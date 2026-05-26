@@ -42,22 +42,13 @@ Artifacts:
 
 Improve test accuracy above the baseline without increasing inference latency beyond 13 ms.
 
-## Planning loop
+## HiAgentResearch loop
 
-From the repo root, run the gated plan-only loop against this workspace:
+From the repository root, run one or more real-agent research loops against this workspace:
 
 ```bash
-cd ~/github/HiAgentControl
-cp -n mnist/.opencode/oh-my-openagent.jsonc.example mnist/.opencode/oh-my-openagent.jsonc
-PYTHONPATH=. python -m hiagentcontrol.tools.run_plan_only_loop \
-  --workdir mnist \
-  --num-tasks 3
+scripts/run_phase1_group.sh model_architecture .
+scripts/run_three_loops.sh model_architecture research/model-architecture 3
 ```
 
-Deliverables land under `state/current/` (gitignored). See the root [README](../README.md).
-
-## Access control
-
-File access for agents is enforced by OpenCode permissions in `.opencode/`, not by ad-hoc path rules in planning prompts.
-
-Copy `oh-my-openagent.jsonc.example` → `oh-my-openagent.jsonc` before the first planning run.
+Runtime artifacts are written under `.hiagentresearch/runs/` and `.hiagentresearch/state/`.
