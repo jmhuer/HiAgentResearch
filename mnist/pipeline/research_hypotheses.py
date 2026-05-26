@@ -7,6 +7,47 @@ from __future__ import annotations
 
 RESEARCH_HYPOTHESES: list[dict] = [
     {
+        "hypothesis_id": "model_architecture-h11",
+        "theme": "shared_bottleneck_heads",
+        "hypothesis": (
+            "h10 reduced SharedLayer4MultiLinearHead layer4 to one BasicBlock; "
+            "last_train_metrics.json (quick mode) shows latency_ms=1.7972 (87% under "
+            "baseline 13.0) but accuracy=0.908 (below baseline 0.985). Three ensemble "
+            "heads are bare Linear(512,10) on pooled features with no nonlinearity. "
+            "Adding a shared 512->256 ReLU bottleneck before per-head 256->10 linears "
+            "increases head capacity with negligible latency (two small matmuls on a "
+            "512-d vector). Expected: accuracy rises toward >= 0.985 with latency_ms "
+            "<= 13.0."
+        ),
+        "planned_change": (
+            "In mnist/pipeline/model.py SharedLayer4MultiLinearHead: add shared "
+            "bottleneck Sequential(Linear(512,256), ReLU); change head linears to "
+            "Linear(256, num_classes); retrain ensemble and re-measure latency_ms."
+        ),
+        "run_id": "run_0e37ead4c502",
+        "timestamp": "2026-05-25T16:30:00.000000+00:00",
+    },
+    {
+        "hypothesis_id": "model_architecture-h10",
+        "theme": "single_block_shared_layer4",
+        "hypothesis": (
+            "h9 removed all trunk KWTA (ResNetTrunk/MnistEncoder use ReLU stem and layers "
+            "1-3), but SharedLayer4MultiLinearHead still runs two 512-channel BasicBlocks in "
+            "layer4 via num_blocks[3]=2 before avg_pool and three linear heads "
+            "(model.py EnsembleMnistCNN lines 240-245). baseline.json requires latency_ms "
+            "<= 13.0 at accuracy >= 0.985. Reducing layer4 to one BasicBlock removes one "
+            "stride-2 512-channel conv stage while preserving multi-head logit ensemble "
+            "diversity. Expected: latency_ms drops with accuracy >= 0.985."
+        ),
+        "planned_change": (
+            "In mnist/pipeline/model.py: pass layer4 block count 1 instead of "
+            "num_blocks[3] to SharedLayer4MultiLinearHead in EnsembleMnistCNN.__init__; "
+            "retrain ensemble and re-measure latency_ms."
+        ),
+        "run_id": "run_712b15ee524f",
+        "timestamp": "2026-05-25T16:00:00.000000+00:00",
+    },
+    {
         "hypothesis_id": "model_architecture-h9",
         "theme": "stem_relu_trunk_sparsity",
         "hypothesis": (

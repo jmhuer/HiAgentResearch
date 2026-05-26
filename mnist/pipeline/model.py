@@ -214,9 +214,14 @@ class SharedLayer4MultiLinearHead(nn.Module):
     ) -> None:
         super().__init__()
         self.in_planes = 256
+        embed_dim = 512 * block.expansion
         self.layer4 = self._make_layer(block, 512, num_blocks_layer4, stride=2, activation="relu")
+        self.bottleneck = nn.Sequential(
+            nn.Linear(embed_dim, 256),
+            nn.ReLU(inplace=True),
+        )
         self.linears = nn.ModuleList(
-            [nn.Linear(512 * block.expansion, num_classes) for _ in range(num_heads)]
+            [nn.Linear(256, num_classes) for _ in range(num_heads)]
         )
 
     def _make_layer(self, block, planes, num_blocks, stride, activation="relu"):
@@ -231,6 +236,7 @@ class SharedLayer4MultiLinearHead(nn.Module):
         out = self.layer4(x)
         out = F.avg_pool2d(out, 4)
         out = out.view(out.size(0), -1)
+        out = self.bottleneck(out)
         return torch.stack([linear(out) for linear in self.linears])
 
 
@@ -242,7 +248,7 @@ class EnsembleMnistCNN(nn.Module):
         block = BasicBlock
         num_blocks = [2, 2, 2, 2]
         self.trunk = ResNetTrunk(block, num_blocks[:3])
-        self.head = SharedLayer4MultiLinearHead(block, num_blocks[3], num_sub_networks)
+        self.head = SharedLayer4MultiLinearHead(block, 1, num_sub_networks)
         self.kwta_k = kwta_k
 
     def load_encoder_weights(self, encoder_state: dict) -> None:

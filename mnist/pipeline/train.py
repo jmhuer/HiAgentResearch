@@ -107,7 +107,10 @@ def main() -> None:
 
         def __call__(self, img):
             img = np.array(img) # Convert PIL Image to numpy array
-            return self.aug(image=img)["image"]
+            out = self.aug(image=img)["image"]
+            if out.dtype == torch.uint8:
+                out = out.float().div(255.0)
+            return out
 
     transform = transforms.Compose([
         AlbumentationsTransform(),
