@@ -7,6 +7,26 @@ from __future__ import annotations
 
 RESEARCH_HYPOTHESES: list[dict] = [
     {
+        "hypothesis_id": "model_architecture-h12",
+        "theme": "restore_dual_layer4_no_bottleneck",
+        "hypothesis": (
+            "h11 added a shared 512->256 ReLU bottleneck before per-head linears but kept "
+            "layer4 at one BasicBlock; eval accuracy fell to 0.885 (below h10's 0.928 at "
+            "latency_ms=1.58). Latency remains ~88% under baseline 13.0. The bottleneck "
+            "compresses pooled features too aggressively for a shallow layer4. Restoring "
+            "layer4 to two BasicBlocks and projecting heads directly from the 512-d "
+            "embedding (reverting the bottleneck) recovers conv depth and full head capacity. "
+            "Expected: accuracy rises toward >= 0.985 with latency_ms <= 13.0."
+        ),
+        "planned_change": (
+            "In mnist/pipeline/model.py SharedLayer4MultiLinearHead: remove bottleneck "
+            "Sequential; restore Linear(512, num_classes) per head. In EnsembleMnistCNN "
+            "pass num_blocks_layer4=2; retrain ensemble and re-measure latency_ms."
+        ),
+        "run_id": "run_2060325f8890",
+        "timestamp": "2026-05-25T17:00:00.000000+00:00",
+    },
+    {
         "hypothesis_id": "model_architecture-h11",
         "theme": "shared_bottleneck_heads",
         "hypothesis": (
