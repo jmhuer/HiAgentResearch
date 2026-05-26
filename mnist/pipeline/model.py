@@ -199,17 +199,47 @@ class ResNetHead(nn.Module):
         return self.linear(out)
 
 
+class SharedLayer4MultiLinearHead(nn.Module):
+    """Shared layer4 + pool; per-head linear classifiers for ensemble logits."""
+
+    def __init__(
+        self,
+        block,
+        num_blocks_layer4: int,
+        num_heads: int,
+        num_classes: int = 10,
+    ) -> None:
+        super().__init__()
+        self.in_planes = 256
+        self.layer4 = self._make_layer(block, 512, num_blocks_layer4, stride=2, activation="relu")
+        self.linears = nn.ModuleList(
+            [nn.Linear(512 * block.expansion, num_classes) for _ in range(num_heads)]
+        )
+
+    def _make_layer(self, block, planes, num_blocks, stride, activation="relu"):
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride, activation=activation))
+            self.in_planes = planes * block.expansion
+        return nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.layer4(x)
+        out = F.avg_pool2d(out, 4)
+        out = out.view(out.size(0), -1)
+        return torch.stack([linear(out) for linear in self.linears])
+
+
 class EnsembleMnistCNN(nn.Module):
-    """Shared-trunk ensemble: one layer3 trunk, multiple layer4 heads."""
+    """Shared-trunk ensemble: one layer3 trunk, shared layer4, multi-linear heads."""
 
     def __init__(self, num_sub_networks: int, kwta_k: int) -> None:
         super().__init__()
         block = BasicBlock
         num_blocks = [2, 2, 2, 2]
         self.trunk = ResNetTrunk(block, num_blocks[:3])
-        self.heads = nn.ModuleList(
-            [ResNetHead(block, num_blocks[3]) for _ in range(num_sub_networks)]
-        )
+        self.head = SharedLayer4MultiLinearHead(block, num_blocks[3], num_sub_networks)
         self.kwta_k = kwta_k
 
     def load_encoder_weights(self, encoder_state: dict) -> None:
@@ -221,7 +251,9 @@ class EnsembleMnistCNN(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         shared = self.trunk(x)
-        outputs = torch.stack([head(shared) for head in self.heads])
+        outputs = self.head(shared)
+        if self.kwta_k == 1:
+            return outputs.max(dim=0).values
         _, topk_indices = torch.topk(outputs, self.kwta_k, dim=0)
         mask = torch.zeros_like(outputs, dtype=torch.bool)
         mask.scatter_(0, topk_indices, True)

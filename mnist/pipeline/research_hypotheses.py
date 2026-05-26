@@ -7,6 +7,26 @@ from __future__ import annotations
 
 RESEARCH_HYPOTHESES: list[dict] = [
     {
+        "hypothesis_id": "model_architecture-h6",
+        "theme": "shared_layer4_multi_linear_heads",
+        "hypothesis": (
+            "h5 shared conv1-layer3 via ResNetTrunk but EnsembleMnistCNN still runs three "
+            "ResNetHead forwards (each layer4: two 512-channel BasicBlocks + avg_pool + linear) "
+            "per sample while train.py defaults num_sub_networks=3 and kwta_k=1. "
+            "baseline.json requires latency_ms <= 13.0 at accuracy >= 0.985. One shared layer4 "
+            "pass with three linear heads on the pooled 512-d embedding preserves logit-level "
+            "ensemble diversity and removes ~2/3 of head conv compute. Expected: latency_ms "
+            "drops toward baseline with accuracy >= 0.985."
+        ),
+        "planned_change": (
+            "In mnist/pipeline/model.py: add SharedLayer4MultiLinearHead; refactor "
+            "EnsembleMnistCNN to use shared layer4 + ModuleList linears; fuse kwta_k=1 "
+            "with outputs.max(dim=0)."
+        ),
+        "run_id": "run_42c5a5452dd5",
+        "timestamp": "2026-05-25T12:00:00.000000+00:00",
+    },
+    {
         "hypothesis_id": "model_architecture-h5",
         "theme": "shared_trunk_ensemble",
         "hypothesis": (
