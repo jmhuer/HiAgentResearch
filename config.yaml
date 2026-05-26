@@ -17,12 +17,17 @@ evaluation:
   command_template: "python {frozen_eval_entrypoint} --mnist-root mnist --quick"
   parser: mnist_phase1_json_stdout
   success_metrics:
+    accuracy:
+      min: 0.985
+    latency_ms:
+      max: 13.0
     tests_passed:
       min: 1
 artifact_contract:
   required:
     - metrics.json
     - failure_class.json
+    - research_outcome.json
     - run_meta.json
     - stdout.txt
     - stderr.txt
@@ -58,8 +63,8 @@ agent_contract:
   research_output_expectations:
     - "Every cycle starts with concrete evidence and a written plan before code edits."
     - "Every cycle applies at least one bounded edit to a configured core implementation file."
-    - "Every cycle produces eval artifacts and updates tactical intent for repair, pivot, continue, or reset."
-    - "Research keeps retrying until output quality and configured metrics meet expectations, or a configured stop condition blocks the group with an explicit reason."
+    - "Every cycle produces eval artifacts, records whether the experiment improved baseline, and updates tactical intent."
+    - "Research branches keep accumulating valid experiments; metric regressions are knowledge, not execution failures."
   retry_policy:
     max_repair_attempts: 1
     max_loops_without_quality_output: 3

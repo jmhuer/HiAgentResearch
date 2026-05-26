@@ -8,6 +8,10 @@ def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 
     (artifact_dir / "failure_class.json").write_text(
         '{"failure_class": "none", "exit_code": 0}', encoding="utf-8"
     )
+    (artifact_dir / "research_outcome.json").write_text(
+        '{"research_outcome": "improved_baseline", "improved_baseline": true, "metrics_ok": true, "next_action": "continue", "reason": "ok"}',
+        encoding="utf-8",
+    )
     (artifact_dir / "run_meta.json").write_text(
         json.dumps(
             {
@@ -44,6 +48,7 @@ def test_ingest_records_artifacts_and_is_idempotent(tmp_path, monkeypatch) -> No
     assert {artifact["artifact_path"] for artifact in registry.artifacts_for_run("gh_1")} >= {
         "metrics.json",
         "failure_class.json",
+        "research_outcome.json",
         "run_meta.json",
     }
 

@@ -88,7 +88,7 @@ jobs:
           import json
           from pathlib import Path
           from hiagentresearch.src.artifact_schema import normalize_eval
-          from hiagentresearch.src.quality import metrics_meet_expectations
+          from hiagentresearch.src.quality import classify_research_outcome
 
           from hiagentresearch.src.config import load_config
 
@@ -112,16 +112,22 @@ jobs:
           if normalized.raw.get("duration_sec") is not None:
               metrics["duration_sec"] = float(normalized.raw["duration_sec"])
           eval_config = group.evaluation or config.evaluation
-          metrics_ok, metrics_error = metrics_meet_expectations(metrics, eval_config.success_metrics)
           failure_class = normalized.failure_class
-          if normalized.passed and not metrics_ok:
-              failure_class = "eval_failure"
-              normalized.raw["quality_error"] = metrics_error
+          outcome = classify_research_outcome(
+              execution_failure_class=failure_class,
+              eval_passed=normalized.passed,
+              metrics=metrics,
+              expectations=eval_config.success_metrics,
+          )
+          research_outcome = outcome.to_dict()
+          normalized.raw["research_outcome"] = research_outcome["research_outcome"]
+          normalized.raw["improved_baseline"] = research_outcome["improved_baseline"]
           Path("metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
           Path("failure_class.json").write_text(
               json.dumps({"failure_class": failure_class, "exit_code": exit_code}, indent=2),
               encoding="utf-8",
           )
+          Path("research_outcome.json").write_text(json.dumps(research_outcome, indent=2), encoding="utf-8")
           Path("run_meta.json").write_text(
               json.dumps(
                   {
@@ -157,11 +163,12 @@ jobs:
             stderr.txt
             metrics.json
             failure_class.json
+            research_outcome.json
             run_meta.json
             .hiagentresearch/state/events.jsonl
             .hiagentresearch/state/evals.db
 
-      - name: Fail on non-passing eval
+      - name: Fail on execution failure
         shell: bash
         run: |
           python - <<'PY'

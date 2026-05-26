@@ -49,6 +49,8 @@ class CycleResult:
     commit_sha: str
     github_run_id: str
     github_failure_class: str
+    github_research_outcome: str
+    improved_baseline: bool
     artifact_dir: str
     decision: str
 
@@ -181,8 +183,16 @@ def run_loops(
             )
 
         failure = json.loads((artifact_dir / "failure_class.json").read_text(encoding="utf-8"))
+        outcome = json.loads((artifact_dir / "research_outcome.json").read_text(encoding="utf-8"))
         github_failure = str(failure.get("failure_class", "infra_failure"))
-        decision = "done" if github_failure == "none" else ("repair" if github_failure == "code_failure" else "pivot")
+        github_outcome = str(outcome.get("research_outcome", "unknown"))
+        improved_baseline = bool(outcome.get("improved_baseline", False))
+        decision = str(
+            outcome.get(
+                "next_action",
+                "done" if improved_baseline else ("repair" if github_failure == "code_failure" else "continue"),
+            )
+        )
         cycles.append(
             CycleResult(
                 loop_index=loop_index,
@@ -191,15 +201,17 @@ def run_loops(
                 commit_sha=commit_sha,
                 github_run_id=gh_run.database_id,
                 github_failure_class=github_failure,
+                github_research_outcome=github_outcome,
+                improved_baseline=improved_baseline,
                 artifact_dir=str(artifact_dir),
                 decision=decision,
             )
         )
-        if stop_on_success and decision == "done":
-            return LoopSummary(ok=True, group_id=group_id, branch=target_branch, cycles=cycles, reason="quality met")
+        if stop_on_success and improved_baseline:
+            return LoopSummary(ok=True, group_id=group_id, branch=target_branch, cycles=cycles, reason="baseline improved")
 
-    ok = bool(cycles) and cycles[-1].github_failure_class == "none"
-    reason = "max loops reached" if not ok else "requested loops completed"
+    ok = bool(cycles) and all(cycle.github_failure_class == "none" for cycle in cycles)
+    reason = "requested loops completed" if ok else "max loops reached with execution blockers"
     return LoopSummary(ok=ok, group_id=group_id, branch=target_branch, cycles=cycles, reason=reason)
 
 

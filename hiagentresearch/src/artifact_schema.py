@@ -47,8 +47,12 @@ def _extract_json(text: str) -> dict[str, Any]:
 def classify_failure(exit_code: int, payload: dict[str, Any]) -> str:
     if exit_code == 0:
         return "none"
+    if payload.get("execution_passed") is False:
+        return str(payload.get("failure_class") or "code_failure")
     if "error" in payload and "missing checkpoint" in str(payload.get("error", "")).lower():
         return "code_failure"
+    if exit_code == 2 and {"accuracy", "latency_ms"}.issubset(payload):
+        return "none"
     if exit_code == 2:
         return "eval_failure"
     return "infra_failure"
@@ -112,7 +116,7 @@ def _extract_pytest_pass_count(stdout: str) -> int | None:
 
 def normalize_phase1_eval_json(stdout: str, exit_code: int) -> NormalizedEvalResult:
     payload = _extract_json(stdout)
-    failure_class = "none" if exit_code == 0 else ("eval_failure" if exit_code == 2 else "code_failure")
+    failure_class = classify_failure(exit_code, payload)
     return NormalizedEvalResult(
         passed=bool(payload.get("passed", False)) and exit_code == 0,
         accuracy=_as_float_or_none(payload.get("accuracy")),

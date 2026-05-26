@@ -25,7 +25,7 @@ from hiagentresearch.src.models import (
     TransitionEvent,
     utc_now_iso,
 )
-from hiagentresearch.src.quality import metrics_meet_expectations
+from hiagentresearch.src.quality import classify_research_outcome
 from hiagentresearch.src.registry import Registry
 
 
@@ -520,6 +520,13 @@ def run_group(
     passed = False
     metrics: dict[str, float] = {}
     parsed: dict[str, Any] = {}
+    research_outcome = {
+        "research_outcome": "execution_blocked",
+        "improved_baseline": False,
+        "metrics_ok": False,
+        "next_action": "continue",
+        "reason": "evaluation did not complete",
+    }
     try:
         normalized = normalize_eval(
             parser=group.evaluation.parser,
@@ -538,23 +545,36 @@ def run_group(
             metrics["duration_sec"] = float(normalized.raw["duration_sec"])
         parsed = normalized.raw
         eval_config = config.group_by_id(group.id).evaluation or config.evaluation
-        metrics_ok, metrics_error = metrics_meet_expectations(metrics, eval_config.success_metrics)
-        if passed and not metrics_ok:
-            passed = False
-            failure_class = "eval_failure"
-            parsed["quality_error"] = metrics_error
+        outcome = classify_research_outcome(
+            execution_failure_class=failure_class,
+            eval_passed=passed,
+            metrics=metrics,
+            expectations=eval_config.success_metrics,
+        )
+        research_outcome = outcome.to_dict()
+        parsed["research_outcome"] = research_outcome["research_outcome"]
+        parsed["improved_baseline"] = research_outcome["improved_baseline"]
         _write_json(run_dir / "metrics.json", metrics)
         _write_json(
             run_dir / "failure_class.json",
             {"failure_class": failure_class, "exit_code": proc.returncode},
         )
+        _write_json(run_dir / "research_outcome.json", research_outcome)
         _write_json(run_dir / "parsed_eval.json", parsed)
     except ArtifactParseError as exc:
         failure_class = classify_non_json_failure(proc.stderr, proc.returncode)
+        research_outcome = {
+            "research_outcome": "execution_blocked",
+            "improved_baseline": False,
+            "metrics_ok": False,
+            "next_action": "repair" if failure_class == "code_failure" else "continue",
+            "reason": str(exc),
+        }
         _write_json(
             run_dir / "failure_class.json",
             {"failure_class": failure_class, "exit_code": proc.returncode, "error": str(exc)},
         )
+        _write_json(run_dir / "research_outcome.json", research_outcome)
         _append_jsonl(actions_path, {"step": "parse_failure", "error": str(exc)})
 
     evidence = {"evidence": []}
@@ -563,7 +583,7 @@ def run_group(
     _write_json(run_dir / "evidence.json", evidence)
     _append_jsonl(actions_path, {"step": "evidence_loaded", "count": len(evidence.get("evidence", []))})
 
-    status = "finished" if passed else "error"
+    status = "finished" if failure_class == "none" else "error"
     registry.record_run(
         run_id=run_id,
         group_id=group.id,
@@ -578,11 +598,7 @@ def run_group(
     if failure_class != "infra_failure":
         prior.attempt_count += 1
     prior.last_failure_class = failure_class if failure_class != "none" else "none"
-    prior.next_action = (
-        "continue"
-        if passed or failure_class == "infra_failure"
-        else ("repair" if failure_class == "code_failure" else "pivot")
-    )
+    prior.next_action = str(research_outcome["next_action"])
     prior.key_evidence_refs = [run_id]
     prior.updated_at = utc_now_iso()
     registry.write_intent_packet(prior)
@@ -593,7 +609,7 @@ def run_group(
             group_id=group.id,
             from_state="running_agent_cycle",
             to_state="ready_for_wake" if failure_class in {"none", "code_failure", "eval_failure"} else "blocked",
-            reason=f"eval_completed:{failure_class}",
+            reason=f"eval_completed:{failure_class}:{research_outcome['research_outcome']}",
             actor="orchestrator",
         )
     )
@@ -608,6 +624,9 @@ def run_group(
             correlation_id=correlation_id,
             exit_code=proc.returncode,
             passed=passed,
+            research_outcome=research_outcome["research_outcome"],
+            improved_baseline=research_outcome["improved_baseline"],
+            next_action=research_outcome["next_action"],
         ),
     )
     registry.record_artifacts(
@@ -623,12 +642,15 @@ def run_group(
                 "run_id": run_id,
                 "status": status,
                 "failure_class": failure_class,
+                "research_outcome": research_outcome["research_outcome"],
+                "improved_baseline": research_outcome["improved_baseline"],
+                "next_action": research_outcome["next_action"],
                 "run_dir": str(run_dir.relative_to(REPO_ROOT)),
             },
             indent=2,
         )
     )
-    return 0 if passed else 2
+    return 0 if failure_class == "none" else 2
 
 
 def build_parser() -> argparse.ArgumentParser:

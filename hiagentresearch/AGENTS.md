@@ -17,7 +17,8 @@ This project uses a Cursor-first phase-1 research loop with a thin Python contro
 - Keep code edits inside configured `allowed_paths` and run-local observability artifacts.
 - Prefer minimal changes with explicit hypotheses and rollback plan.
 - Do not claim successful research without evaluation outputs.
-- If a cycle fails quality expectations, retry through the intent packet (`repair`, `pivot`, `reset`, or `continue`) until output quality matches expectations or the group is explicitly blocked.
+- If a valid experiment does not improve baseline, record the outcome as evidence and continue through the intent packet (`repair`, `pivot`, `reset`, or `continue`) until output quality matches expectations or the group is explicitly blocked.
+- Only revert when the branch state itself is a worse basis for future research; prefer auditable corrective commits over hidden history rewrites.
 - Fix boundary problems canonically through config, eval adapters, registry invariants, or operator commands; do not add ad-hoc guardrails that weaken the architecture.
 
 ## Evidence expectations

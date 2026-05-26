@@ -21,6 +21,7 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
     config = load_config()
     metrics_path = artifact_dir / "metrics.json"
     failure_path = artifact_dir / "failure_class.json"
+    outcome_path = artifact_dir / "research_outcome.json"
     meta_path = artifact_dir / "run_meta.json"
 
     validation_error = _validate_artifact_contract(artifact_dir, config.artifact_contract.required)
@@ -40,6 +41,7 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
     try:
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         failure = json.loads(failure_path.read_text(encoding="utf-8"))
+        outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         print(json.dumps({"ok": False, "error": f"malformed artifact json: {exc}"}, indent=2))
@@ -75,10 +77,23 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
             "group_id": group_id,
             "branch": branch,
             "failure_class": failure_class,
+            "research_outcome": outcome.get("research_outcome", "unknown"),
+            "improved_baseline": bool(outcome.get("improved_baseline", False)),
             "artifact_dir": str(artifact_dir),
         }
     )
-    print(json.dumps({"ok": True, "run_id": run_id, "failure_class": failure_class}, indent=2))
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "run_id": run_id,
+                "failure_class": failure_class,
+                "research_outcome": outcome.get("research_outcome", "unknown"),
+                "improved_baseline": bool(outcome.get("improved_baseline", False)),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -87,7 +102,7 @@ def _validate_artifact_contract(artifact_dir: Path, required: list[str]) -> str:
     if missing:
         return f"missing required artifacts: {missing}"
     malformed: list[str] = []
-    for name in ("metrics.json", "failure_class.json", "run_meta.json"):
+    for name in ("metrics.json", "failure_class.json", "research_outcome.json", "run_meta.json"):
         path = artifact_dir / name
         if path.exists():
             try:

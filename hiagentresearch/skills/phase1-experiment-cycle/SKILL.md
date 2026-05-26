@@ -31,5 +31,7 @@ Produce a real, hypothesis-driven experiment with planning artifacts before code
 - Do not skip planning artifacts.
 - Do not make marker-only runs.
 - Keep edits small, reversible, and syntax-safe.
+- Treat metric regressions as research evidence, not execution failures.
 - Keep retrying through repair, pivot, reset, or continue decisions until configured output expectations are met or the group is explicitly blocked.
+- Only choose revert when the current branch state is worse for future research than an auditable rollback.
 - Do not add ad-hoc guardrails to force success; improve the canonical contract or fix the root issue.

@@ -16,7 +16,8 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 6. Write:
    - run metadata,
    - normalized metrics,
-   - failure classification,
+   - execution failure classification,
+   - research outcome,
    - updated intent packet,
    - append-only event log entry.
 
@@ -44,10 +45,19 @@ Each cycle must include evidence references in `evidence.json`:
 
 The orchestrator does not invent evidence; it only validates/persists it.
 
+## Outcome language
+
+`failure_class` is reserved for execution health: `none`, `infra_failure`,
+`code_failure`, `eval_failure`, or `invalid_cycle`. A valid experiment that
+does not improve baseline is not a failure; it records
+`research_outcome=did_not_improve_baseline` and continues adding evidence to
+the research branch unless the agent explicitly chooses a revert.
+
 ## No-shortcuts policy
 
 - Do not mark runs successful if eval artifacts are missing.
 - Do not bypass failed evals with manual pass flags.
-- Do not hide failures; classify as `infra_failure`, `code_failure`, or `eval_failure`.
+- Do not hide execution failures; classify as `infra_failure`, `code_failure`, or `eval_failure`.
+- Do not call metric regressions execution failures; record them as research outcomes.
 - If the runtime cannot execute the intended path, surface the blocker as explicit run output.
 - Do not fix contract failures with ad-hoc guardrails. Strengthen the canonical config, eval adapter, registry invariant, or operator command.

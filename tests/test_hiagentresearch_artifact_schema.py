@@ -19,7 +19,7 @@ def test_normalize_mnist_eval_eval_failure() -> None:
     stdout = '{"passed": false, "accuracy": 0.982, "latency_ms": 13.9}'
     result = normalize_mnist_eval(stdout=stdout, exit_code=2)
     assert result.passed is False
-    assert result.failure_class == "eval_failure"
+    assert result.failure_class == "none"
 
 
 def test_classify_non_json_failure_module_not_found() -> None:
@@ -42,13 +42,30 @@ def test_normalize_eval_dispatch_pytest() -> None:
 
 
 def test_normalize_phase1_eval_json() -> None:
-    stdout = '{"passed": true, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
+    stdout = (
+        '{"passed": true, "execution_passed": true, "accuracy": 0.99, '
+        '"latency_ms": 2.0, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
+    )
     result = normalize_phase1_eval_json(stdout=stdout, exit_code=0)
     assert result.passed is True
+    assert result.failure_class == "none"
+    assert result.to_metrics()["accuracy"] == 0.99
+
+
+def test_normalize_phase1_eval_json_keeps_regression_as_clean_execution() -> None:
+    stdout = (
+        '{"passed": false, "execution_passed": true, "accuracy": 0.89, '
+        '"latency_ms": 1.7, "tests_passed": 2, "tests_failed": 0}'
+    )
+    result = normalize_phase1_eval_json(stdout=stdout, exit_code=0)
+    assert result.passed is False
     assert result.failure_class == "none"
 
 
 def test_normalize_eval_dispatch_phase1_json() -> None:
-    stdout = '{"passed": true, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
+    stdout = (
+        '{"passed": true, "execution_passed": true, "accuracy": 0.99, '
+        '"latency_ms": 2.0, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
+    )
     result = normalize_eval(parser="mnist_phase1_json_stdout", stdout=stdout, stderr="", exit_code=0)
     assert result.passed is True

@@ -72,6 +72,18 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
         json.dumps({"failure_class": "none", "exit_code": 0}),
         encoding="utf-8",
     )
+    (artifact_dir / "research_outcome.json").write_text(
+        json.dumps(
+            {
+                "research_outcome": "improved_baseline",
+                "improved_baseline": True,
+                "metrics_ok": True,
+                "next_action": "continue",
+                "reason": "configured improvement metrics were met",
+            }
+        ),
+        encoding="utf-8",
+    )
     (artifact_dir / "metrics.json").write_text(json.dumps({"tests_passed": 1}), encoding="utf-8")
     (artifact_dir / "stdout.txt").write_text("{}", encoding="utf-8")
     (artifact_dir / "stderr.txt").write_text("", encoding="utf-8")
@@ -103,6 +115,7 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
     )
 
     assert summary.ok is True
+    assert summary.cycles[0].github_research_outcome == "improved_baseline"
     assert git.committed is True
     assert git.pushed is True
     assert "HiAgentResearch-Run-ID: run_test" == git.body
