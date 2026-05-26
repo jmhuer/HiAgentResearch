@@ -62,23 +62,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("summary", help="Show latest run summary by research group.")
+    summary_parser = sub.add_parser("summary", help="Show latest run summary by research group.")
+    _add_json_flag(summary_parser)
 
     runs_parser = sub.add_parser("runs", help="List runs.")
     runs_parser.add_argument("--group-id", default=None)
     runs_parser.add_argument("--limit", type=int, default=20)
+    _add_json_flag(runs_parser)
 
     show_parser = sub.add_parser("show", help="Show one run with metrics, outcome, experiment, and artifacts.")
     show_parser.add_argument("--run-id", required=True)
+    _add_json_flag(show_parser)
 
     metrics_parser = sub.add_parser("metrics", help="List metric series for a group.")
     metrics_parser.add_argument("--group-id", required=True)
     metrics_parser.add_argument("--metric", default=None)
+    _add_json_flag(metrics_parser)
 
     artifacts_parser = sub.add_parser("artifacts", help="List artifacts for a run.")
     artifacts_parser.add_argument("--run-id", required=True)
+    _add_json_flag(artifacts_parser)
 
-    sub.add_parser("export", help="Export compact dashboard-friendly registry snapshot.")
+    export_parser = sub.add_parser("export", help="Export compact dashboard-friendly registry snapshot.")
+    _add_json_flag(export_parser)
     return parser
 
 
@@ -106,6 +112,10 @@ def _emit(value: Any, *, as_json: bool, text_formatter) -> None:
         print(json.dumps(value, indent=2))
         return
     print(text_formatter(value))
+
+
+def _add_json_flag(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
 
 def _format_summary(rows: list[dict[str, Any]]) -> str:

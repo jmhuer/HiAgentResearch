@@ -44,7 +44,7 @@ def test_registry_view_summary_and_show_json(tmp_path, capsys) -> None:
     summary = json.loads(capsys.readouterr().out)
     assert summary[0]["research_outcome"] == "improved_baseline"
 
-    assert main(["--state-dir", str(tmp_path), "--json", "show", "--run-id", "run_abc"]) == 0
+    assert main(["--state-dir", str(tmp_path), "show", "--run-id", "run_abc", "--json"]) == 0
     detail = json.loads(capsys.readouterr().out)
     assert detail["metrics"]["accuracy"] == 0.99
     assert detail["experiment"]["hypothesis_id"] == "h1"
