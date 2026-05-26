@@ -1,12 +1,13 @@
 import json
 
 from hiagentresearch.src.models import IntentPacket
-from hiagentresearch.src.registry import Registry
+from hiagentresearch.src.registry import SCHEMA_VERSION, Registry
 
 
 def test_registry_init_and_intent_packet(tmp_path) -> None:
     registry = Registry(tmp_path)
     registry.init()
+    assert registry.schema_version() == SCHEMA_VERSION
     packet = IntentPacket(
         group_id="model_architecture",
         active_hypothesis_id="h1",
@@ -34,8 +35,40 @@ def test_registry_record_run(tmp_path) -> None:
         status="finished",
         failure_class="none",
         metrics={"accuracy": 0.99, "latency_ms": 12.1},
+        correlation_id="corr-1",
     )
+    registry.record_run(
+        run_id="run_abc",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.991, "latency_ms": 12.0},
+        correlation_id="corr-1",
+    )
+    latest = registry.latest_run("model_architecture")
+    assert latest is not None
+    assert latest["correlation_id"] == "corr-1"
+    assert registry.metrics_for_run("run_abc") == {"accuracy": 0.991, "latency_ms": 12.0}
     # events.jsonl should be writable for external callers
     registry.append_event({"event_type": "smoke", "ok": True})
     payloads = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()]
     assert payloads[-1]["event_type"] == "smoke"
+
+
+def test_registry_records_artifact(tmp_path) -> None:
+    registry = Registry(tmp_path)
+    registry.init()
+    artifact = tmp_path / "metrics.json"
+    artifact.write_text('{"tests_passed": 1}', encoding="utf-8")
+
+    registry.record_artifact(
+        run_id="run_abc",
+        artifact_path=artifact,
+        artifact_type="local_eval",
+        base_dir=tmp_path,
+    )
+
+    artifacts = registry.artifacts_for_run("run_abc")
+    assert artifacts[0]["artifact_path"] == "metrics.json"
+    assert artifacts[0]["size_bytes"] > 0

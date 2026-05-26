@@ -1,0 +1,61 @@
+# New Repo Onboarding
+
+HiAgentResearch uses one small root `config.yaml` to stitch a project into the research runtime. The Python control plane stays generic; project-specific behavior belongs in config, editable project files, and the frozen eval adapter.
+
+## 15-Minute Path
+
+1. Put project code under the configured `workdir`.
+2. Create or update root `config.yaml`:
+   - `project_id`
+   - `workdir`
+   - `editable_paths`
+   - `frozen_eval_entrypoint`
+   - `evaluation.command_template`
+   - `evaluation.parser`
+   - `research_groups`
+   - `artifact_contract`
+   - `policy_modes`
+3. Put the runtime-owned eval adapter under `.hiagentresearch/eval/`.
+4. Keep native project eval code in `<workdir>/eval/` only if it is part of the editable project. The frozen adapter in `.hiagentresearch/eval/` is what HiAgentResearch and CI execute.
+5. Validate config:
+
+```bash
+python -m hiagentresearch.src.config validate
+```
+
+6. Initialize state:
+
+```bash
+python -m hiagentresearch.src.orchestrator init
+```
+
+7. Run one group:
+
+```bash
+scripts/run_phase1_group.sh model_architecture .
+```
+
+8. Inspect status:
+
+```bash
+python -m hiagentresearch.src.orchestrator status --group-id model_architecture
+```
+
+## Contract Boundaries
+
+- Agents may inspect code, use tools, form hypotheses, and edit configured `editable_paths`.
+- Agents may write run-local observability artifacts under `.hiagentresearch/runs/<run_id>/`.
+- Agents must not edit frozen eval adapters unless that path is explicitly configured as editable.
+- GitHub Actions is the committed-branch eval authority.
+- The registry is the durable source for run evidence, metrics, artifact checksums, transitions, and intent packets.
+
+## Quality Retry Policy
+
+Research groups keep cycling until configured output expectations and metric bounds are met, or until a configured stop condition blocks the group with a clear reason. Retries should use the persisted intent packet:
+
+- `repair` for deterministic code failures,
+- `pivot` for underperforming hypotheses,
+- `reset` when a rollback anchor is required,
+- `continue` when evidence supports another iteration.
+
+Do not patch around failures with special-case guardrails. If a boundary is missing, fix the canonical contract: config schema, eval adapter, registry invariant, or operator command.

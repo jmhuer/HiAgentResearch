@@ -4,7 +4,7 @@
 
 - eval stdout/stderr
 - process exit code
-- parser profile (`mnist_json_stdout`)
+- parser profile from `config.yaml`
 
 ## Outputs
 

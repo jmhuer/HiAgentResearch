@@ -1,0 +1,101 @@
+project_id: mnist
+workdir: .
+editable_paths:
+  - mnist/pipeline/model.py
+  - mnist/pipeline/train.py
+  - mnist/pipeline/train_optuna.py
+  - mnist/pipeline/kwta.py
+  - mnist/pipeline/research_hypotheses.py
+  - mnist/pipeline/research_markers.py
+  - mnist/eval/run_eval.py
+frozen_eval_entrypoint: .hiagentresearch/eval/run_phase1_eval.py
+evaluation:
+  command_template: "python {frozen_eval_entrypoint} --mnist-root mnist --quick"
+  parser: mnist_phase1_json_stdout
+  success_metrics:
+    tests_passed:
+      min: 1
+artifact_contract:
+  required:
+    - metrics.json
+    - failure_class.json
+    - run_meta.json
+    - stdout.txt
+    - stderr.txt
+  optional:
+    - parsed_eval.json
+    - evidence.json
+    - agent_actions.jsonl
+    - experiment_intent.json
+    - experiment_plan.md
+policy_modes:
+  explore: "Try one bounded hypothesis and allow measured regressions with evidence."
+  exploit: "Prefer refinements to evidence-backed promising directions."
+  reset: "Start a new hypothesis track from a rollback anchor."
+github:
+  workflow_name: hiagentresearch-research-eval
+  remote: origin
+  run_lookup_attempts: 30
+  run_lookup_sleep_sec: 3
+agent_contract:
+  guidance_files:
+    - hiagentresearch/AGENTS.md
+    - hiagentresearch/skills/phase1-experiment-cycle/SKILL.md
+  context_paths:
+    - mnist/baseline.json
+    - mnist/pipeline/model.py
+    - mnist/pipeline/train.py
+    - mnist/pipeline/research_hypotheses.py
+  supporting_artifacts:
+    - path: mnist/pipeline/research_hypotheses.py
+      instruction: "Prepend one new hypothesis entry following the existing file convention."
+    - path: mnist/pipeline/research_markers.py
+      instruction: "Prepend one marker string following the existing file convention."
+  research_output_expectations:
+    - "Every cycle starts with concrete evidence and a written plan before code edits."
+    - "Every cycle applies at least one bounded edit to a configured core implementation file."
+    - "Every cycle produces eval artifacts and updates tactical intent for repair, pivot, continue, or reset."
+    - "Research keeps retrying until output quality and configured metrics meet expectations, or a configured stop condition blocks the group with an explicit reason."
+  retry_policy:
+    max_repair_attempts: 1
+    max_loops_without_quality_output: 3
+research_groups:
+  - id: model_architecture
+    branch: research/model-architecture
+    objective: Improve model architecture while preserving latency budget.
+    policy_mode: explore
+    allowed_paths:
+      - mnist/pipeline/model.py
+      - mnist/pipeline/train.py
+      - mnist/eval/run_eval.py
+      - mnist/pipeline/research_hypotheses.py
+      - mnist/pipeline/research_markers.py
+  - id: hyperparameter_optimization
+    branch: research/hyperparameter-optimization
+    objective: Improve training dynamics through hyperparameter exploration.
+    policy_mode: explore
+    allowed_paths:
+      - mnist/pipeline/train.py
+      - mnist/pipeline/train_optuna.py
+      - mnist/pipeline/research_hypotheses.py
+      - mnist/pipeline/research_markers.py
+  - id: data_augmentation
+    branch: research/data-augmentation
+    objective: Improve robustness and accuracy using targeted augmentation strategy.
+    policy_mode: explore
+    allowed_paths:
+      - mnist/pipeline/train.py
+      - mnist/pipeline/model.py
+      - mnist/eval/run_eval.py
+      - mnist/pipeline/research_hypotheses.py
+      - mnist/pipeline/research_markers.py
+  - id: optimization_strategy
+    branch: research/optimization-strategy
+    objective: Improve optimization strategy and training efficiency tradeoffs.
+    policy_mode: exploit
+    allowed_paths:
+      - mnist/pipeline/train.py
+      - mnist/pipeline/train_optuna.py
+      - mnist/pipeline/kwta.py
+      - mnist/pipeline/research_hypotheses.py
+      - mnist/pipeline/research_markers.py

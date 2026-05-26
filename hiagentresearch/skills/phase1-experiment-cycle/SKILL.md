@@ -9,9 +9,9 @@ Produce a real, hypothesis-driven experiment with planning artifacts before code
 ## Required sequence
 
 1. Inspect evidence in:
-   - `mnist/baseline.json`
-   - target implementation files (for example `mnist/pipeline/model.py`)
-   - latest `mnist/pipeline/research_hypotheses.py`
+   - configured context paths from `config.yaml`
+   - target implementation files from the active group
+   - latest configured supporting artifacts
 2. Write `experiment_intent.json` with:
    - `run_id`, `group_id`, `objective`
    - `hypothesis_id`, `hypothesis`
@@ -23,12 +23,13 @@ Produce a real, hypothesis-driven experiment with planning artifacts before code
    - `## Risk and Rollback`
    - `## Eval Expectations`
 4. Apply one bounded edit to a core allowed file.
-5. Update `mnist/pipeline/research_hypotheses.py` with the new hypothesis entry.
-6. Update `mnist/pipeline/research_markers.py` with one marker entry.
-7. Return a JSON summary of changed files and artifact paths.
+5. Update configured supporting artifacts when applicable.
+6. Return a JSON summary of changed files and artifact paths.
 
 ## Constraints
 
 - Do not skip planning artifacts.
 - Do not make marker-only runs.
 - Keep edits small, reversible, and syntax-safe.
+- Keep retrying through repair, pivot, reset, or continue decisions until configured output expectations are met or the group is explicitly blocked.
+- Do not add ad-hoc guardrails to force success; improve the canonical contract or fix the root issue.

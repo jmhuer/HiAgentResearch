@@ -17,6 +17,7 @@ from hiagentresearch.src.artifact_schema import (
     classify_non_json_failure,
     normalize_eval,
 )
+from hiagentresearch.src.config import load_config, resolve_group_id_for_branch
 from hiagentresearch.src.models import (
     EvaluationSpec,
     IntentPacket,
@@ -24,6 +25,7 @@ from hiagentresearch.src.models import (
     TransitionEvent,
     utc_now_iso,
 )
+from hiagentresearch.src.quality import metrics_meet_expectations
 from hiagentresearch.src.registry import Registry
 
 
@@ -32,10 +34,12 @@ DEFAULT_STATE_DIR = REPO_ROOT / ".hiagentresearch" / "state"
 DEFAULT_RUNS_DIR = REPO_ROOT / ".hiagentresearch" / "runs"
 STATE_DIR = Path(os.environ.get("HIAGENTRESEARCH_STATE_DIR", str(DEFAULT_STATE_DIR))).resolve()
 RUNS_DIR = Path(os.environ.get("HIAGENTRESEARCH_RUNS_DIR", str(DEFAULT_RUNS_DIR))).resolve()
-GROUPS_JSON = Path(os.environ.get("HIAGENTRESEARCH_GROUPS_JSON", str(STATE_DIR / "research_groups.json"))).resolve()
+CONFIG_PATH = Path(os.environ.get("HIAGENTRESEARCH_CONFIG", str(REPO_ROOT / "config.yaml"))).resolve()
 
 
 def _load_groups(path: Path) -> dict[str, ResearchGroup]:
+    if path.suffix in {".yaml", ".yml"}:
+        return load_config(path).research_groups_by_id()
     payload = json.loads(path.read_text(encoding="utf-8"))
     groups: dict[str, ResearchGroup] = {}
     for raw in payload.get("groups", []):
@@ -62,6 +66,63 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         f.write(json.dumps(payload, ensure_ascii=True) + "\n")
 
 
+def _repo_relative(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _git_changed_files(_workdir: Path) -> set[str]:
+    proc = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return set()
+
+    changed: set[str] = set()
+    for line in proc.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.rsplit(" -> ", 1)[1]
+        changed.add(path.strip('"'))
+    return changed
+
+
+def _validate_edit_boundary(
+    *,
+    workdir: Path,
+    group: ResearchGroup,
+    run_id: str,
+    before_changes: set[str],
+) -> tuple[bool, str, list[str]]:
+    after_changes = _git_changed_files(workdir)
+    cycle_changes = sorted(after_changes - before_changes)
+    if not cycle_changes:
+        return False, "agent cycle produced no changed files", []
+
+    run_prefix = f".hiagentresearch/runs/{run_id}/"
+    allowed = set(group.allowed_paths)
+    outside = [
+        path
+        for path in cycle_changes
+        if path not in allowed and not path.startswith(run_prefix)
+    ]
+    if outside:
+        return False, f"changed files outside configured edit contract: {outside}", cycle_changes
+
+    core_paths = set(_core_allowed_paths(group))
+    if core_paths and not core_paths.intersection(cycle_changes):
+        return False, "agent cycle produced no changed core experiment file", cycle_changes
+    return True, "", cycle_changes
+
+
 def _normalize_python_command(command: str) -> list[str]:
     tokens = shlex.split(command)
     if tokens and tokens[0] == "python":
@@ -69,12 +130,31 @@ def _normalize_python_command(command: str) -> list[str]:
     return tokens
 
 
+def _metadata_payload(
+    *,
+    run_id: str,
+    group: ResearchGroup,
+    status: str,
+    failure_class: str,
+    correlation_id: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "run_id": run_id,
+        "correlation_id": correlation_id,
+        "group": asdict(group),
+        "group_id": group.id,
+        "branch": group.branch,
+        "status": status,
+        "failure_class": failure_class,
+    }
+    payload.update(extra)
+    return payload
+
+
 def _core_allowed_paths(group: ResearchGroup) -> list[str]:
-    return [
-        path
-        for path in group.allowed_paths
-        if not path.endswith("research_markers.py") and not path.endswith("research_hypotheses.py")
-    ]
+    supporting = set(group.supporting_artifacts)
+    return [path for path in group.allowed_paths if path not in supporting]
 
 
 def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_id: str) -> tuple[bool, str]:
@@ -116,6 +196,9 @@ def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_
     core_paths = set(_core_allowed_paths(group))
     if core_paths and not core_paths.intersection(set(target_files)):
         return False, "experiment_intent.json must target at least one core allowed file"
+    outside_allowed = sorted(path for path in target_files if path not in set(group.allowed_paths))
+    if outside_allowed:
+        return False, f"experiment_intent.json target_files outside allowed paths: {outside_allowed}"
 
     plan_text = plan_path.read_text(encoding="utf-8")
     for heading in ("## Evidence", "## Planned Edit", "## Risk and Rollback", "## Eval Expectations"):
@@ -125,6 +208,24 @@ def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_
         return False, "experiment_plan.md is too short to qualify as pre-code planning"
 
     return True, ""
+
+
+def _apply_agent_intent_update(*, run_dir: Path, prior: IntentPacket) -> IntentPacket:
+    intent_path = run_dir / "experiment_intent.json"
+    if not intent_path.exists():
+        return prior
+    try:
+        intent = json.loads(intent_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return prior
+
+    hypothesis_id = intent.get("hypothesis_id")
+    hypothesis_text = intent.get("hypothesis")
+    if isinstance(hypothesis_id, str) and hypothesis_id.strip():
+        prior.active_hypothesis_id = hypothesis_id.strip()
+    if isinstance(hypothesis_text, str) and hypothesis_text.strip():
+        prior.hypothesis_text = hypothesis_text.strip()
+    return prior
 
 
 def _seed_intent(group: ResearchGroup) -> IntentPacket:
@@ -145,11 +246,35 @@ def init_state() -> int:
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     registry = Registry(STATE_DIR)
     registry.init()
-    groups = _load_groups(GROUPS_JSON)
+    groups = _load_groups(CONFIG_PATH)
     for group in groups.values():
         if registry.read_intent_packet(group.id) is None:
             registry.write_intent_packet(_seed_intent(group))
     print(json.dumps({"ok": True, "groups_seeded": sorted(groups.keys())}, indent=2))
+    return 0
+
+
+def status_report(group_id: str | None = None) -> int:
+    registry = Registry(STATE_DIR)
+    registry.init()
+    latest = registry.latest_run(group_id)
+    payload: dict[str, Any] = {
+        "ok": True,
+        "schema_version": registry.schema_version(),
+        "group_id": group_id,
+        "latest_run": latest,
+    }
+    if latest:
+        run_id = str(latest["run_id"])
+        payload["metrics"] = registry.metrics_for_run(run_id)
+        payload["artifacts"] = registry.artifacts_for_run(run_id)
+        payload["intent_packet"] = registry.read_intent_packet(str(latest["group_id"])).to_dict() if registry.read_intent_packet(str(latest["group_id"])) else None
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
+def resolve_group(branch: str) -> int:
+    print(resolve_group_id_for_branch(branch, load_config(CONFIG_PATH)))
     return 0
 
 
@@ -163,20 +288,23 @@ def run_group(
     agent_command: str | None,
     agent_timeout_sec: int,
 ) -> int:
+    config = load_config(CONFIG_PATH)
     registry = Registry(STATE_DIR)
     registry.init()
-    groups = _load_groups(GROUPS_JSON)
+    groups = config.research_groups_by_id()
     if group_id not in groups:
         print(json.dumps({"ok": False, "error": f"unknown group_id: {group_id}"}, indent=2))
         return 1
 
     group = groups[group_id]
+    preexisting_changes = _git_changed_files(workdir)
     run_id = f"run_{uuid.uuid4().hex[:12]}"
+    correlation_id = run_id
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     actions_path = run_dir / "agent_actions.jsonl"
-    metadata_path = run_dir / "run_metadata.json"
+    metadata_path = run_dir / "run_meta.json"
 
     transition = TransitionEvent(
         run_id=run_id,
@@ -215,14 +343,15 @@ def run_group(
         except AgentBackendError as exc:
             _write_json(
                 metadata_path,
-                {
-                    "run_id": run_id,
-                    "group": asdict(group),
-                    "status": "error",
-                    "failure_class": "invalid_cycle",
-                    "error": str(exc),
-                    "agent_backend": "cursor_sdk",
-                },
+                _metadata_payload(
+                    run_id=run_id,
+                    group=group,
+                    status="error",
+                    failure_class="invalid_cycle",
+                    correlation_id=correlation_id,
+                    error=str(exc),
+                    agent_backend="cursor_sdk",
+                ),
             )
             registry.record_run(
                 run_id=run_id,
@@ -231,6 +360,7 @@ def run_group(
                 status="error",
                 failure_class="invalid_cycle",
                 metrics={},
+                correlation_id=correlation_id,
             )
             registry.record_transition(
                 TransitionEvent(
@@ -276,14 +406,15 @@ def run_group(
         if agent_proc.returncode != 0:
             _write_json(
                 metadata_path,
-                {
-                    "run_id": run_id,
-                    "group": asdict(group),
-                    "status": "error",
-                    "failure_class": "invalid_cycle",
-                    "error": "agent command failed before evaluation",
-                    "agent_exit_code": agent_proc.returncode,
-                },
+                _metadata_payload(
+                    run_id=run_id,
+                    group=group,
+                    status="error",
+                    failure_class="invalid_cycle",
+                    correlation_id=correlation_id,
+                    error="agent command failed before evaluation",
+                    agent_exit_code=agent_proc.returncode,
+                ),
             )
             registry.record_run(
                 run_id=run_id,
@@ -292,6 +423,7 @@ def run_group(
                 status="error",
                 failure_class="invalid_cycle",
                 metrics={},
+                correlation_id=correlation_id,
             )
             registry.record_transition(
                 TransitionEvent(
@@ -324,14 +456,15 @@ def run_group(
     if not valid_contract:
         _write_json(
             metadata_path,
-            {
-                "run_id": run_id,
-                "group": asdict(group),
-                "status": "error",
-                "failure_class": "invalid_cycle",
-                "error": contract_error,
-                "agent_backend": agent_backend,
-            },
+                _metadata_payload(
+                    run_id=run_id,
+                    group=group,
+                    status="error",
+                    failure_class="invalid_cycle",
+                    correlation_id=correlation_id,
+                    error=contract_error,
+                    agent_backend=agent_backend,
+                ),
         )
         _append_jsonl(actions_path, {"step": "plan_validation_failed", "error": contract_error})
         registry.record_run(
@@ -341,6 +474,7 @@ def run_group(
             status="error",
             failure_class="invalid_cycle",
             metrics={},
+            correlation_id=correlation_id,
         )
         registry.record_transition(
             TransitionEvent(
@@ -368,8 +502,66 @@ def run_group(
         return 1
     _append_jsonl(actions_path, {"step": "plan_validation_passed"})
 
+    if agent_backend != "none":
+        valid_edits, edit_error, cycle_changes = _validate_edit_boundary(
+            workdir=workdir,
+            group=group,
+            run_id=run_id,
+            before_changes=preexisting_changes,
+        )
+        _append_jsonl(
+            actions_path,
+            {"step": "edit_boundary_check", "valid": valid_edits, "changed_files": cycle_changes},
+        )
+        if not valid_edits:
+            _write_json(
+                metadata_path,
+                _metadata_payload(
+                    run_id=run_id,
+                    group=group,
+                    status="error",
+                    failure_class="invalid_cycle",
+                    correlation_id=correlation_id,
+                    error=edit_error,
+                    agent_backend=agent_backend,
+                ),
+            )
+            registry.record_run(
+                run_id=run_id,
+                group_id=group.id,
+                branch=group.branch,
+                status="error",
+                failure_class="invalid_cycle",
+                metrics={},
+                correlation_id=correlation_id,
+            )
+            registry.record_transition(
+                TransitionEvent(
+                    run_id=run_id,
+                    group_id=group.id,
+                    from_state="running_agent_cycle",
+                    to_state="blocked",
+                    reason="edit_boundary_failed",
+                    actor="orchestrator",
+                )
+            )
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "run_id": run_id,
+                        "status": "error",
+                        "failure_class": "invalid_cycle",
+                        "error": edit_error,
+                        "run_dir": str(run_dir.relative_to(REPO_ROOT)),
+                    },
+                    indent=2,
+                )
+            )
+            return 1
+
     cmd = group.evaluation.command
-    if quick and group.evaluation.parser == "mnist_json_stdout" and "--quick" not in cmd:
+    if quick and group.evaluation.parser in {"mnist_json_stdout", "mnist_phase1_json_stdout"} and "--quick" not in cmd:
         cmd = f"{cmd} --quick"
     _append_jsonl(actions_path, {"step": "run_evaluation", "command": cmd})
 
@@ -404,6 +596,12 @@ def run_group(
         if normalized.raw.get("duration_sec") is not None:
             metrics["duration_sec"] = float(normalized.raw["duration_sec"])
         parsed = normalized.raw
+        eval_config = config.group_by_id(group.id).evaluation or config.evaluation
+        metrics_ok, metrics_error = metrics_meet_expectations(metrics, eval_config.success_metrics)
+        if passed and not metrics_ok:
+            passed = False
+            failure_class = "eval_failure"
+            parsed["quality_error"] = metrics_error
         _write_json(run_dir / "metrics.json", metrics)
         _write_json(
             run_dir / "failure_class.json",
@@ -432,9 +630,10 @@ def run_group(
         status=status,
         failure_class=failure_class,
         metrics=metrics,
+        correlation_id=correlation_id,
     )
 
-    prior = prior_intent
+    prior = _apply_agent_intent_update(run_dir=run_dir, prior=prior_intent)
     if failure_class != "infra_failure":
         prior.attempt_count += 1
     prior.last_failure_class = failure_class if failure_class != "none" else "none"
@@ -460,14 +659,21 @@ def run_group(
 
     _write_json(
         metadata_path,
-        {
-            "run_id": run_id,
-            "group": asdict(group),
-            "status": status,
-            "exit_code": proc.returncode,
-            "failure_class": failure_class,
-            "passed": passed,
-        },
+        _metadata_payload(
+            run_id=run_id,
+            group=group,
+            status=status,
+            failure_class=failure_class,
+            correlation_id=correlation_id,
+            exit_code=proc.returncode,
+            passed=passed,
+        ),
+    )
+    registry.record_artifacts(
+        run_id=run_id,
+        artifact_paths=[run_dir / name for name in config.artifact_contract.required + config.artifact_contract.optional],
+        artifact_type="local_eval",
+        base_dir=run_dir,
     )
     print(
         json.dumps(
@@ -488,6 +694,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Phase-1 orchestrator for hiagentresearch.")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init", help="Initialize registry and intent packets.")
+    status = sub.add_parser("status", help="Print registry-backed status.")
+    status.add_argument("--group-id", default=None)
+    resolve = sub.add_parser("resolve-group", help="Resolve group id for a branch.")
+    resolve.add_argument("--branch", required=True)
     run = sub.add_parser("run-group", help="Run one research group evaluation cycle.")
     run.add_argument("--group-id", required=True)
     run.add_argument("--workdir", default=".")
@@ -505,6 +715,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "init":
         return init_state()
+    if args.cmd == "status":
+        return status_report(group_id=args.group_id)
+    if args.cmd == "resolve-group":
+        return resolve_group(branch=args.branch)
     if args.cmd == "run-group":
         return run_group(
             group_id=args.group_id,

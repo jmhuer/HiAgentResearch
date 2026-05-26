@@ -5,7 +5,10 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from kwta import KWTA
+try:
+    from .kwta import KWTA
+except ImportError:  # pragma: no cover - supports direct script/test execution.
+    from kwta import KWTA
 
 
 class Autoencoder(nn.Module):

@@ -35,9 +35,13 @@ class ResearchGroup:
     id: str
     branch: str
     objective: str
-    policy_mode: PolicyMode
+    policy_mode: PolicyMode | str
     allowed_paths: list[str]
     evaluation: EvaluationSpec
+    context_paths: list[str] = field(default_factory=list)
+    supporting_artifacts: list[str] = field(default_factory=list)
+    supporting_artifact_instructions: dict[str, str] = field(default_factory=dict)
+    research_output_expectations: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

@@ -1,0 +1,57 @@
+import json
+
+from hiagentresearch.src import gh_ingest
+
+
+def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 1}') -> None:
+    (artifact_dir / "metrics.json").write_text(metrics, encoding="utf-8")
+    (artifact_dir / "failure_class.json").write_text(
+        '{"failure_class": "none", "exit_code": 0}', encoding="utf-8"
+    )
+    (artifact_dir / "run_meta.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_local",
+                "correlation_id": "corr-1",
+                "commit_sha": "abc",
+                "workflow_run_id": "123",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "stdout.txt").write_text("{}", encoding="utf-8")
+    (artifact_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+
+def test_ingest_rejects_missing_required_artifacts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(gh_ingest, "STATE_DIR", tmp_path / "state")
+
+    assert gh_ingest.ingest("gh_1", "model_architecture", "research/model-architecture", tmp_path) == 1
+
+
+def test_ingest_records_artifacts_and_is_idempotent(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(gh_ingest, "STATE_DIR", tmp_path / "state")
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    _write_required_artifacts(artifact_dir)
+
+    assert gh_ingest.ingest("gh_1", "model_architecture", "research/model-architecture", artifact_dir) == 0
+    assert gh_ingest.ingest("gh_1", "model_architecture", "research/model-architecture", artifact_dir) == 0
+
+    registry = gh_ingest.Registry(tmp_path / "state")
+    registry.init()
+    assert registry.metrics_for_run("gh_1") == {"tests_passed": 1.0}
+    assert {artifact["artifact_path"] for artifact in registry.artifacts_for_run("gh_1")} >= {
+        "metrics.json",
+        "failure_class.json",
+        "run_meta.json",
+    }
+
+
+def test_ingest_rejects_malformed_metrics(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(gh_ingest, "STATE_DIR", tmp_path / "state")
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    _write_required_artifacts(artifact_dir, metrics="{not json")
+
+    assert gh_ingest.ingest("gh_1", "model_architecture", "research/model-architecture", artifact_dir) == 1

@@ -8,15 +8,17 @@ This project uses a Cursor-first phase-1 research loop with a thin Python contro
 2. Each run writes planning artifacts under `.hiagentresearch/runs/<run_id>/`:
    - `experiment_intent.json`
    - `experiment_plan.md`
-3. Each run applies at least one bounded code edit to a core MNIST implementation file.
+3. Each run applies at least one bounded code edit to a configured core implementation file.
 4. Marker/hypothesis files are supporting artifacts, not a substitute for real experiments.
 5. Every run must finish with eval artifacts and an auditable trail.
 
 ## Editing boundaries
 
-- Keep code edits inside group `allowed_paths` and run-local observability artifacts.
+- Keep code edits inside configured `allowed_paths` and run-local observability artifacts.
 - Prefer minimal changes with explicit hypotheses and rollback plan.
 - Do not claim successful research without evaluation outputs.
+- If a cycle fails quality expectations, retry through the intent packet (`repair`, `pivot`, `reset`, or `continue`) until output quality matches expectations or the group is explicitly blocked.
+- Fix boundary problems canonically through config, eval adapters, registry invariants, or operator commands; do not add ad-hoc guardrails that weaken the architecture.
 
 ## Evidence expectations
 

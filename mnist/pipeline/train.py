@@ -16,7 +16,10 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import numpy as np
 
-from .model import MnistCNN, Decoder, Autoencoder, EnsembleMnistCNN
+try:
+    from .model import MnistCNN, Decoder, Autoencoder, EnsembleMnistCNN
+except ImportError:  # pragma: no cover - supports direct script/test execution.
+    from model import MnistCNN, Decoder, Autoencoder, EnsembleMnistCNN
 
 def pretrain_autoencoder(autoencoder: Autoencoder, loader: DataLoader, device: torch.device, epochs: int, lr: float) -> None:
     print("Starting autoencoder pre-training...")

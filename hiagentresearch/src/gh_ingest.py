@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+from hiagentresearch.src.config import load_config
 from hiagentresearch.src.registry import Registry
 
 
@@ -17,29 +18,36 @@ STATE_DIR = Path(os.environ.get("HIAGENTRESEARCH_STATE_DIR", str(DEFAULT_STATE_D
 def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
     registry = Registry(STATE_DIR)
     registry.init()
+    config = load_config()
     metrics_path = artifact_dir / "metrics.json"
     failure_path = artifact_dir / "failure_class.json"
     meta_path = artifact_dir / "run_meta.json"
 
-    if not metrics_path.exists() or not failure_path.exists():
+    validation_error = _validate_artifact_contract(artifact_dir, config.artifact_contract.required)
+    if validation_error:
         print(
             json.dumps(
                 {
                     "ok": False,
-                    "error": "missing required artifacts",
-                    "required": ["metrics.json", "failure_class.json"],
+                    "error": validation_error,
+                    "required": config.artifact_contract.required,
                 },
                 indent=2,
             )
         )
         return 1
 
-    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-    failure = json.loads(failure_path.read_text(encoding="utf-8"))
-    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    try:
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        failure = json.loads(failure_path.read_text(encoding="utf-8"))
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(json.dumps({"ok": False, "error": f"malformed artifact json: {exc}"}, indent=2))
+        return 1
 
     failure_class = failure.get("failure_class", "infra_failure")
     status = "finished" if failure_class == "none" else "error"
+    correlation_id = str(meta.get("correlation_id") or meta.get("run_id") or run_id)
     registry.record_run(
         run_id=run_id,
         group_id=group_id,
@@ -49,11 +57,21 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
         metrics={k: float(v) for k, v in metrics.items()},
         commit_sha=str(meta.get("commit_sha", "")),
         workflow_run_id=str(meta.get("workflow_run_id", "")),
+        correlation_id=correlation_id,
+    )
+    registry.record_artifacts(
+        run_id=run_id,
+        artifact_paths=[
+            artifact_dir / name for name in config.artifact_contract.required + config.artifact_contract.optional
+        ],
+        artifact_type="github_eval",
+        base_dir=artifact_dir,
     )
     registry.append_event(
         {
             "event_type": "github_ingest",
             "run_id": run_id,
+            "correlation_id": correlation_id,
             "group_id": group_id,
             "branch": branch,
             "failure_class": failure_class,
@@ -62,6 +80,26 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
     )
     print(json.dumps({"ok": True, "run_id": run_id, "failure_class": failure_class}, indent=2))
     return 0
+
+
+def _validate_artifact_contract(artifact_dir: Path, required: list[str]) -> str:
+    missing = [name for name in required if not (artifact_dir / name).exists()]
+    if missing:
+        return f"missing required artifacts: {missing}"
+    malformed: list[str] = []
+    for name in ("metrics.json", "failure_class.json", "run_meta.json"):
+        path = artifact_dir / name
+        if path.exists():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                malformed.append(name)
+                continue
+            if not isinstance(payload, dict):
+                malformed.append(name)
+    if malformed:
+        return f"malformed required artifacts: {malformed}"
+    return ""
 
 
 def build_parser() -> argparse.ArgumentParser:
