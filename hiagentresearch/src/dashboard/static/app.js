@@ -2,6 +2,7 @@ const SQL_HTTPVFS_URL = "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/+esm";
 const ECHARTS_URL = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.esm.min.js";
 const ALL_GROUPS = "__all__";
 const SERIES_COLORS = ["#89b4ff", "#7ee787", "#f2cc60", "#ff8b8b", "#c9a8ff", "#77d4ff"];
+const DISCRETE_LINE_METRICS = new Set(["tests_passed", "tests_failed"]);
 
 let dashboardData = null;
 let selectedRunId = null;
@@ -15,6 +16,7 @@ async function main() {
   dashboardData = await loadDashboardData(manifest);
   dashboardData.repository = manifest.repository || dashboardData.repository || {};
   dashboardData.summary = dashboardData.summary?.length ? dashboardData.summary : summary.groups;
+  dashboardData.metric_names = chartMetricNames(dashboardData, summary);
   renderShell(manifest, summary);
   renderGroups(dashboardData.summary || []);
   renderFilters(dashboardData);
@@ -119,7 +121,7 @@ function renderGroups(groups) {
 
 function renderFilters(data) {
   const groups = unique((data.runs || []).map((run) => run.group_id));
-  const metrics = data.metric_names?.length ? data.metric_names : unique((data.metrics || []).map((metric) => metric.metric_name));
+  const metrics = chartMetricNames(data);
   setOptions("group-filter", groups, { allLabel: "All groups" });
   setOptions("metric-filter", metrics);
   document.getElementById("group-filter").addEventListener("change", renderChart);
@@ -156,9 +158,10 @@ function renderRuns(runs) {
 async function renderChart() {
   const groupId = document.getElementById("group-filter").value;
   const metricName = document.getElementById("metric-filter").value;
+  const indexes = dashboardIndexes();
   const values = (dashboardData.metrics || [])
     .filter((metric) => (groupId === ALL_GROUPS || metric.group_id === groupId) && metric.metric_name === metricName)
-    .map(enrichMetricPoint);
+    .map((metric) => enrichMetricPoint(metric, indexes));
   const container = document.getElementById("metric-chart");
   if (!values.length) {
     container.textContent = "No metric data for this selection.";
@@ -169,9 +172,10 @@ async function renderChart() {
 }
 
 function renderRunDetail() {
-  const run = (dashboardData.runs || []).find((item) => item.run_id === selectedRunId);
-  const outcome = (dashboardData.research_outcomes || []).find((item) => item.run_id === selectedRunId);
-  const experiment = (dashboardData.experiments || []).find((item) => item.run_id === selectedRunId);
+  const indexes = dashboardIndexes();
+  const run = indexes.runs.get(selectedRunId);
+  const outcome = indexes.outcomes.get(selectedRunId);
+  const experiment = indexes.experiments.get(selectedRunId);
   const artifacts = (dashboardData.artifacts || []).filter((item) => item.run_id === selectedRunId);
   const metrics = (dashboardData.metrics || []).filter((item) => item.run_id === selectedRunId);
   const container = document.getElementById("run-detail");
@@ -283,7 +287,8 @@ async function renderEChart(container, values, metricName, expectations) {
         borderColor: "rgba(255,255,255,0.16)",
         backgroundColor: "rgba(9,11,18,0.96)",
         textStyle: { color: "#f6f7fb" },
-        extraCssText: "box-shadow:0 20px 60px rgba(0,0,0,.45);border-radius:14px;padding:12px;",
+        extraCssText:
+          "max-width:min(340px,calc(100vw - 48px));white-space:normal;word-break:break-word;line-height:1.45;box-shadow:0 20px 60px rgba(0,0,0,.45);border-radius:14px;padding:12px;",
         formatter: (params) => pointTooltipHtml(params.data?.point),
       },
       xAxis: {
@@ -338,10 +343,10 @@ async function renderEChart(container, values, metricName, expectations) {
   }
 }
 
-function enrichMetricPoint(metric) {
-  const run = (dashboardData.runs || []).find((item) => item.run_id === metric.run_id) || {};
-  const outcome = (dashboardData.research_outcomes || []).find((item) => item.run_id === metric.run_id) || {};
-  const experiment = (dashboardData.experiments || []).find((item) => item.run_id === metric.run_id) || {};
+function enrichMetricPoint(metric, indexes) {
+  const run = indexes.runs.get(metric.run_id) || {};
+  const outcome = indexes.outcomes.get(metric.run_id) || {};
+  const experiment = indexes.experiments.get(metric.run_id) || {};
   return {
     ...metric,
     branch: run.branch || metric.branch || "",
@@ -375,8 +380,8 @@ function pointTooltipHtml(point) {
   return `
     <div class="tooltip-title">${escapeHtml(point.group_id)} · ${escapeHtml(point.metric_name)} ${formatMetric(point.metric_value)}</div>
     <div class="tooltip-muted">${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</div>
-    <div>${escapeHtml(shortText(point.hypothesis || point.reason || "No summary recorded.", 170))}</div>
-    ${(point.planned_code_changes || []).slice(0, 2).map((item) => `<div class="tooltip-muted">${escapeHtml(shortText(item, 120))}</div>`).join("")}
+    <div class="tooltip-body">${escapeHtml(shortText(point.hypothesis || point.reason || "No summary recorded.", 190))}</div>
+    ${(point.planned_code_changes || []).slice(0, 2).map((item) => `<div class="tooltip-muted">${escapeHtml(shortText(item, 130))}</div>`).join("")}
   `;
 }
 
@@ -405,6 +410,18 @@ function groupBy(values, keyFn) {
     groups[key].push(value);
     return groups;
   }, {});
+}
+
+function dashboardIndexes() {
+  return {
+    runs: byRunId(dashboardData.runs || []),
+    outcomes: byRunId(dashboardData.research_outcomes || []),
+    experiments: byRunId(dashboardData.experiments || []),
+  };
+}
+
+function byRunId(rows) {
+  return new Map(rows.map((row) => [row.run_id, row]));
 }
 
 async function loadECharts() {
@@ -497,6 +514,12 @@ function setOptions(id, values, options = {}) {
   const select = document.getElementById(id);
   const allOption = options.allLabel ? `<option value="${ALL_GROUPS}">${escapeHtml(options.allLabel)}</option>` : "";
   select.innerHTML = `${allOption}${values.map((value) => `<option value="${escapeAttribute(value)}">${escapeHtml(value)}</option>`).join("")}`;
+}
+
+function chartMetricNames(data, summary = {}) {
+  const configured = summary.metric_names?.length ? summary.metric_names : data.metric_names;
+  const candidates = configured?.length ? configured : unique((data.metrics || []).map((metric) => metric.metric_name));
+  return candidates.filter((metric) => !DISCRETE_LINE_METRICS.has(metric));
 }
 
 function unique(values) {

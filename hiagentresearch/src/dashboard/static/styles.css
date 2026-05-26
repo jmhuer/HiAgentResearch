@@ -283,6 +283,12 @@ select {
   line-height: 1.45;
 }
 
+.tooltip-body {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 820px) {
   .hero,
   .grid,
