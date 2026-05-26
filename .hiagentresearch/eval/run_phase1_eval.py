@@ -49,6 +49,10 @@ def _run(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _tail(text: str, *, limit: int = 4000) -> str:
+    return text[-limit:] if len(text) > limit else text
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run phase-1 MNIST eval contract.")
     parser.add_argument("--mnist-root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -120,6 +124,12 @@ def main() -> int:
         "train_exit_code": train_proc.returncode if train_proc else None,
         "eval_exit_code": eval_proc.returncode if eval_proc else None,
         "eval_parse_error": eval_parse_error,
+        "pytest_stdout_tail": _tail(test_proc.stdout),
+        "pytest_stderr_tail": _tail(test_proc.stderr),
+        "train_stdout_tail": _tail(train_proc.stdout) if train_proc else "",
+        "train_stderr_tail": _tail(train_proc.stderr) if train_proc else "",
+        "eval_stdout_tail": _tail(eval_proc.stdout) if eval_proc else "",
+        "eval_stderr_tail": _tail(eval_proc.stderr) if eval_proc else "",
         "baseline": baseline,
         "eval_report": eval_payload,
     }
