@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import io
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -75,6 +76,7 @@ class LoopSummary:
 
 RunGroupCallable = Callable[..., int]
 IngestCallable = Callable[[str, str, str, Path], int]
+EXPERIMENT_MANIFEST_ROOT = Path(".hiagentresearch") / "experiments"
 
 
 def run_loops(
@@ -132,8 +134,15 @@ def run_loops(
                 reason=f"local cycle blocked with {local_failure}",
             )
 
+        manifest_path, manifest = _write_experiment_manifest(
+            group_id=group_id,
+            branch=target_branch,
+            loop_index=loop_index,
+            local_run_id=local_run_id,
+            local_result=local,
+        )
         supporting_paths = [artifact.path for artifact in loaded_config.agent_contract.supporting_artifacts]
-        git_service.stage_paths(list(group_config.allowed_paths))
+        git_service.stage_paths([*list(group_config.allowed_paths), manifest_path])
         if not git_service.has_core_staged_change(
             allowed_paths=list(group_config.allowed_paths),
             supporting_paths=supporting_paths,
@@ -146,8 +155,8 @@ def run_loops(
                 reason="cycle produced no staged core change",
             )
 
-        subject = f"Phase1 loop {loop_index}: {group_id} planned experiment update."
-        body = f"HiAgentResearch-Run-ID: {local_run_id}"
+        subject = _commit_subject(loop_index=loop_index, manifest=manifest)
+        body = _commit_body(local_run_id=local_run_id, manifest_path=manifest_path, manifest=manifest)
         commit_sha = git_service.commit(subject=subject, body=body)
         git_service.push(remote=loaded_config.github.remote, branch=target_branch)
 
@@ -226,6 +235,80 @@ def _run_group_capture(run_group_func: RunGroupCallable, **kwargs) -> dict:
         payload = {"ok": False, "error": "could not parse run_group output", "raw_stdout": text}
     payload["exit_code"] = exit_code
     return payload
+
+
+def _write_experiment_manifest(
+    *,
+    group_id: str,
+    branch: str,
+    loop_index: int,
+    local_run_id: str,
+    local_result: dict,
+) -> tuple[str, dict]:
+    run_dir = REPO_ROOT / ".hiagentresearch" / "runs" / local_run_id
+    intent = _read_json(run_dir / "experiment_intent.json")
+    manifest = {
+        "schema_version": 1,
+        "run_id": local_run_id,
+        "group_id": group_id,
+        "branch": branch,
+        "loop_index": loop_index,
+        "hypothesis_id": intent.get("hypothesis_id", ""),
+        "hypothesis": intent.get("hypothesis", ""),
+        "planned_code_changes": _as_string_list(intent.get("planned_code_changes")),
+        "target_files": _as_string_list(intent.get("target_files")),
+        "success_criteria": _as_string_list(intent.get("success_criteria")),
+        "rollback_plan": intent.get("rollback_plan", ""),
+        "local_status": local_result.get("status", ""),
+        "local_failure_class": local_result.get("failure_class", ""),
+        "local_research_outcome": local_result.get("research_outcome", ""),
+        "local_improved_baseline": bool(local_result.get("improved_baseline", False)),
+    }
+    path = EXPERIMENT_MANIFEST_ROOT / group_id / f"{local_run_id}.json"
+    absolute_path = REPO_ROOT / path
+    absolute_path.parent.mkdir(parents=True, exist_ok=True)
+    absolute_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return str(path), manifest
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _as_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _commit_subject(*, loop_index: int, manifest: dict) -> str:
+    summary = _manifest_summary(manifest)
+    return f"Phase 1, loop {loop_index}: {summary}"
+
+
+def _commit_body(*, local_run_id: str, manifest_path: str, manifest: dict) -> str:
+    lines = [f"HiAgentResearch-Run-ID: {local_run_id}", f"Experiment-Manifest: {manifest_path}"]
+    hypothesis_id = str(manifest.get("hypothesis_id", "")).strip()
+    if hypothesis_id:
+        lines.append(f"Hypothesis-ID: {hypothesis_id}")
+    return "\n".join(lines)
+
+
+def _manifest_summary(manifest: dict) -> str:
+    planned = manifest.get("planned_code_changes", [])
+    if isinstance(planned, list) and planned:
+        text = str(planned[0])
+    else:
+        text = str(manifest.get("hypothesis_id") or manifest.get("hypothesis") or "experiment update")
+    text = re.sub(r"\s+", " ", text).strip().rstrip(".")
+    text = re.sub(r"^in\s+[^:]+:\s*", "", text, flags=re.IGNORECASE)
+    if len(text) > 72:
+        text = text[:69].rstrip() + "..."
+    return text or "experiment update"
 
 
 def build_parser() -> argparse.ArgumentParser:

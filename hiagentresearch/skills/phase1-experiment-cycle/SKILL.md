@@ -11,7 +11,6 @@ Produce a real, hypothesis-driven experiment with planning artifacts before code
 1. Inspect evidence in:
    - configured context paths from `config.yaml`
    - target implementation files from the active group
-   - latest configured supporting artifacts
 2. Write `experiment_intent.json` with:
    - `run_id`, `group_id`, `objective`
    - `hypothesis_id`, `hypothesis`
@@ -23,13 +22,13 @@ Produce a real, hypothesis-driven experiment with planning artifacts before code
    - `## Risk and Rollback`
    - `## Eval Expectations`
 4. Apply one bounded edit to a core allowed file.
-5. Update configured supporting artifacts when applicable.
-6. Return a JSON summary of changed files and artifact paths.
+5. Return a JSON summary of changed files and artifact paths.
 
 ## Constraints
 
 - Do not skip planning artifacts.
 - Do not make marker-only runs.
+- Do not create branch-memory Python files for hypotheses or markers.
 - Keep edits small, reversible, and syntax-safe.
 - Treat metric regressions as research evidence, not execution failures.
 - Keep retrying through repair, pivot, reset, or continue decisions until configured output expectations are met or the group is explicitly blocked.

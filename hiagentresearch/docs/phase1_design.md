@@ -6,9 +6,7 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 
 ## Runtime flow
 
-1. Load group charter from `.hiagentresearch/state/research_groups.json`.
-   New runs load the canonical project contract from root `config.yaml`; the
-   legacy JSON file is retained only as historical state.
+1. Load the canonical project contract from root `config.yaml`.
 2. Load current intent packet for group (or seed first packet).
 3. Record agent actions to `agent_actions.jsonl` (traceability).
 4. Trigger evaluation command (`.hiagentresearch/eval/run_phase1_eval.py` for phase 1).
@@ -18,6 +16,7 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
    - normalized metrics,
    - execution failure classification,
    - research outcome,
+   - branch-local experiment manifest,
    - updated intent packet,
    - append-only event log entry.
 
@@ -35,6 +34,12 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 - agent context and quality expectations.
 
 Core runtime code should stay project-agnostic. If a project needs different files, prompts, or eval behavior, change config or the frozen eval adapter rather than hardcoding a new path in Python.
+
+## Experiment Memory
+
+Each run has exactly one canonical hypothesis in `.hiagentresearch/runs/<run_id>/experiment_intent.json`.
+The loop controller copies the concise branch record to `.hiagentresearch/experiments/<group_id>/<run_id>.json`
+before committing the experiment branch. Do not maintain accumulating Python lists for hypotheses or markers.
 
 ## Evidence requirement
 

@@ -5,8 +5,6 @@ editable_paths:
   - mnist/pipeline/train.py
   - mnist/pipeline/train_optuna.py
   - mnist/pipeline/kwta.py
-  - mnist/pipeline/research_hypotheses.py
-  - mnist/pipeline/research_markers.py
   - mnist/eval/run_eval.py
 generated_paths:
   - mnist/data/
@@ -54,12 +52,7 @@ agent_contract:
     - mnist/baseline.json
     - mnist/pipeline/model.py
     - mnist/pipeline/train.py
-    - mnist/pipeline/research_hypotheses.py
-  supporting_artifacts:
-    - path: mnist/pipeline/research_hypotheses.py
-      instruction: "Prepend one new hypothesis entry following the existing file convention."
-    - path: mnist/pipeline/research_markers.py
-      instruction: "Prepend one marker string following the existing file convention."
+  supporting_artifacts: []
   research_output_expectations:
     - "Every cycle starts with concrete evidence and a written plan before code edits."
     - "Every cycle applies at least one bounded edit to a configured core implementation file."
@@ -77,8 +70,6 @@ research_groups:
       - mnist/pipeline/model.py
       - mnist/pipeline/train.py
       - mnist/eval/run_eval.py
-      - mnist/pipeline/research_hypotheses.py
-      - mnist/pipeline/research_markers.py
   - id: hyperparameter_optimization
     branch: research/hyperparameter-optimization
     objective: Improve training dynamics through hyperparameter exploration.
@@ -86,8 +77,6 @@ research_groups:
     allowed_paths:
       - mnist/pipeline/train.py
       - mnist/pipeline/train_optuna.py
-      - mnist/pipeline/research_hypotheses.py
-      - mnist/pipeline/research_markers.py
   - id: data_augmentation
     branch: research/data-augmentation
     objective: Improve robustness and accuracy using targeted augmentation strategy.
@@ -96,8 +85,6 @@ research_groups:
       - mnist/pipeline/train.py
       - mnist/pipeline/model.py
       - mnist/eval/run_eval.py
-      - mnist/pipeline/research_hypotheses.py
-      - mnist/pipeline/research_markers.py
   - id: optimization_strategy
     branch: research/optimization-strategy
     objective: Improve optimization strategy and training efficiency tradeoffs.
@@ -106,5 +93,3 @@ research_groups:
       - mnist/pipeline/train.py
       - mnist/pipeline/train_optuna.py
       - mnist/pipeline/kwta.py
-      - mnist/pipeline/research_hypotheses.py
-      - mnist/pipeline/research_markers.py

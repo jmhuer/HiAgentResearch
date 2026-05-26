@@ -61,7 +61,26 @@ class FakeGitHub:
 
 
 def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("hiagentresearch.src.loop_controller.REPO_ROOT", tmp_path)
     monkeypatch.setattr("hiagentresearch.src.loop_controller.init_state", lambda: 0)
+    run_dir = tmp_path / ".hiagentresearch" / "runs" / "run_test"
+    run_dir.mkdir(parents=True)
+    (run_dir / "experiment_intent.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_test",
+                "group_id": "model_architecture",
+                "objective": "Improve model architecture while preserving latency budget.",
+                "hypothesis_id": "model_architecture-h1",
+                "hypothesis": "Try a bounded model change.",
+                "planned_code_changes": ["Replace one model layer with a smaller equivalent."],
+                "target_files": ["mnist/pipeline/model.py"],
+                "success_criteria": ["accuracy improves"],
+                "rollback_plan": "Revert the model layer.",
+            }
+        ),
+        encoding="utf-8",
+    )
     artifact_dir = tmp_path / "hiagentresearch-123"
     artifact_dir.mkdir()
     (artifact_dir / "run_meta.json").write_text(
@@ -116,7 +135,13 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
 
     assert summary.ok is True
     assert summary.cycles[0].github_research_outcome == "improved_baseline"
+    assert (
+        tmp_path / ".hiagentresearch" / "experiments" / "model_architecture" / "run_test.json"
+    ).exists()
+    assert ".hiagentresearch/experiments/model_architecture/run_test.json" in git.staged_paths
+    assert git.subject == "Phase 1, loop 1: Replace one model layer with a smaller equivalent"
     assert git.committed is True
     assert git.pushed is True
-    assert "HiAgentResearch-Run-ID: run_test" == git.body
+    assert "HiAgentResearch-Run-ID: run_test" in git.body
+    assert "Experiment-Manifest: .hiagentresearch/experiments/model_architecture/run_test.json" in git.body
     assert ingested["args"][0] == "gh_123"

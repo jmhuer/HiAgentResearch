@@ -9,8 +9,9 @@ This project uses a Cursor-first phase-1 research loop with a thin Python contro
    - `experiment_intent.json`
    - `experiment_plan.md`
 3. Each run applies at least one bounded code edit to a configured core implementation file.
-4. Marker/hypothesis files are supporting artifacts, not a substitute for real experiments.
-5. Every run must finish with eval artifacts and an auditable trail.
+4. Each committed experiment includes a concise `.hiagentresearch/experiments/<group_id>/<run_id>.json` manifest.
+5. Do not create branch-memory Python files for hypotheses or markers.
+6. Every run must finish with eval artifacts and an auditable trail.
 
 ## Editing boundaries
 

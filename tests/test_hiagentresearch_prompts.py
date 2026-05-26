@@ -21,6 +21,7 @@ def test_prompt_is_config_backed() -> None:
     prompt = build_phase1_prompt(group=group, intent_packet=packet, run_id="run_abc")
 
     assert "mnist/pipeline/model.py" in prompt
-    assert "mnist/pipeline/research_hypotheses.py" in prompt
+    assert "mnist/pipeline/research_hypotheses.py" not in prompt
+    assert "Do not create branch-memory source files" in prompt
     assert "configured core experiment files" in prompt.lower()
     assert "core MNIST" not in prompt

@@ -13,6 +13,11 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
     core_paths_text = _bullets(core_paths)
     generated_paths_text = _bullets(group.generated_paths)
     supporting_text = _supporting_artifacts_text(group)
+    supporting_step = (
+        "5) Update configured supporting artifacts when applicable, following their instructions.\n"
+        if group.supporting_artifacts
+        else "5) Do not create branch-memory source files; experiment intent is recorded by the runtime.\n"
+    )
     expectations_text = _bullets(group.research_output_expectations)
 
     return (
@@ -44,7 +49,7 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
         "   - include headings: ## Evidence, ## Planned Edit, ## Risk and Rollback,\n"
         "     ## Eval Expectations.\n"
         "4) Implement one real bounded code experiment in at least one configured core file.\n"
-        "5) Update configured supporting artifacts when applicable, following their instructions.\n"
+        f"{supporting_step}"
         "6) Return a short JSON summary with keys: hypothesis_id, theme, changed_files,\n"
         "   intent_json_path, plan_md_path.\n\n"
         "Configured core experiment files:\n"
