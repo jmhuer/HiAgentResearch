@@ -39,16 +39,12 @@ python -m hiagentresearch.src.orchestrator run-group --group-id model_architectu
 python -m hiagentresearch.src.orchestrator status --group-id model_architecture
 ```
 
-By default `run-group` uses a real Cursor SDK agent backend.  
-If you need command-mode fallback while debugging, set `--agent-backend command --agent-command "..."`
-
-Optional explicit backend flags:
+`run-group` always uses the Cursor SDK agent backend. `CURSOR_API_KEY` is required.
 
 ```bash
 python -m hiagentresearch.src.orchestrator run-group \
   --group-id model_architecture \
   --workdir . \
-  --agent-backend cursor_sdk \
   --agent-model composer-2.5
 ```
 

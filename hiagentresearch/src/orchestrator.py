@@ -294,10 +294,7 @@ def run_group(
     workdir: Path,
     quick: bool,
     evidence_path: Path | None,
-    agent_backend: str,
     agent_model: str,
-    agent_command: str | None,
-    agent_timeout_sec: int,
 ) -> int:
     config = load_config(CONFIG_PATH)
     registry = Registry(STATE_DIR)
@@ -338,129 +335,63 @@ def run_group(
     )
 
     prior_intent = registry.read_intent_packet(group.id) or _seed_intent(group)
-    if agent_backend == "cursor_sdk":
-        _append_jsonl(actions_path, {"step": "run_agent_backend", "backend": "cursor_sdk", "model": agent_model})
-        try:
-            record = run_cursor_agent_cycle(
-                workdir=workdir,
-                run_dir=run_dir,
-                group=group,
-                intent_packet=prior_intent,
-                run_id=run_id,
-                model=agent_model,
-            )
-            (run_dir / "agent_stdout.txt").write_text(record.summary, encoding="utf-8")
-            (run_dir / "agent_stderr.txt").write_text("", encoding="utf-8")
-        except AgentBackendError as exc:
-            _write_json(
-                metadata_path,
-                _metadata_payload(
-                    run_id=run_id,
-                    group=group,
-                    status="error",
-                    failure_class="invalid_cycle",
-                    correlation_id=correlation_id,
-                    error=str(exc),
-                    agent_backend="cursor_sdk",
-                ),
-            )
-            registry.record_run(
-                run_id=run_id,
-                group_id=group.id,
-                branch=group.branch,
-                status="error",
-                failure_class="invalid_cycle",
-                metrics={},
-                correlation_id=correlation_id,
-            )
-            registry.record_transition(
-                TransitionEvent(
-                    run_id=run_id,
-                    group_id=group.id,
-                    from_state="running_agent_cycle",
-                    to_state="blocked",
-                    reason="cursor_agent_backend_failed",
-                    actor="orchestrator",
-                )
-            )
-            print(
-                json.dumps(
-                    {
-                        "ok": False,
-                        "run_id": run_id,
-                        "status": "error",
-                        "failure_class": "invalid_cycle",
-                        "run_dir": str(run_dir.relative_to(REPO_ROOT)),
-                    },
-                    indent=2,
-                )
-            )
-            return 1
-    elif agent_command:
-        _append_jsonl(actions_path, {"step": "run_agent_backend", "backend": "command", "command": agent_command})
-        agent_proc = subprocess.run(
-            _normalize_python_command(agent_command),
-            cwd=workdir,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=agent_timeout_sec,
-            env={
-                **os.environ,
-                "HIAGENTRESEARCH_RUN_ID": run_id,
-                "HIAGENTRESEARCH_GROUP_ID": group.id,
-                "HIAGENTRESEARCH_STATE_DIR": str(STATE_DIR.resolve()),
-            },
+    _append_jsonl(actions_path, {"step": "run_agent_backend", "backend": "cursor_sdk", "model": agent_model})
+    try:
+        record = run_cursor_agent_cycle(
+            workdir=workdir,
+            run_dir=run_dir,
+            group=group,
+            intent_packet=prior_intent,
+            run_id=run_id,
+            model=agent_model,
         )
-        (run_dir / "agent_stdout.txt").write_text(agent_proc.stdout, encoding="utf-8")
-        (run_dir / "agent_stderr.txt").write_text(agent_proc.stderr, encoding="utf-8")
-        if agent_proc.returncode != 0:
-            _write_json(
-                metadata_path,
-                _metadata_payload(
-                    run_id=run_id,
-                    group=group,
-                    status="error",
-                    failure_class="invalid_cycle",
-                    correlation_id=correlation_id,
-                    error="agent command failed before evaluation",
-                    agent_exit_code=agent_proc.returncode,
-                ),
-            )
-            registry.record_run(
+        (run_dir / "agent_stdout.txt").write_text(record.summary, encoding="utf-8")
+        (run_dir / "agent_stderr.txt").write_text("", encoding="utf-8")
+    except AgentBackendError as exc:
+        _write_json(
+            metadata_path,
+            _metadata_payload(
                 run_id=run_id,
-                group_id=group.id,
-                branch=group.branch,
+                group=group,
                 status="error",
                 failure_class="invalid_cycle",
-                metrics={},
                 correlation_id=correlation_id,
+                error=str(exc),
+                agent_backend="cursor_sdk",
+            ),
+        )
+        registry.record_run(
+            run_id=run_id,
+            group_id=group.id,
+            branch=group.branch,
+            status="error",
+            failure_class="invalid_cycle",
+            metrics={},
+            correlation_id=correlation_id,
+        )
+        registry.record_transition(
+            TransitionEvent(
+                run_id=run_id,
+                group_id=group.id,
+                from_state="running_agent_cycle",
+                to_state="blocked",
+                reason="cursor_agent_backend_failed",
+                actor="orchestrator",
             )
-            registry.record_transition(
-                TransitionEvent(
-                    run_id=run_id,
-                    group_id=group.id,
-                    from_state="running_agent_cycle",
-                    to_state="blocked",
-                    reason="agent_command_failed",
-                    actor="orchestrator",
-                )
+        )
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "run_id": run_id,
+                    "status": "error",
+                    "failure_class": "invalid_cycle",
+                    "run_dir": str(run_dir.relative_to(REPO_ROOT)),
+                },
+                indent=2,
             )
-            print(
-                json.dumps(
-                    {
-                        "ok": False,
-                        "run_id": run_id,
-                        "status": "error",
-                        "failure_class": "invalid_cycle",
-                        "run_dir": str(run_dir.relative_to(REPO_ROOT)),
-                    },
-                    indent=2,
-                )
-            )
-            return 1
-    else:
-        _append_jsonl(actions_path, {"step": "skip_agent_command", "reason": "no command provided"})
+        )
+        return 1
 
     _append_jsonl(actions_path, {"step": "validate_plan_before_eval"})
     valid_contract, contract_error = _validate_agent_intent_contract(run_dir=run_dir, group=group, run_id=run_id)
@@ -474,7 +405,7 @@ def run_group(
                     failure_class="invalid_cycle",
                     correlation_id=correlation_id,
                     error=contract_error,
-                    agent_backend=agent_backend,
+                    agent_backend="cursor_sdk",
                 ),
         )
         _append_jsonl(actions_path, {"step": "plan_validation_failed", "error": contract_error})
@@ -513,63 +444,62 @@ def run_group(
         return 1
     _append_jsonl(actions_path, {"step": "plan_validation_passed"})
 
-    if agent_backend != "none":
-        valid_edits, edit_error, cycle_changes = _validate_edit_boundary(
-            workdir=workdir,
-            group=group,
-            run_id=run_id,
-            before_changes=preexisting_changes,
-        )
-        _append_jsonl(
-            actions_path,
-            {"step": "edit_boundary_check", "valid": valid_edits, "changed_files": cycle_changes},
-        )
-        if not valid_edits:
-            _write_json(
-                metadata_path,
-                _metadata_payload(
-                    run_id=run_id,
-                    group=group,
-                    status="error",
-                    failure_class="invalid_cycle",
-                    correlation_id=correlation_id,
-                    error=edit_error,
-                    agent_backend=agent_backend,
-                ),
-            )
-            registry.record_run(
+    valid_edits, edit_error, cycle_changes = _validate_edit_boundary(
+        workdir=workdir,
+        group=group,
+        run_id=run_id,
+        before_changes=preexisting_changes,
+    )
+    _append_jsonl(
+        actions_path,
+        {"step": "edit_boundary_check", "valid": valid_edits, "changed_files": cycle_changes},
+    )
+    if not valid_edits:
+        _write_json(
+            metadata_path,
+            _metadata_payload(
                 run_id=run_id,
-                group_id=group.id,
-                branch=group.branch,
+                group=group,
                 status="error",
                 failure_class="invalid_cycle",
-                metrics={},
                 correlation_id=correlation_id,
+                error=edit_error,
+                agent_backend="cursor_sdk",
+            ),
+        )
+        registry.record_run(
+            run_id=run_id,
+            group_id=group.id,
+            branch=group.branch,
+            status="error",
+            failure_class="invalid_cycle",
+            metrics={},
+            correlation_id=correlation_id,
+        )
+        registry.record_transition(
+            TransitionEvent(
+                run_id=run_id,
+                group_id=group.id,
+                from_state="running_agent_cycle",
+                to_state="blocked",
+                reason="edit_boundary_failed",
+                actor="orchestrator",
             )
-            registry.record_transition(
-                TransitionEvent(
-                    run_id=run_id,
-                    group_id=group.id,
-                    from_state="running_agent_cycle",
-                    to_state="blocked",
-                    reason="edit_boundary_failed",
-                    actor="orchestrator",
-                )
+        )
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "run_id": run_id,
+                    "status": "error",
+                    "failure_class": "invalid_cycle",
+                    "error": edit_error,
+                    "run_dir": str(run_dir.relative_to(REPO_ROOT)),
+                },
+                indent=2,
             )
-            print(
-                json.dumps(
-                    {
-                        "ok": False,
-                        "run_id": run_id,
-                        "status": "error",
-                        "failure_class": "invalid_cycle",
-                        "error": edit_error,
-                        "run_dir": str(run_dir.relative_to(REPO_ROOT)),
-                    },
-                    indent=2,
-                )
-            )
-            return 1
+        )
+        return 1
 
     cmd = group.evaluation.command
     if quick and group.evaluation.parser in {"mnist_json_stdout", "mnist_phase1_json_stdout"} and "--quick" not in cmd:
@@ -714,10 +644,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--workdir", default=".")
     run.add_argument("--quick", action="store_true")
     run.add_argument("--evidence-json", type=Path, default=None)
-    run.add_argument("--agent-backend", choices=["cursor_sdk", "command", "none"], default="cursor_sdk")
     run.add_argument("--agent-model", default="composer-2.5")
-    run.add_argument("--agent-command", default=None, help="Optional command that runs the group agent loop once.")
-    run.add_argument("--agent-timeout-sec", type=int, default=900)
     return parser
 
 
@@ -736,10 +663,7 @@ def main(argv: list[str] | None = None) -> int:
             workdir=Path(args.workdir).resolve(),
             quick=args.quick,
             evidence_path=args.evidence_json,
-            agent_backend=args.agent_backend,
             agent_model=args.agent_model,
-            agent_command=args.agent_command,
-            agent_timeout_sec=args.agent_timeout_sec,
         )
     parser.print_help()
     return 1

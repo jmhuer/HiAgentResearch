@@ -82,10 +82,7 @@ def run_loops(
     workdir: Path,
     quick: bool,
     evidence_path: Path | None,
-    agent_backend: str,
     agent_model: str,
-    agent_command: str | None,
-    agent_timeout_sec: int,
     config: HiAgentResearchConfig | None = None,
     git: GitLike | None = None,
     github: GitHubActionsLike | None = None,
@@ -111,10 +108,7 @@ def run_loops(
             workdir=workdir,
             quick=quick,
             evidence_path=evidence_path,
-            agent_backend=agent_backend,
             agent_model=agent_model,
-            agent_command=agent_command,
-            agent_timeout_sec=agent_timeout_sec,
         )
         local_run_id = str(local.get("run_id", ""))
         local_failure = str(local.get("failure_class", "invalid_cycle"))
@@ -229,10 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workdir", type=Path, default=REPO_ROOT)
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--evidence-json", type=Path, default=REPO_ROOT / ".hiagentresearch/state/evidence/model_architecture.json")
-    parser.add_argument("--agent-backend", choices=["cursor_sdk", "command", "none"], default="cursor_sdk")
     parser.add_argument("--agent-model", default="composer-2.5")
-    parser.add_argument("--agent-command", default=None)
-    parser.add_argument("--agent-timeout-sec", type=int, default=900)
     parser.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
     return parser
 
@@ -246,10 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         workdir=args.workdir.resolve(),
         quick=args.quick,
         evidence_path=args.evidence_json.resolve() if args.evidence_json else None,
-        agent_backend=args.agent_backend,
         agent_model=args.agent_model,
-        agent_command=args.agent_command,
-        agent_timeout_sec=args.agent_timeout_sec,
         stop_on_success=not args.run_exact_loops,
     )
     print(json.dumps(summary.to_dict(), indent=2))
