@@ -7,6 +7,25 @@ from __future__ import annotations
 
 RESEARCH_HYPOTHESES: list[dict] = [
     {
+        "hypothesis_id": "model_architecture-h7",
+        "theme": "layer2_relu_trunk_sparsity",
+        "hypothesis": (
+            "h6 shared ResNetTrunk plus SharedLayer4MultiLinearHead removed redundant layer4 "
+            "conv passes, but ResNetTrunk still applies KWTA(k=10) in stem, layer1, and layer2 "
+            "(9 torch.topk calls per forward in kwta.py; layer2 maps are 128x14x14 = 25,088 "
+            "elements). baseline.json requires latency_ms <= 13.0 at accuracy >= 0.985. "
+            "Switching trunk layer2 BasicBlocks to ReLU (matching h4 layer3/layer4) removes "
+            "4 topk passes while keeping KWTA on the largest early feature maps. Expected: "
+            "latency_ms drops vs h6 with accuracy >= 0.985."
+        ),
+        "planned_change": (
+            "In mnist/pipeline/model.py: set ResNetTrunk and MnistEncoder layer2 "
+            "_make_layer activation to relu; retrain ensemble and re-measure latency_ms."
+        ),
+        "run_id": "run_ea6f94bf9ad7",
+        "timestamp": "2026-05-25T14:30:00.000000+00:00",
+    },
+    {
         "hypothesis_id": "model_architecture-h6",
         "theme": "shared_layer4_multi_linear_heads",
         "hypothesis": (

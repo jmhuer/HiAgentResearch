@@ -7,6 +7,7 @@ Each loop appends a marker string to `RESEARCH_MARKERS`.
 from __future__ import annotations
 
 RESEARCH_MARKERS: list[str] = [
+    "model_architecture:run_ea6f94bf9ad7:attempt16:2026-05-25T14:30:00.000000+00:00",
     "model_architecture:run_42c5a5452dd5:attempt15:2026-05-25T12:00:00.000000+00:00",
     "model_architecture:run_266dfb842c28:attempt14:2026-05-26T00:28:23.884355+00:00",
     "model_architecture:run_e61a448a7e8a:attempt13:2026-05-26T00:26:03.344226+00:00",
