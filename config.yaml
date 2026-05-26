@@ -50,7 +50,7 @@ github:
   run_lookup_attempts: 30
   run_lookup_sleep_sec: 3
 dashboard:
-  enabled: false
+  enabled: true
   title: HiAgentResearch
   metrics:
     - accuracy
