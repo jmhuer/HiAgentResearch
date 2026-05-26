@@ -524,8 +524,6 @@ def run_group(
         return 1
 
     cmd = group.evaluation.command
-    if quick and group.evaluation.parser in {"mnist_json_stdout", "mnist_phase1_json_stdout"} and "--quick" not in cmd:
-        cmd = f"{cmd} --quick"
     _append_jsonl(actions_path, {"step": "run_evaluation", "command": cmd})
 
     proc = subprocess.run(
