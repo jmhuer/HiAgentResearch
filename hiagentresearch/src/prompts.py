@@ -11,6 +11,7 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
     guidance_text = _bullets(["hiagentresearch/AGENTS.md", "hiagentresearch/skills/phase1-experiment-cycle/SKILL.md"])
     context_text = _bullets(group.context_paths)
     core_paths_text = _bullets(core_paths)
+    generated_paths_text = _bullets(group.generated_paths)
     supporting_text = _supporting_artifacts_text(group)
     expectations_text = _bullets(group.research_output_expectations)
 
@@ -50,6 +51,8 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
         f"{core_paths_text}\n\n"
         "Configured supporting artifacts:\n"
         f"{supporting_text}\n\n"
+        "Configured generated paths (may be created while testing, never commit as source changes):\n"
+        f"{generated_paths_text}\n\n"
         "Research output expectations:\n"
         f"{expectations_text}\n\n"
         "Constraints:\n"

@@ -112,7 +112,9 @@ def _validate_edit_boundary(
     outside = [
         path
         for path in cycle_changes
-        if path not in allowed and not path.startswith(run_prefix)
+        if path not in allowed
+        and not path.startswith(run_prefix)
+        and not _is_generated_path(path, group.generated_paths)
     ]
     if outside:
         return False, f"changed files outside configured edit contract: {outside}", cycle_changes
@@ -121,6 +123,15 @@ def _validate_edit_boundary(
     if core_paths and not core_paths.intersection(cycle_changes):
         return False, "agent cycle produced no changed core experiment file", cycle_changes
     return True, "", cycle_changes
+
+
+def _is_generated_path(path: str, generated_paths: list[str]) -> bool:
+    normalized = path.rstrip("/")
+    for generated in generated_paths:
+        generated_normalized = generated.rstrip("/")
+        if normalized == generated_normalized or normalized.startswith(f"{generated_normalized}/"):
+            return True
+    return False
 
 
 def _normalize_python_command(command: str) -> list[str]:

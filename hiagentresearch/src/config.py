@@ -91,6 +91,7 @@ class HiAgentResearchConfig(BaseModel):
     project_id: str
     workdir: str
     editable_paths: list[str]
+    generated_paths: list[str] = Field(default_factory=list)
     frozen_eval_entrypoint: str
     evaluation: EvaluationConfig
     research_groups: list[ResearchGroupConfig]
@@ -175,6 +176,7 @@ class HiAgentResearchConfig(BaseModel):
             supporting_artifacts=[artifact.path for artifact in supporting],
             supporting_artifact_instructions={artifact.path: artifact.instruction for artifact in supporting},
             research_output_expectations=list(expectations),
+            generated_paths=list(self.generated_paths),
         )
 
     def research_groups_by_id(self) -> dict[str, ResearchGroup]:

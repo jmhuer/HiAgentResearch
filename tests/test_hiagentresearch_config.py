@@ -10,6 +10,7 @@ def test_load_root_config() -> None:
 
     assert config.project_id == "mnist"
     assert config.frozen_eval_entrypoint == ".hiagentresearch/eval/run_phase1_eval.py"
+    assert "mnist/data/" in config.generated_paths
     assert "metrics.json" in config.artifact_contract.required
     assert "model_architecture" in config.research_groups_by_id()
 

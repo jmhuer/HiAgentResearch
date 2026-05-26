@@ -8,6 +8,10 @@ editable_paths:
   - mnist/pipeline/research_hypotheses.py
   - mnist/pipeline/research_markers.py
   - mnist/eval/run_eval.py
+generated_paths:
+  - mnist/data/
+  - mnist/pipeline/checkpoints/
+  - mnist/pipeline/last_train_metrics.json
 frozen_eval_entrypoint: .hiagentresearch/eval/run_phase1_eval.py
 evaluation:
   command_template: "python {frozen_eval_entrypoint} --mnist-root mnist --quick"

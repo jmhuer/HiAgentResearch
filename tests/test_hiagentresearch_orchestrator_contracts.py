@@ -2,7 +2,11 @@ from pathlib import Path
 
 from hiagentresearch.src.config import load_config
 from hiagentresearch.src.models import IntentPacket
-from hiagentresearch.src.orchestrator import _apply_agent_intent_update, _validate_agent_intent_contract
+from hiagentresearch.src.orchestrator import (
+    _apply_agent_intent_update,
+    _is_generated_path,
+    _validate_agent_intent_contract,
+)
 
 
 def test_agent_intent_contract_rejects_targets_outside_allowed_paths(tmp_path) -> None:
@@ -75,3 +79,12 @@ def test_agent_intent_update_preserves_latest_hypothesis(tmp_path) -> None:
 
     assert updated.active_hypothesis_id == "model_architecture-h10"
     assert updated.hypothesis_text == "Latest agent-authored hypothesis."
+
+
+def test_generated_paths_match_files_and_directories() -> None:
+    generated = ["mnist/data/", "mnist/pipeline/last_train_metrics.json"]
+
+    assert _is_generated_path("mnist/data/", generated) is True
+    assert _is_generated_path("mnist/data/MNIST/raw/file", generated) is True
+    assert _is_generated_path("mnist/pipeline/last_train_metrics.json", generated) is True
+    assert _is_generated_path("mnist/pipeline/model.py", generated) is False
