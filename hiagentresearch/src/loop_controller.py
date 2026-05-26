@@ -18,6 +18,7 @@ from hiagentresearch.src.orchestrator import REPO_ROOT, init_state, run_group
 
 class GitLike(Protocol):
     def checkout(self, branch: str) -> None: ...
+    def checkout_or_create(self, branch: str, *, base_branch: str = "main") -> None: ...
     def stage_paths(self, paths: list[str]) -> None: ...
     def changed_files(self, *, staged: bool = False) -> list[str]: ...
     def has_core_staged_change(self, *, allowed_paths: list[str], supporting_paths: list[str]) -> bool: ...
@@ -98,7 +99,7 @@ def run_loops(
 
     with contextlib.redirect_stdout(io.StringIO()):
         init_state()
-    git_service.checkout(target_branch)
+    git_service.checkout_or_create(target_branch, base_branch="main")
 
     cycles: list[CycleResult] = []
     for loop_index in range(1, loops + 1):

@@ -24,6 +24,23 @@ class GitService:
     def checkout(self, branch: str) -> None:
         self._run(["checkout", branch])
 
+    def checkout_or_create(self, branch: str, *, base_branch: str = "main") -> None:
+        if self.branch_exists(branch):
+            self.checkout(branch)
+            return
+        self._run(["checkout", base_branch])
+        self._run(["checkout", "-b", branch])
+
+    def branch_exists(self, branch: str) -> bool:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--verify", branch],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return proc.returncode == 0
+
     def changed_files(self, *, staged: bool = False) -> list[str]:
         args = ["diff", "--name-only", "--cached"] if staged else ["status", "--porcelain"]
         result = self._run(args)

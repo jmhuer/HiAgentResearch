@@ -14,6 +14,10 @@ class FakeGit:
     def checkout(self, branch: str) -> None:
         self.branch = branch
 
+    def checkout_or_create(self, branch: str, *, base_branch: str = "main") -> None:
+        self.branch = branch
+        self.base_branch = base_branch
+
     def stage_paths(self, paths: list[str]) -> None:
         self.staged_paths = paths
 
