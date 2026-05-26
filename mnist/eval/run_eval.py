@@ -72,7 +72,7 @@ def main() -> int:
         "--metrics",
         type=Path,
         default=None,
-        help="Optional train metrics JSON (default: pipeline/last_train_metrics.json).",
+        help="Optional train metrics JSON.",
     )
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--quick", action="store_true", help="Evaluate on a small test subset.")
@@ -82,8 +82,7 @@ def main() -> int:
     args = parser.parse_args()
 
     mnist_root = args.mnist_root.resolve()
-    metrics_path = args.metrics or (mnist_root / "pipeline" / "last_train_metrics.json")
-    train_metrics = _load_json(metrics_path) if metrics_path.exists() else {}
+    train_metrics = _load_json(args.metrics) if args.metrics and args.metrics.exists() else {}
 
     checkpoint_path = args.checkpoint or (mnist_root / train_metrics.get("checkpoint", "pipeline/checkpoints/mnist_cnn_ensemble.pt"))
     if not Path(checkpoint_path).is_absolute():

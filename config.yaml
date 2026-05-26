@@ -12,7 +12,6 @@ dependency_files:
 generated_paths:
   - mnist/data/
   - mnist/pipeline/checkpoints/
-  - mnist/pipeline/last_train_metrics.json
 frozen_paths:
   - .hiagentresearch/eval/
 frozen_eval_entrypoint: .hiagentresearch/eval/run_phase1_eval.py

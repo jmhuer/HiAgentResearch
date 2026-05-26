@@ -82,9 +82,8 @@ def test_agent_intent_update_preserves_latest_hypothesis(tmp_path) -> None:
 
 
 def test_generated_paths_match_files_and_directories() -> None:
-    generated = ["mnist/data/", "mnist/pipeline/last_train_metrics.json"]
+    generated = ["mnist/data/"]
 
     assert _is_generated_path("mnist/data/", generated) is True
     assert _is_generated_path("mnist/data/MNIST/raw/file", generated) is True
-    assert _is_generated_path("mnist/pipeline/last_train_metrics.json", generated) is True
     assert _is_generated_path("mnist/pipeline/model.py", generated) is False

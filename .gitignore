@@ -10,7 +10,6 @@ __pycache__/
 # Project-generated training artifacts
 mnist/data/
 mnist/pipeline/checkpoints/
-mnist/pipeline/last_train_metrics.json
 
 # Local credentials
 credentials/

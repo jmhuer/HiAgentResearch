@@ -84,7 +84,7 @@ def main() -> None:
     parser.add_argument("--quick", action="store_true", help="Use a small train subset for fast smoke runs.")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--checkpoint", type=Path, default=None, help="Model checkpoint path.")
-    parser.add_argument("--output", type=Path, default=None, help="Output metrics file path.")
+    parser.add_argument("--output", type=Path, default=None, help="Optional output metrics file path.")
     args = parser.parse_args()
 
     mnist_root = args.mnist_root.resolve()
@@ -190,9 +190,9 @@ def main() -> None:
         "num_sub_networks": args.num_sub_networks,
         "kwta_k": args.kwta_k,
     }
-    out = args.output or (mnist_root / "pipeline" / "last_train_metrics.json")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(metrics))
 
 

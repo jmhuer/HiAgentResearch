@@ -36,7 +36,7 @@ python eval/run_eval.py --accuracy-min 0.985 --latency-ms-max 13.0
 Artifacts:
 
 - `pipeline/checkpoints/mnist_cnn_ensemble.pt` — trained weights
-- `pipeline/last_train_metrics.json` — default train metrics fallback for manual runs
+- train metrics are printed to stdout or written to the explicit `--output` path
 
 ## Goal
 
