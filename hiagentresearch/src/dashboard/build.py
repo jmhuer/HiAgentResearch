@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import urllib.request
 from dataclasses import dataclass
@@ -55,8 +56,14 @@ def build_from_registry(
     registry = Registry(state_dir.resolve())
     registry.init()
     snapshot = registry.dashboard_snapshot()
+    metric_expectations = _metric_expectations(loaded)
+    snapshot["metric_expectations"] = metric_expectations
     database_path = target_dir / "dashboard.db"
-    _write_dashboard_db(source_db=registry.db_path, destination_db=database_path)
+    _write_dashboard_db(
+        source_db=registry.db_path,
+        destination_db=database_path,
+        metric_expectations=metric_expectations,
+    )
     _copy_static_assets(target_dir)
     _copy_sqlite_runtime_assets(target_dir, require=require_sqlite_assets)
     return _write_dashboard_files(
@@ -116,6 +123,7 @@ def _write_dashboard_files(
         "database": "dashboard.db",
         "snapshot": "dashboard.json",
         "summary": "summary.json",
+        "repository": _repository_metadata(config),
         "sqlite": {
             "adapter": "sql.js-httpvfs",
             "url": "dashboard.db",
@@ -141,7 +149,12 @@ def _write_dashboard_files(
     )
 
 
-def _write_dashboard_db(*, source_db: Path, destination_db: Path) -> None:
+def _write_dashboard_db(
+    *,
+    source_db: Path,
+    destination_db: Path,
+    metric_expectations: list[dict[str, Any]],
+) -> None:
     if destination_db.exists():
         destination_db.unlink()
     source = sqlite3.connect(source_db)
@@ -160,6 +173,22 @@ def _write_dashboard_db(*, source_db: Path, destination_db: Path) -> None:
                 f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
                 rows,
             )
+        destination.executemany(
+            """
+            INSERT INTO metric_expectations (group_id, metric_name, min_value, max_value, source)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["group_id"],
+                    row["metric_name"],
+                    row.get("min"),
+                    row.get("max"),
+                    row["source"],
+                )
+                for row in metric_expectations
+            ],
+        )
         destination.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('dashboard_schema_version', ?)",
             (str(DASHBOARD_SCHEMA_VERSION),),
@@ -222,11 +251,20 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL,
             PRIMARY KEY (run_id, artifact_path)
         );
+        CREATE TABLE metric_expectations (
+            group_id TEXT NOT NULL,
+            metric_name TEXT NOT NULL,
+            min_value REAL,
+            max_value REAL,
+            source TEXT NOT NULL,
+            PRIMARY KEY (group_id, metric_name)
+        );
         CREATE UNIQUE INDEX idx_dashboard_metrics_run_name ON metrics(run_id, metric_name);
         CREATE INDEX idx_dashboard_runs_group_created ON runs(group_id, created_at);
         CREATE INDEX idx_dashboard_metrics_group_name ON metrics(metric_name, run_id);
         CREATE INDEX idx_dashboard_outcomes_outcome ON research_outcomes(research_outcome, improved_baseline);
         CREATE INDEX idx_dashboard_experiments_group ON experiments(group_id, loop_index);
+        CREATE INDEX idx_dashboard_expectations_metric ON metric_expectations(metric_name, group_id);
         CREATE VIEW latest_group_summary AS
             WITH latest AS (
                 SELECT *
@@ -277,6 +315,72 @@ def _copy_sqlite_runtime_assets(output_dir: Path, *, require: bool) -> None:
         except OSError:
             if require:
                 raise
+
+
+def _metric_expectations(config: HiAgentResearchConfig) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for group in config.research_groups:
+        eval_config = group.evaluation or config.evaluation
+        source = "group" if group.evaluation else "global"
+        for metric_name, expectation in sorted(eval_config.success_metrics.items()):
+            rows.append(
+                {
+                    "group_id": group.id,
+                    "metric_name": metric_name,
+                    "min": expectation.min,
+                    "max": expectation.max,
+                    "source": source,
+                }
+            )
+    return rows
+
+
+def _repository_metadata(config: HiAgentResearchConfig) -> dict[str, str]:
+    import os
+
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    if repository:
+        web_url = f"{server_url}/{repository}"
+    else:
+        web_url = _normalize_github_remote(_git_remote_url(config.github.remote))
+        repository = _repository_slug(web_url)
+    return {
+        "web_url": web_url,
+        "repository": repository,
+        "commit_url_template": f"{web_url}/commit/{{commit_sha}}" if web_url else "",
+        "branch_url_template": f"{web_url}/tree/{{branch}}" if web_url else "",
+        "workflow_run_url_template": f"{web_url}/actions/runs/{{workflow_run_id}}" if web_url else "",
+    }
+
+
+def _git_remote_url(remote: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", remote],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+    return result.stdout.strip()
+
+
+def _normalize_github_remote(remote_url: str) -> str:
+    if not remote_url:
+        return ""
+    cleaned = remote_url.removesuffix(".git")
+    if cleaned.startswith("git@github.com:"):
+        return f"https://github.com/{cleaned.removeprefix('git@github.com:')}"
+    return cleaned
+
+
+def _repository_slug(web_url: str) -> str:
+    prefix = "https://github.com/"
+    if web_url.startswith(prefix):
+        return web_url.removeprefix(prefix)
+    return ""
 
 
 def _ingest_artifact_root(*, registry: Registry, config: HiAgentResearchConfig, artifact_root: Path) -> int:

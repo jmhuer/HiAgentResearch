@@ -7,7 +7,9 @@ from hiagentresearch.src.dashboard.cli import main
 from hiagentresearch.src.registry import Registry
 
 
-def test_dashboard_build_outputs_sanitized_bundle(tmp_path) -> None:
+def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "jmhuer/HiAgentResearch")
     state_dir = tmp_path / "state"
     registry = _seed_registry(state_dir)
     artifact = tmp_path / "stdout.txt"
@@ -24,14 +26,33 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path) -> None:
     assert manifest["dashboard_schema_version"] == 1
     assert manifest["sqlite"]["worker_url"] == "sqlite.worker.js"
     assert manifest["sqlite"]["wasm_url"] == "sql-wasm.wasm"
+    assert manifest["repository"]["commit_url_template"] == "https://github.com/jmhuer/HiAgentResearch/commit/{commit_sha}"
+    assert manifest["repository"]["workflow_run_url_template"] == "https://github.com/jmhuer/HiAgentResearch/actions/runs/{workflow_run_id}"
     snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
     assert snapshot["metric_names"] == ["accuracy", "latency_ms"]
     assert snapshot["experiments"][0]["hypothesis_id"] == "h1"
+    assert {
+        "group_id": "model_architecture",
+        "metric_name": "accuracy",
+        "min": 0.985,
+        "max": None,
+        "source": "global",
+    } in snapshot["metric_expectations"]
 
     conn = sqlite3.connect(result.database_path)
     try:
         assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM metric_series").fetchone()[0] == 2
+        assert (
+            conn.execute(
+                """
+                SELECT min_value
+                FROM metric_expectations
+                WHERE group_id = 'model_architecture' AND metric_name = 'accuracy'
+                """
+            ).fetchone()[0]
+            == 0.985
+        )
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'intent_packets'").fetchone() is None
     finally:
         conn.close()

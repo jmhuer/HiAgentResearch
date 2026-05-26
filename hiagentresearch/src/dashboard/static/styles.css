@@ -123,6 +123,12 @@ h2 {
   border-top: 1px solid var(--line);
 }
 
+.metric-row strong,
+.run-button,
+.detail {
+  overflow-wrap: anywhere;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -168,8 +174,30 @@ select {
 }
 
 .chart {
+  position: relative;
   min-height: 340px;
   margin-top: 20px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
 }
 
 .metric-svg {
@@ -188,6 +216,47 @@ select {
   font-size: 12px;
 }
 
+.metric-point {
+  cursor: pointer;
+  stroke: var(--bg);
+  stroke-width: 1.5;
+}
+
+.metric-point:hover,
+.metric-point.active {
+  stroke: var(--text);
+  stroke-width: 3;
+}
+
+.target-line line {
+  stroke: var(--warn);
+  stroke-dasharray: 7 7;
+}
+
+.target-line text {
+  fill: var(--warn);
+}
+
+.chart-tooltip {
+  position: absolute;
+  z-index: 4;
+  max-width: min(360px, calc(100vw - 64px));
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--text);
+  background: rgba(9, 11, 18, 0.95);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.chart-tooltip span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .grid {
   grid-template-columns: minmax(280px, 0.9fr) minmax(340px, 1.1fr);
   align-items: start;
@@ -198,6 +267,9 @@ select {
   display: grid;
   gap: 10px;
   margin-top: 16px;
+  max-height: min(640px, 72vh);
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .run-button {
@@ -217,10 +289,21 @@ select {
   background: rgba(137, 180, 255, 0.12);
 }
 
+.run-meta {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
 .detail {
   display: grid;
   gap: 14px;
   margin-top: 16px;
+}
+
+.grid > .panel:last-child {
+  position: sticky;
+  top: 18px;
 }
 
 .detail-block {
@@ -234,6 +317,29 @@ select {
   margin-bottom: 6px;
 }
 
+.detail-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-links strong {
+  flex-basis: 100%;
+}
+
+.detail-links a {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--accent);
+  text-decoration: none;
+  background: rgba(137, 180, 255, 0.08);
+}
+
+.detail-links a:hover {
+  border-color: var(--accent);
+}
+
 @media (max-width: 820px) {
   .hero,
   .grid,
@@ -243,5 +349,9 @@ select {
 
   .controls {
     flex-wrap: wrap;
+  }
+
+  .grid > .panel:last-child {
+    position: static;
   }
 }
