@@ -86,8 +86,8 @@ def normalize_pytest_eval(stdout: str, stderr: str, exit_code: int) -> Normalize
 def normalize_eval(parser: str, stdout: str, stderr: str, exit_code: int) -> NormalizedEvalResult:
     if parser == "mnist_json_stdout":
         return normalize_mnist_eval(stdout=stdout, exit_code=exit_code)
-    if parser == "mnist_phase1_json_stdout":
-        return normalize_phase1_eval_json(stdout=stdout, exit_code=exit_code)
+    if parser in {"canonical_json_stdout", "mnist_phase1_json_stdout"}:
+        return normalize_canonical_json_stdout(stdout=stdout, exit_code=exit_code)
     if parser == "pytest_exit_code":
         return normalize_pytest_eval(stdout=stdout, stderr=stderr, exit_code=exit_code)
     raise ArtifactParseError(f"Unknown parser profile: {parser}")
@@ -114,7 +114,7 @@ def _extract_pytest_pass_count(stdout: str) -> int | None:
     return None
 
 
-def normalize_phase1_eval_json(stdout: str, exit_code: int) -> NormalizedEvalResult:
+def normalize_canonical_json_stdout(stdout: str, exit_code: int) -> NormalizedEvalResult:
     payload = _extract_json(stdout)
     failure_class = classify_failure(exit_code, payload)
     return NormalizedEvalResult(
@@ -124,6 +124,10 @@ def normalize_phase1_eval_json(stdout: str, exit_code: int) -> NormalizedEvalRes
         failure_class=failure_class,
         raw=payload,
     )
+
+
+def normalize_phase1_eval_json(stdout: str, exit_code: int) -> NormalizedEvalResult:
+    return normalize_canonical_json_stdout(stdout=stdout, exit_code=exit_code)
 
 
 def _as_float_or_none(value: Any) -> float | None:

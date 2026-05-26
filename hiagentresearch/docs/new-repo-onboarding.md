@@ -10,6 +10,7 @@ HiAgentResearch uses one small root `config.yaml` to stitch a project into the r
    - `workdir`
    - `editable_paths`
    - `frozen_eval_entrypoint`
+   - `agent_tools.validation_commands`
    - `evaluation.command_template`
    - `evaluation.parser`
    - `research_groups`
@@ -44,6 +45,7 @@ hiagentresearch status --group-id model_architecture
 ## Contract Boundaries
 
 - Agents may inspect code, use tools, form hypotheses, and edit configured `editable_paths`.
+- Agents may run configured validation commands for local feedback.
 - Agents may write run-local observability artifacts under `.hiagentresearch/runs/<run_id>/`.
 - Agents must not edit frozen eval adapters.
 - GitHub Actions is the committed-branch eval authority.
@@ -59,3 +61,11 @@ Research groups keep cycling until configured output expectations and metric bou
 - `continue` when evidence supports another iteration.
 
 Do not patch around failures with special-case guardrails. If a boundary is missing, fix the canonical contract: config schema, eval adapter, registry invariant, or operator command.
+
+## Eval Setup
+
+Use project-owned validation commands for cheap agent feedback, for example unit
+tests or smoke evals under the workdir. Keep the final judge in the frozen eval
+adapter and have it print canonical JSON. Prefer `evaluation.parser:
+canonical_json_stdout`; only add a parser profile when a truly reusable output
+format cannot be adapted in the frozen eval file.

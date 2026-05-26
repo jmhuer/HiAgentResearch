@@ -31,6 +31,13 @@ class EvaluationSpec:
 
 
 @dataclass(slots=True)
+class AgentValidationCommand:
+    name: str
+    command: str
+    description: str = ""
+
+
+@dataclass(slots=True)
 class ResearchGroup:
     id: str
     branch: str
@@ -42,6 +49,7 @@ class ResearchGroup:
     supporting_artifacts: list[str] = field(default_factory=list)
     supporting_artifact_instructions: dict[str, str] = field(default_factory=dict)
     research_output_expectations: list[str] = field(default_factory=list)
+    validation_commands: list[AgentValidationCommand] = field(default_factory=list)
     generated_paths: list[str] = field(default_factory=list)
     frozen_paths: list[str] = field(default_factory=list)
 

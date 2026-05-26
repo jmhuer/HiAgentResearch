@@ -1,6 +1,7 @@
 from hiagentresearch.src.artifact_schema import (
     classify_non_json_failure,
     normalize_eval,
+    normalize_canonical_json_stdout,
     normalize_phase1_eval_json,
     normalize_mnist_eval,
     normalize_pytest_eval,
@@ -52,6 +53,17 @@ def test_normalize_phase1_eval_json() -> None:
     assert result.to_metrics()["accuracy"] == 0.99
 
 
+def test_normalize_canonical_json_stdout() -> None:
+    stdout = (
+        '{"passed": true, "execution_passed": true, "accuracy": 0.99, '
+        '"latency_ms": 2.0, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
+    )
+    result = normalize_canonical_json_stdout(stdout=stdout, exit_code=0)
+    assert result.passed is True
+    assert result.failure_class == "none"
+    assert result.raw["tests_passed"] == 2
+
+
 def test_normalize_phase1_eval_json_keeps_regression_as_clean_execution() -> None:
     stdout = (
         '{"passed": false, "execution_passed": true, "accuracy": 0.89, '
@@ -67,5 +79,5 @@ def test_normalize_eval_dispatch_phase1_json() -> None:
         '{"passed": true, "execution_passed": true, "accuracy": 0.99, '
         '"latency_ms": 2.0, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
     )
-    result = normalize_eval(parser="mnist_phase1_json_stdout", stdout=stdout, stderr="", exit_code=0)
+    result = normalize_eval(parser="canonical_json_stdout", stdout=stdout, stderr="", exit_code=0)
     assert result.passed is True

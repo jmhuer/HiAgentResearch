@@ -28,6 +28,7 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 - editable paths,
 - project-owned dependency files,
 - frozen eval entrypoint,
+- agent validation commands,
 - eval command template and parser,
 - research groups,
 - artifact contract,
@@ -36,6 +37,19 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 
 Core runtime code should stay project-agnostic. If a project needs different files, prompts, or eval behavior, change config or the frozen eval adapter rather than hardcoding a new path in Python.
 Project experiments may add dependencies through their configured requirements file; do not add experiment-only packages to the core runtime dependencies.
+
+## Eval Abstraction
+
+Agent validation commands are optional feedback tools. They can run unit tests,
+smoke training, quick evals, or import checks during an agent cycle, and they may
+call editable project eval code. They are not the final authority.
+
+The frozen eval command is the final authority. It lives outside editable project
+paths, runs locally during the control loop, and runs again in GitHub Actions on
+the committed research branch. It should emit canonical JSON to stdout. The
+generic `canonical_json_stdout` parser deterministically extracts metrics and
+execution health from that JSON; project-specific report quirks belong in the
+frozen adapter, not in core orchestration.
 
 ## Experiment Memory
 

@@ -24,4 +24,7 @@ def test_prompt_is_config_backed() -> None:
     assert "mnist/pipeline/research_hypotheses.py" not in prompt
     assert "Do not create branch-memory source files" in prompt
     assert "configured core experiment files" in prompt.lower()
+    assert "Optional validation commands" in prompt
+    assert "kwta_unit_tests" in prompt
+    assert "GitHub final eval remains authoritative" in prompt
     assert "core MNIST" not in prompt

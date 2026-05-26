@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from hiagentresearch.src.models import EvaluationSpec, ResearchGroup
+from hiagentresearch.src.models import AgentValidationCommand, EvaluationSpec, ResearchGroup
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,6 +27,16 @@ class EvaluationConfig(BaseModel):
     command_template: str
     parser: str
     success_metrics: dict[str, MetricExpectation] = Field(default_factory=dict)
+
+
+class AgentValidationCommandConfig(BaseModel):
+    name: str
+    command: str
+    description: str = ""
+
+
+class AgentToolsConfig(BaseModel):
+    validation_commands: list[AgentValidationCommandConfig] = Field(default_factory=list)
 
 
 class ArtifactContract(BaseModel):
@@ -100,6 +110,7 @@ class HiAgentResearchConfig(BaseModel):
     artifact_contract: ArtifactContract
     policy_modes: dict[str, str]
     github: GitHubConfig = Field(default_factory=GitHubConfig)
+    agent_tools: AgentToolsConfig = Field(default_factory=AgentToolsConfig)
     agent_contract: AgentContractConfig = Field(default_factory=AgentContractConfig)
 
     @field_validator("editable_paths")
@@ -198,6 +209,14 @@ class HiAgentResearchConfig(BaseModel):
             supporting_artifacts=[artifact.path for artifact in supporting],
             supporting_artifact_instructions={artifact.path: artifact.instruction for artifact in supporting},
             research_output_expectations=list(expectations),
+            validation_commands=[
+                AgentValidationCommand(
+                    name=tool.name,
+                    command=tool.command,
+                    description=tool.description,
+                )
+                for tool in self.agent_tools.validation_commands
+            ],
             generated_paths=list(self.generated_paths),
             frozen_paths=list(self.all_frozen_paths()),
         )
@@ -268,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
                     "ok": True,
                     "project_id": config.project_id,
                     "groups": [group.id for group in config.research_groups],
+                    "agent_validation_tools": [tool.name for tool in config.agent_tools.validation_commands],
                     "required_artifacts": config.artifact_contract.required,
                 },
                 indent=2,

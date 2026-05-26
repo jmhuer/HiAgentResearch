@@ -54,3 +54,7 @@ The run command writes visibility artifacts under:
 - `.hiagentresearch/experiments/<group_id>/<run_id>.json` on research branches
 
 Project-specific context, editable paths, eval commands, artifact requirements, and quality retry expectations are generated from `config.yaml`.
+
+Agent validation commands in `config.yaml` are local feedback tools. The frozen
+eval adapter remains the final authority and should emit canonical JSON for the
+generic parser.

@@ -12,6 +12,7 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
     context_text = _bullets(group.context_paths)
     core_paths_text = _bullets(core_paths)
     generated_paths_text = _bullets(group.generated_paths)
+    validation_commands_text = _validation_commands_text(group)
     supporting_text = _supporting_artifacts_text(group)
     supporting_step = (
         "5) Update configured supporting artifacts when applicable, following their instructions.\n"
@@ -58,13 +59,16 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
         f"{supporting_text}\n\n"
         "Configured generated paths (may be created while testing, never commit as source changes):\n"
         f"{generated_paths_text}\n\n"
+        "Optional validation commands for your own feedback (not final authority):\n"
+        f"{validation_commands_text}\n\n"
         "Research output expectations:\n"
         f"{expectations_text}\n\n"
         "Constraints:\n"
         "- Keep edits inside configured allowed paths plus run-local observability files.\n"
-        "- Do not edit frozen eval entrypoints or runtime config unless explicitly configured.\n"
+        "- Do not edit frozen eval entrypoints or runtime config.\n"
         "- Do not delete previous research entries.\n"
         "- Keep edits minimal, reversible, and syntactically valid.\n"
+        "- You may run configured validation commands for feedback; GitHub final eval remains authoritative.\n"
         "- If you add or change project dependencies, install the configured requirements file before validation.\n"
         "- If previous output did not improve baseline, treat that as evidence and continue or pivot using the intent packet.\n"
         "- Only revert when the current branch state is a worse basis for future research.\n"
@@ -90,4 +94,14 @@ def _supporting_artifacts_text(group: ResearchGroup) -> str:
         instruction = group.supporting_artifact_instructions.get(path, "")
         suffix = f": {instruction}" if instruction else ""
         lines.append(f"- {path}{suffix}")
+    return "\n".join(lines)
+
+
+def _validation_commands_text(group: ResearchGroup) -> str:
+    if not group.validation_commands:
+        return "- (none configured)"
+    lines = []
+    for tool in group.validation_commands:
+        suffix = f" - {tool.description}" if tool.description else ""
+        lines.append(f"- {tool.name}: `{tool.command}`{suffix}")
     return "\n".join(lines)

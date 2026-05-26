@@ -18,7 +18,7 @@ frozen_paths:
 frozen_eval_entrypoint: .hiagentresearch/eval/run_phase1_eval.py
 evaluation:
   command_template: "python {frozen_eval_entrypoint} --mnist-root mnist --quick"
-  parser: mnist_phase1_json_stdout
+  parser: canonical_json_stdout
   success_metrics:
     accuracy:
       min: 0.985
@@ -48,6 +48,14 @@ github:
   remote: origin
   run_lookup_attempts: 30
   run_lookup_sleep_sec: 3
+agent_tools:
+  validation_commands:
+    - name: kwta_unit_tests
+      command: "python -m pytest -q mnist/pipeline/test_kwta.py"
+      description: "Fast code correctness feedback for the model support code."
+    - name: quick_train_eval
+      command: "python mnist/pipeline/train.py --quick && python mnist/eval/run_eval.py --quick"
+      description: "Optional local feedback; GitHub still runs the frozen final eval."
 agent_contract:
   guidance_files:
     - hiagentresearch/AGENTS.md

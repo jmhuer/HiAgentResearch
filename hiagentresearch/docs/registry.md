@@ -29,6 +29,8 @@ Runtime state is intentionally SQLite-only; durable experiment intent belongs in
 - `artifacts` records artifact paths, types, hashes, and sizes without embedding large payloads in the database.
 
 This keeps the database useful for humans and dashboards while keeping agent context small.
+Metric rows come from deterministic parser output. Prefer frozen eval adapters
+that emit canonical JSON and `evaluation.parser: canonical_json_stdout`.
 
 ## Phase 2 Ambition
 
