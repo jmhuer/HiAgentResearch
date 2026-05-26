@@ -29,6 +29,7 @@ Produce a real, hypothesis-driven experiment with planning artifacts before code
 - Do not skip planning artifacts.
 - Do not make marker-only runs.
 - Do not create branch-memory Python files for hypotheses or markers.
+- Add project experiment dependencies to the configured requirements file when needed.
 - Keep edits small, reversible, and syntax-safe.
 - Treat metric regressions as research evidence, not execution failures.
 - Keep retrying through repair, pivot, reset, or continue decisions until configured output expectations are met or the group is explicitly blocked.

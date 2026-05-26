@@ -1,6 +1,7 @@
 project_id: mnist
 workdir: .
 editable_paths:
+  - mnist/requirements.txt
   - mnist/pipeline/model.py
   - mnist/pipeline/train.py
   - mnist/pipeline/train_optuna.py
@@ -49,6 +50,7 @@ agent_contract:
     - hiagentresearch/AGENTS.md
     - hiagentresearch/skills/phase1-experiment-cycle/SKILL.md
   context_paths:
+    - mnist/requirements.txt
     - mnist/baseline.json
     - mnist/pipeline/model.py
     - mnist/pipeline/train.py
@@ -67,6 +69,7 @@ research_groups:
     objective: Improve model architecture while preserving latency budget.
     policy_mode: explore
     allowed_paths:
+      - mnist/requirements.txt
       - mnist/pipeline/model.py
       - mnist/pipeline/train.py
       - mnist/eval/run_eval.py
@@ -75,6 +78,7 @@ research_groups:
     objective: Improve training dynamics through hyperparameter exploration.
     policy_mode: explore
     allowed_paths:
+      - mnist/requirements.txt
       - mnist/pipeline/train.py
       - mnist/pipeline/train_optuna.py
   - id: data_augmentation
@@ -82,6 +86,7 @@ research_groups:
     objective: Improve robustness and accuracy using targeted augmentation strategy.
     policy_mode: explore
     allowed_paths:
+      - mnist/requirements.txt
       - mnist/pipeline/train.py
       - mnist/pipeline/model.py
       - mnist/eval/run_eval.py
@@ -90,6 +95,7 @@ research_groups:
     objective: Improve optimization strategy and training efficiency tradeoffs.
     policy_mode: exploit
     allowed_paths:
+      - mnist/requirements.txt
       - mnist/pipeline/train.py
       - mnist/pipeline/train_optuna.py
       - mnist/pipeline/kwta.py

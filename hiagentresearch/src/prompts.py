@@ -65,6 +65,7 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
         "- Do not edit frozen eval entrypoints or runtime config unless explicitly configured.\n"
         "- Do not delete previous research entries.\n"
         "- Keep edits minimal, reversible, and syntactically valid.\n"
+        "- If you add or change project dependencies, install the configured requirements file before validation.\n"
         "- If previous output did not improve baseline, treat that as evidence and continue or pivot using the intent packet.\n"
         "- Only revert when the current branch state is a worse basis for future research.\n"
     )

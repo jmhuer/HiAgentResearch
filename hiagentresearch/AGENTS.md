@@ -16,6 +16,7 @@ This project uses a Cursor-first phase-1 research loop with a thin Python contro
 ## Editing boundaries
 
 - Keep code edits inside configured `allowed_paths` and run-local observability artifacts.
+- If an experiment needs a project dependency, add it to the configured project requirements file instead of core runtime dependencies.
 - Prefer minimal changes with explicit hypotheses and rollback plan.
 - Do not claim successful research without evaluation outputs.
 - If a valid experiment does not improve baseline, record the outcome as evidence and continue through the intent packet (`repair`, `pivot`, `reset`, or `continue`) until output quality matches expectations or the group is explicitly blocked.

@@ -13,6 +13,8 @@ def test_load_root_config() -> None:
     assert "mnist/data/" in config.generated_paths
     assert "metrics.json" in config.artifact_contract.required
     assert "model_architecture" in config.research_groups_by_id()
+    assert "mnist/requirements.txt" in config.editable_paths
+    assert "mnist/requirements.txt" in config.group_by_id("model_architecture").allowed_paths
     assert config.agent_contract.supporting_artifacts == []
     assert "mnist/pipeline/research_hypotheses.py" not in config.editable_paths
 
