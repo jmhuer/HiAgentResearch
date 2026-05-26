@@ -2,6 +2,9 @@ name: hiagentresearch-dashboard
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["hiagentresearch-research-eval"]
+    types: [completed]
 
 permissions:
   contents: read
