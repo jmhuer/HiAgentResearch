@@ -70,7 +70,7 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
         "- Keep edits minimal, reversible, and syntactically valid.\n"
         "- You may run configured validation commands for feedback; GitHub final eval remains authoritative.\n"
         "- If you add or change project dependencies, install the configured requirements file before validation.\n"
-        "- If previous output did not improve baseline, treat that as evidence and continue or pivot using the intent packet.\n"
+        "- If previous output did not improve the configured baseline, treat that as evidence and continue or pivot using the intent packet.\n"
         "- Only revert when the current branch state is a worse basis for future research.\n"
     )
 

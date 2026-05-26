@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate trained MNIST model and check gate thresholds against baseline."""
+"""Evaluate trained MNIST model and optionally check configured thresholds."""
 
 from __future__ import annotations
 
@@ -77,10 +77,11 @@ def main() -> int:
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--quick", action="store_true", help="Evaluate on a small test subset.")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--accuracy-min", type=float, default=None)
+    parser.add_argument("--latency-ms-max", type=float, default=None)
     args = parser.parse_args()
 
     mnist_root = args.mnist_root.resolve()
-    baseline = _load_json(mnist_root / "baseline.json")
     metrics_path = args.metrics or (mnist_root / "pipeline" / "last_train_metrics.json")
     train_metrics = _load_json(metrics_path) if metrics_path.exists() else {}
 
@@ -111,9 +112,13 @@ def main() -> int:
     pr_f1_metrics = _precision_recall_f1(all_labels, all_preds)
     conf_matrix = _confusion_matrix(all_labels, all_preds)
 
-    acc_ok = accuracy >= float(baseline["accuracy"])
-    lat_ok = latency_ms <= float(baseline["latency_ms"])
+    acc_ok = True if args.accuracy_min is None else accuracy >= args.accuracy_min
+    lat_ok = True if args.latency_ms_max is None else latency_ms <= args.latency_ms_max
     passed = acc_ok and lat_ok
+    thresholds = {
+        "accuracy_min": args.accuracy_min,
+        "latency_ms_max": args.latency_ms_max,
+    }
     report = {
         "passed": passed,
         "accuracy": round(accuracy, 6),
@@ -124,7 +129,7 @@ def main() -> int:
         "confusion_matrix": conf_matrix,
         "accuracy_ok": acc_ok,
         "latency_ok": lat_ok,
-        "baseline": baseline,
+        "thresholds": thresholds,
         "train_metrics": train_metrics,
         "checkpoint": str(checkpoint_path.relative_to(mnist_root)),
     }

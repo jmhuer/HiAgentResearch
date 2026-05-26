@@ -2,9 +2,10 @@
 
 Example project workspace for HiAgentControl hierarchical planning.
 
-## Baseline
+## Target Metrics
 
-See `baseline.json`:
+Gate thresholds live in the root `config.yaml` so the framework has one source
+of truth for research outcomes:
 
 - accuracy: 0.985
 - latency_ms: 13.0
@@ -15,32 +16,31 @@ See `baseline.json`:
 | --- | --- |
 | `pipeline/` | **Executable code** — training, builds, experiments that will be run |
 | `eval/` | **Verification** — scripts and checks that test whether pipeline output meets targets |
-| `baseline.json` | Gate thresholds for accuracy and latency |
 
 ## Runnable entrypoints
 
 ```bash
 cd mnist
 python -m pip install -r requirements.txt
-python pipeline/train.py --quick          # fast smoke train
-python eval/run_eval.py --quick           # re-measure and gate-check
+python pipeline/train.py --quick --output /tmp/hiagentresearch_mnist_train_metrics.json
+python eval/run_eval.py --quick --metrics /tmp/hiagentresearch_mnist_train_metrics.json
 ```
 
 Full training (downloads MNIST to `data/`):
 
 ```bash
 python pipeline/train.py --epochs 3
-python eval/run_eval.py
+python eval/run_eval.py --accuracy-min 0.985 --latency-ms-max 13.0
 ```
 
 Artifacts:
 
-- `pipeline/checkpoints/mnist_cnn.pt` — trained weights
-- `pipeline/last_train_metrics.json` — metrics written by training
+- `pipeline/checkpoints/mnist_cnn_ensemble.pt` — trained weights
+- `pipeline/last_train_metrics.json` — default train metrics fallback for manual runs
 
 ## Goal
 
-Improve test accuracy above the baseline without increasing inference latency beyond 13 ms.
+Improve test accuracy above the configured target without increasing inference latency beyond 13 ms.
 
 ## HiAgentResearch loop
 

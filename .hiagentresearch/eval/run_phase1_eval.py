@@ -9,12 +9,17 @@ baseline while still producing useful evidence for the next loop.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
+
+from hiagentresearch.src.config import load_config
 
 
 def _parse_pytest_counts(stdout: str) -> tuple[int, int]:
@@ -53,41 +58,76 @@ def _tail(text: str, *, limit: int = 4000) -> str:
     return text[-limit:] if len(text) > limit else text
 
 
+def _metric_thresholds(group_id: str = "model_architecture") -> dict[str, float | None]:
+    config = load_config()
+    group = config.group_by_id(group_id)
+    eval_config = group.evaluation or config.evaluation
+    accuracy = eval_config.success_metrics.get("accuracy")
+    latency = eval_config.success_metrics.get("latency_ms")
+    return {
+        "accuracy_min": accuracy.min if accuracy else None,
+        "latency_ms_max": latency.max if latency else None,
+    }
+
+
+@contextlib.contextmanager
+def _train_metrics_path() -> Path:
+    run_dir = os.environ.get("HIAGENTRESEARCH_RUN_DIR")
+    if run_dir:
+        path = Path(run_dir) / "train_metrics.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        yield path
+        return
+    with tempfile.TemporaryDirectory(prefix="hiagentresearch-mnist-eval-") as tmp:
+        yield Path(tmp) / "train_metrics.json"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run phase-1 MNIST eval contract.")
     parser.add_argument("--mnist-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--group-id", default="model_architecture")
     parser.add_argument("--quick", action="store_true", help="Use quick train/eval settings for loop feedback.")
     args = parser.parse_args()
 
     root = args.mnist_root.resolve()
     repo_root = root.parents[0]
-    baseline_path = root / "baseline.json"
-    baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
+    thresholds = _metric_thresholds(args.group_id)
 
     # Keep the selection narrow and stable for phase-1 reproducibility.
     selected_tests = ["mnist/pipeline/test_kwta.py"]
     start = time.perf_counter()
     test_proc = _run([sys.executable, "-m", "pytest", "-q", *selected_tests], cwd=repo_root)
-    train_cmd = [sys.executable, "mnist/pipeline/train.py"]
-    eval_cmd = [sys.executable, "mnist/eval/run_eval.py"]
-    if args.quick:
-        train_cmd.append("--quick")
-        eval_cmd.append("--quick")
-    train_proc = _run(train_cmd, cwd=repo_root) if test_proc.returncode == 0 else None
-    eval_proc = _run(eval_cmd, cwd=repo_root) if train_proc and train_proc.returncode == 0 else None
-    elapsed = time.perf_counter() - start
+    with _train_metrics_path() as train_metrics_path:
+        train_cmd = [sys.executable, "mnist/pipeline/train.py", "--output", str(train_metrics_path)]
+        eval_cmd = [
+            sys.executable,
+            "mnist/eval/run_eval.py",
+            "--metrics",
+            str(train_metrics_path),
+        ]
+        if thresholds["accuracy_min"] is not None:
+            eval_cmd.extend(["--accuracy-min", str(thresholds["accuracy_min"])])
+        if thresholds["latency_ms_max"] is not None:
+            eval_cmd.extend(["--latency-ms-max", str(thresholds["latency_ms_max"])])
+        if args.quick:
+            train_cmd.append("--quick")
+            eval_cmd.append("--quick")
+        train_proc = _run(train_cmd, cwd=repo_root) if test_proc.returncode == 0 else None
+        eval_proc = _run(eval_cmd, cwd=repo_root) if train_proc and train_proc.returncode == 0 else None
+        train_metrics = json.loads(train_metrics_path.read_text(encoding="utf-8")) if train_metrics_path.exists() else {}
+        elapsed = time.perf_counter() - start
 
-    tests_passed, tests_failed = _parse_pytest_counts(test_proc.stdout)
-    tests_ok = test_proc.returncode == 0 and tests_failed == 0 and tests_passed > 0
-    train_ok = bool(train_proc and train_proc.returncode == 0)
+        tests_passed, tests_failed = _parse_pytest_counts(test_proc.stdout)
+        tests_ok = test_proc.returncode == 0 and tests_failed == 0 and tests_passed > 0
+        train_ok = bool(train_proc and train_proc.returncode == 0)
 
-    eval_payload: dict = {}
-    eval_parse_error = ""
-    if eval_proc is not None:
-        try:
-            eval_payload = _extract_json(eval_proc.stdout)
-        except (json.JSONDecodeError, ValueError) as exc:
-            eval_parse_error = str(exc)
+        eval_payload: dict = {}
+        eval_parse_error = ""
+        if eval_proc is not None:
+            try:
+                eval_payload = _extract_json(eval_proc.stdout)
+            except (json.JSONDecodeError, ValueError) as exc:
+                eval_parse_error = str(exc)
 
     eval_executed = eval_proc is not None and bool(eval_payload) and eval_proc.returncode in {0, 2}
     execution_passed = tests_ok and train_ok and eval_executed
@@ -130,7 +170,8 @@ def main() -> int:
         "train_stderr_tail": _tail(train_proc.stderr) if train_proc else "",
         "eval_stdout_tail": _tail(eval_proc.stdout) if eval_proc else "",
         "eval_stderr_tail": _tail(eval_proc.stderr) if eval_proc else "",
-        "baseline": baseline,
+        "thresholds": thresholds,
+        "train_metrics": train_metrics,
         "eval_report": eval_payload,
     }
     print(json.dumps(report, indent=2))

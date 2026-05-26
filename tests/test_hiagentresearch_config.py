@@ -14,6 +14,7 @@ def test_load_root_config() -> None:
     assert "mnist/data/" in config.generated_paths
     assert "metrics.json" in config.artifact_contract.required
     assert config.evaluation.parser == "canonical_json_stdout"
+    assert "--group-id model_architecture" in config.format_eval_command(config.group_by_id("model_architecture"))
     assert config.agent_tools.validation_commands[0].name == "kwta_unit_tests"
     assert "model_architecture" in config.research_groups_by_id()
     assert "mnist/requirements.txt" in config.editable_paths
@@ -21,6 +22,7 @@ def test_load_root_config() -> None:
     assert config.dependency_file_paths(Path(".").resolve())[0].name == "requirements.txt"
     assert "mnist/requirements.txt" in config.group_by_id("model_architecture").allowed_paths
     assert config.agent_contract.supporting_artifacts == []
+    assert "mnist/baseline.json" not in config.agent_contract.context_paths
     assert "mnist/pipeline/research_hypotheses.py" not in config.editable_paths
     group = config.research_groups_by_id()["model_architecture"]
     assert group.validation_commands[0].command.startswith("python -m pytest")

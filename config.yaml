@@ -17,7 +17,7 @@ frozen_paths:
   - .hiagentresearch/eval/
 frozen_eval_entrypoint: .hiagentresearch/eval/run_phase1_eval.py
 evaluation:
-  command_template: "python {frozen_eval_entrypoint} --mnist-root mnist --quick"
+  command_template: "python {frozen_eval_entrypoint} --mnist-root mnist --group-id {group_id} --quick"
   parser: canonical_json_stdout
   success_metrics:
     accuracy:
@@ -37,6 +37,7 @@ artifact_contract:
   optional:
     - parsed_eval.json
     - agent_actions.jsonl
+    - train_metrics.json
     - experiment_intent.json
     - experiment_plan.md
 policy_modes:
@@ -54,7 +55,7 @@ agent_tools:
       command: "python -m pytest -q mnist/pipeline/test_kwta.py"
       description: "Fast code correctness feedback for the model support code."
     - name: quick_train_eval
-      command: "python mnist/pipeline/train.py --quick && python mnist/eval/run_eval.py --quick"
+      command: "python mnist/pipeline/train.py --quick --output /tmp/hiagentresearch_mnist_train_metrics.json && python mnist/eval/run_eval.py --quick --metrics /tmp/hiagentresearch_mnist_train_metrics.json"
       description: "Optional local feedback; GitHub still runs the frozen final eval."
 agent_contract:
   guidance_files:
@@ -62,7 +63,6 @@ agent_contract:
     - hiagentresearch/skills/phase1-experiment-cycle/SKILL.md
   context_paths:
     - mnist/requirements.txt
-    - mnist/baseline.json
     - mnist/pipeline/model.py
     - mnist/pipeline/train.py
   supporting_artifacts: []

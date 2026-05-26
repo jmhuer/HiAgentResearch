@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train MNIST CNN and write metrics for the eval gate."""
+"""Train MNIST CNN and write metrics for downstream evaluation."""
 
 from __future__ import annotations
 
@@ -39,10 +39,6 @@ def pretrain_autoencoder(autoencoder: Autoencoder, loader: DataLoader, device: t
             total_loss += loss.item()
         print(f"Autoencoder Pre-train Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(loader):.4f}")
     print("Autoencoder pre-training finished.")
-
-
-def _load_baseline(mnist_root: Path) -> dict:
-    return json.loads((mnist_root / "baseline.json").read_text(encoding="utf-8"))
 
 
 def _accuracy(model: nn.Module, loader: DataLoader, device: torch.device) -> float:
@@ -92,7 +88,6 @@ def main() -> None:
     args = parser.parse_args()
 
     mnist_root = args.mnist_root.resolve()
-    baseline = _load_baseline(mnist_root)
     device = torch.device(args.device)
 
 
@@ -189,8 +184,6 @@ def main() -> None:
         "accuracy": round(accuracy, 6),
         "latency_ms": round(latency_ms, 4),
         "epochs": args.epochs,
-        "baseline_accuracy": baseline["accuracy"],
-        "baseline_latency_ms": baseline["latency_ms"],
         "checkpoint": str(checkpoint_path.relative_to(mnist_root)),
         "device": str(device),
         "quick_mode": args.quick,

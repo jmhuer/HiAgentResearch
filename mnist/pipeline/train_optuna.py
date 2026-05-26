@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import time
 from pathlib import Path
 
@@ -34,10 +33,6 @@ def pretrain_autoencoder(autoencoder: Autoencoder, loader: DataLoader, device: t
             total_loss += loss.item()
         # print(f"Autoencoder Pre-train Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(loader):.4f}")
     # print("Autoencoder pre-training finished.")
-
-
-def _load_baseline(mnist_root: Path) -> dict:
-    return json.loads((mnist_root / "baseline.json").read_text(encoding="utf-8"))
 
 
 def _accuracy(model: nn.Module, loader: DataLoader, device: torch.device) -> float:

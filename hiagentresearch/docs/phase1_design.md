@@ -51,6 +51,10 @@ generic `canonical_json_stdout` parser deterministically extracts metrics and
 execution health from that JSON; project-specific report quirks belong in the
 frozen adapter, not in core orchestration.
 
+Project metric thresholds live in `config.yaml`. Project eval scripts may emit
+raw metrics, but the frozen adapter is responsible for passing configured
+thresholds and writing run-local train metrics under the active run directory.
+
 ## Experiment Memory
 
 Each run has exactly one canonical hypothesis in `.hiagentresearch/runs/<run_id>/experiment_intent.json`.
@@ -78,7 +82,7 @@ persists the durable experiment manifest on the research branch.
 
 `failure_class` is reserved for execution health: `none`, `infra_failure`,
 `code_failure`, `eval_failure`, or `invalid_cycle`. A valid experiment that
-does not improve baseline is not a failure; it records
+does not improve the configured baseline is not a failure; it records
 `research_outcome=did_not_improve_baseline` and continues adding evidence to
 the research branch unless the agent explicitly chooses a revert.
 

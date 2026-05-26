@@ -531,6 +531,7 @@ def run_group(
     proc = subprocess.run(
         _normalize_python_command(cmd),
         cwd=workdir,
+        env={**os.environ, "HIAGENTRESEARCH_RUN_DIR": str(run_dir)},
         capture_output=True,
         text=True,
         check=False,
