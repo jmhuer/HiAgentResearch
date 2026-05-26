@@ -1,7 +1,4 @@
 const SQL_HTTPVFS_URL = "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/+esm";
-const SQL_WORKER_URL = "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/dist/sqlite.worker.js";
-const SQL_WASM_URL = "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/dist/sql-wasm.wasm";
-const VEGA_EMBED_URL = "https://cdn.jsdelivr.net/npm/vega-embed/+esm";
 
 let dashboardData = null;
 let selectedRunId = null;
@@ -43,13 +40,13 @@ async function loadFromSqlite(manifest) {
         config: {
           serverMode: "full",
           requestChunkSize: manifest.sqlite?.request_chunk_size || 4096,
-          url: manifest.sqlite?.url || manifest.database || "dashboard.db",
+          url: pageUrl(manifest.sqlite?.url || manifest.database || "dashboard.db"),
           cacheBust: manifest.cache_bust || "",
         },
       },
     ],
-    SQL_WORKER_URL,
-    SQL_WASM_URL,
+    pageUrl(manifest.sqlite?.worker_url || "sqlite.worker.js"),
+    pageUrl(manifest.sqlite?.wasm_url || "sql-wasm.wasm"),
     50 * 1024 * 1024,
   );
   const [summary, runs, metrics, outcomes, experiments, artifacts, metricNames] = await Promise.all([
@@ -164,34 +161,7 @@ async function renderChart() {
     container.textContent = "No metric data for this selection.";
     return;
   }
-  try {
-    const { default: vegaEmbed } = await import(VEGA_EMBED_URL);
-    await vegaEmbed(
-      container,
-      {
-        $schema: "https://vega.github.io/schema/vega-lite/v6.json",
-        background: "transparent",
-        data: { values },
-        width: "container",
-        height: 300,
-        mark: { type: "line", point: true, tooltip: true },
-        encoding: {
-          x: { field: "created_at", type: "temporal", title: "Run time" },
-          y: { field: "metric_value", type: "quantitative", title: metricName },
-          color: { value: "#89b4ff" },
-          tooltip: [
-            { field: "run_id", type: "nominal" },
-            { field: "created_at", type: "temporal" },
-            { field: "metric_value", type: "quantitative" },
-          ],
-        },
-      },
-      { actions: false, theme: "dark" },
-    );
-  } catch (error) {
-    console.warn("Vega-Lite unavailable, using SVG fallback", error);
-    renderSvgChart(container, values);
-  }
+  renderSvgChart(container, values, metricName);
 }
 
 function renderRunDetail() {
@@ -233,10 +203,10 @@ function renderRunDetail() {
   `;
 }
 
-function renderSvgChart(container, values) {
-  const width = 760;
+function renderSvgChart(container, values, metricName) {
+  const width = 820;
   const height = 300;
-  const padding = 34;
+  const padding = 44;
   const ys = values.map((value) => value.metric_value);
   const min = Math.min(...ys);
   const max = Math.max(...ys);
@@ -246,8 +216,15 @@ function renderSvgChart(container, values) {
     const y = height - padding - ((value.metric_value - min) / span) * (height - padding * 2);
     return `${x},${y}`;
   });
+  const labels = values.map((value, index) => {
+    const x = padding + (index / Math.max(values.length - 1, 1)) * (width - padding * 2);
+    return `<text x="${x}" y="${height - 8}" text-anchor="middle">${escapeHtml(value.run_id.replace(/^gh_/, ""))}</text>`;
+  });
   container.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Metric chart">
+    <svg class="metric-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(metricName)} metric chart">
+      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}"></line>
+      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}"></line>
+      <text x="${padding}" y="18">${escapeHtml(metricName)}: ${formatMetric(min)} to ${formatMetric(max)}</text>
       <polyline fill="none" stroke="#89b4ff" stroke-width="3" points="${points.join(" ")}"></polyline>
       ${points
         .map((point, index) => {
@@ -255,6 +232,7 @@ function renderSvgChart(container, values) {
           return `<circle cx="${x}" cy="${y}" r="4" fill="#7ee787"><title>${escapeHtml(values[index].run_id)}: ${values[index].metric_value}</title></circle>`;
         })
         .join("")}
+      ${labels.join("")}
     </svg>
   `;
 }
@@ -308,6 +286,10 @@ function parseJson(value, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function pageUrl(path) {
+  return new URL(path, window.location.href).href;
 }
 
 function escapeHtml(value) {

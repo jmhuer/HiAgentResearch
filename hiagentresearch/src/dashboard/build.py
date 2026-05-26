@@ -4,6 +4,7 @@ import json
 import shutil
 import sqlite3
 import tempfile
+import urllib.request
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -15,6 +16,10 @@ from hiagentresearch.src.registry import Registry
 
 DASHBOARD_SCHEMA_VERSION = 1
 STATIC_PACKAGE = "hiagentresearch.src.dashboard.static"
+SQLITE_RUNTIME_ASSETS = {
+    "sqlite.worker.js": "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/dist/sqlite.worker.js",
+    "sql-wasm.wasm": "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/dist/sql-wasm.wasm",
+}
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,7 @@ def build_from_registry(
     output_dir: Path | None = None,
     config: HiAgentResearchConfig | None = None,
     source_label: str = "local_registry",
+    require_sqlite_assets: bool = False,
 ) -> DashboardBuildResult:
     loaded = config or load_config()
     target_dir = (output_dir or loaded.dashboard_output_path()).resolve()
@@ -52,6 +58,7 @@ def build_from_registry(
     database_path = target_dir / "dashboard.db"
     _write_dashboard_db(source_db=registry.db_path, destination_db=database_path)
     _copy_static_assets(target_dir)
+    _copy_sqlite_runtime_assets(target_dir, require=require_sqlite_assets)
     return _write_dashboard_files(
         output_dir=target_dir,
         database_path=database_path,
@@ -66,6 +73,7 @@ def build_from_artifacts(
     artifact_root: Path,
     output_dir: Path | None = None,
     config: HiAgentResearchConfig | None = None,
+    require_sqlite_assets: bool = False,
 ) -> DashboardBuildResult:
     loaded = config or load_config()
     with tempfile.TemporaryDirectory(prefix="hiagentresearch-dashboard-") as tmp:
@@ -80,6 +88,7 @@ def build_from_artifacts(
             output_dir=output_dir or loaded.dashboard_output_path(),
             config=loaded,
             source_label=f"github_artifacts:{ingested}",
+            require_sqlite_assets=require_sqlite_assets,
         )
 
 
@@ -110,6 +119,8 @@ def _write_dashboard_files(
         "sqlite": {
             "adapter": "sql.js-httpvfs",
             "url": "dashboard.db",
+            "worker_url": "sqlite.worker.js",
+            "wasm_url": "sql-wasm.wasm",
             "request_chunk_size": 4096,
         },
         "cache_bust": _sha256(database_path.read_bytes())[:12],
@@ -253,6 +264,19 @@ def _copy_static_assets(output_dir: Path) -> None:
         if asset.is_file():
             with resources.as_file(asset) as source:
                 shutil.copyfile(source, destination)
+
+
+def _copy_sqlite_runtime_assets(output_dir: Path, *, require: bool) -> None:
+    for filename, url in SQLITE_RUNTIME_ASSETS.items():
+        destination = output_dir / filename
+        if destination.exists():
+            continue
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                destination.write_bytes(response.read())
+        except OSError:
+            if require:
+                raise
 
 
 def _ingest_artifact_root(*, registry: Registry, config: HiAgentResearchConfig, artifact_root: Path) -> int:

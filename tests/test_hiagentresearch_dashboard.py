@@ -20,7 +20,10 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path) -> None:
     assert result.database_path.exists()
     assert (output_dir / "index.html").exists()
     assert (output_dir / "app.js").exists()
-    assert json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))["dashboard_schema_version"] == 1
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["dashboard_schema_version"] == 1
+    assert manifest["sqlite"]["worker_url"] == "sqlite.worker.js"
+    assert manifest["sqlite"]["wasm_url"] == "sql-wasm.wasm"
     snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
     assert snapshot["metric_names"] == ["accuracy", "latency_ms"]
     assert snapshot["experiments"][0]["hypothesis_id"] == "h1"

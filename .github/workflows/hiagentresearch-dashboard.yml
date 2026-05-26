@@ -113,7 +113,8 @@ jobs:
         run: |
           hiagentresearch dashboard build-from-artifacts \
             --artifact-root dashboard-artifacts \
-            --output-dir _site
+            --output-dir _site \
+            --require-sqlite-assets
 
       - name: Configure Pages
         if: steps.dashboard_config.outputs.enabled == 'true'

@@ -17,10 +17,12 @@ def build_parser() -> argparse.ArgumentParser:
     build = sub.add_parser("build", help="Build a dashboard bundle from a local registry DB.")
     build.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR)
     build.add_argument("--output-dir", type=Path, default=None)
+    build.add_argument("--require-sqlite-assets", action="store_true")
 
     artifacts = sub.add_parser("build-from-artifacts", help="Build a dashboard bundle from downloaded GitHub artifacts.")
     artifacts.add_argument("--artifact-root", type=Path, required=True)
     artifacts.add_argument("--output-dir", type=Path, default=None)
+    artifacts.add_argument("--require-sqlite-assets", action="store_true")
     return parser
 
 
@@ -32,12 +34,14 @@ def main(argv: list[str] | None = None) -> int:
             state_dir=args.state_dir,
             output_dir=args.output_dir,
             config=config,
+            require_sqlite_assets=args.require_sqlite_assets,
         )
     elif args.cmd == "build-from-artifacts":
         result = build_from_artifacts(
             artifact_root=args.artifact_root,
             output_dir=args.output_dir,
             config=config,
+            require_sqlite_assets=args.require_sqlite_assets,
         )
     else:
         return 1
