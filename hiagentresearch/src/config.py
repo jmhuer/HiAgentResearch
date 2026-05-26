@@ -91,6 +91,7 @@ class HiAgentResearchConfig(BaseModel):
     project_id: str
     workdir: str
     editable_paths: list[str]
+    dependency_files: list[str] = Field(default_factory=list)
     generated_paths: list[str] = Field(default_factory=list)
     frozen_eval_entrypoint: str
     evaluation: EvaluationConfig
@@ -114,6 +115,9 @@ class HiAgentResearchConfig(BaseModel):
             raise ValueError("research group ids must be unique")
 
         editable = set(self.editable_paths)
+        dependency_outside = sorted(path for path in self.dependency_files if path not in editable)
+        if dependency_outside:
+            raise ValueError(f"dependency_files must be listed in editable_paths: {dependency_outside}")
         for group in self.research_groups:
             if group.policy_mode not in self.policy_modes:
                 raise ValueError(f"group {group.id} has unknown policy_mode: {group.policy_mode}")
@@ -131,6 +135,13 @@ class HiAgentResearchConfig(BaseModel):
     def frozen_eval_path(self, root: Path = REPO_ROOT) -> Path:
         path = Path(self.frozen_eval_entrypoint)
         return path if path.is_absolute() else (root / path).resolve()
+
+    def dependency_file_paths(self, root: Path = REPO_ROOT) -> list[Path]:
+        paths: list[Path] = []
+        for dependency_file in self.dependency_files:
+            path = Path(dependency_file)
+            paths.append(path if path.is_absolute() else (root / path).resolve())
+        return paths
 
     def group_by_id(self, group_id: str) -> ResearchGroupConfig:
         for group in self.research_groups:

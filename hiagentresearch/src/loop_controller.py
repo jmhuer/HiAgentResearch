@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import re
+import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -102,6 +103,7 @@ def run_loops(
     git_service = git or GitService(REPO_ROOT)
     github_service = github or GitHubActionsService(REPO_ROOT)
 
+    _install_dependency_files(loaded_config)
     with contextlib.redirect_stdout(io.StringIO()):
         init_state()
     git_service.checkout_or_create(target_branch, base_branch="main")
@@ -243,6 +245,17 @@ def _run_group_capture(run_group_func: RunGroupCallable, **kwargs) -> dict:
         payload = {"ok": False, "error": "could not parse run_group output", "raw_stdout": text}
     payload["exit_code"] = exit_code
     return payload
+
+
+def _install_dependency_files(config: HiAgentResearchConfig) -> None:
+    for dependency_file in config.dependency_file_paths(REPO_ROOT):
+        if not dependency_file.exists():
+            raise FileNotFoundError(f"configured dependency file does not exist: {dependency_file}")
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", str(dependency_file)],
+            cwd=REPO_ROOT,
+            check=True,
+        )
 
 
 def _write_experiment_manifest(

@@ -14,6 +14,8 @@ def test_load_root_config() -> None:
     assert "metrics.json" in config.artifact_contract.required
     assert "model_architecture" in config.research_groups_by_id()
     assert "mnist/requirements.txt" in config.editable_paths
+    assert config.dependency_files == ["mnist/requirements.txt"]
+    assert config.dependency_file_paths(Path(".").resolve())[0].name == "requirements.txt"
     assert "mnist/requirements.txt" in config.group_by_id("model_architecture").allowed_paths
     assert config.agent_contract.supporting_artifacts == []
     assert "mnist/pipeline/research_hypotheses.py" not in config.editable_paths
@@ -56,4 +58,37 @@ research_groups:
     )
 
     with pytest.raises(Exception, match="allowed_paths"):
+        load_config(config_path)
+
+
+def test_config_rejects_dependency_files_outside_editable_contract(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+project_id: demo
+workdir: .
+editable_paths:
+  - src/app.py
+dependency_files:
+  - requirements.txt
+frozen_eval_entrypoint: .hiagentresearch/eval/run.py
+evaluation:
+  command_template: "python .hiagentresearch/eval/run.py"
+  parser: pytest_exit_code
+artifact_contract:
+  required: [metrics.json]
+policy_modes:
+  explore: Explore.
+research_groups:
+  - id: demo
+    branch: research/demo
+    objective: Demo
+    policy_mode: explore
+    allowed_paths:
+      - src/app.py
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(Exception, match="dependency_files"):
         load_config(config_path)

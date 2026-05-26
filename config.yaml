@@ -7,6 +7,8 @@ editable_paths:
   - mnist/pipeline/train_optuna.py
   - mnist/pipeline/kwta.py
   - mnist/eval/run_eval.py
+dependency_files:
+  - mnist/requirements.txt
 generated_paths:
   - mnist/data/
   - mnist/pipeline/checkpoints/

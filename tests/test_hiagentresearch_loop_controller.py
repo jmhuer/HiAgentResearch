@@ -119,6 +119,11 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
         return 0
 
     git = FakeGit()
+    installed = {}
+    monkeypatch.setattr(
+        "hiagentresearch.src.loop_controller._install_dependency_files",
+        lambda config: installed.setdefault("called", True),
+    )
     summary = run_loops(
         group_id="model_architecture",
         branch="research/model-architecture",
@@ -135,6 +140,7 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
     )
 
     assert summary.ok is True
+    assert installed["called"] is True
     assert summary.cycles[0].github_research_outcome == "improved_baseline"
     assert (
         tmp_path / ".hiagentresearch" / "experiments" / "model_architecture" / "run_test.json"
