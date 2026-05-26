@@ -1,9 +1,13 @@
 const SQL_HTTPVFS_URL = "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/+esm";
+const ECHARTS_URL = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.esm.min.js";
 const ALL_GROUPS = "__all__";
 const SERIES_COLORS = ["#89b4ff", "#7ee787", "#f2cc60", "#ff8b8b", "#c9a8ff", "#77d4ff"];
 
 let dashboardData = null;
 let selectedRunId = null;
+let chartInstance = null;
+let echartsModule = null;
+let resizeListenerAttached = false;
 
 async function main() {
   const manifest = await fetchJson("./manifest.json");
@@ -161,7 +165,7 @@ async function renderChart() {
     return;
   }
   const expectations = expectationLines({ groupId, metricName });
-  renderSvgChart(container, values, metricName, expectations);
+  await renderEChart(container, values, metricName, expectations);
 }
 
 function renderRunDetail() {
@@ -208,76 +212,130 @@ function renderRunDetail() {
   `;
 }
 
-function renderSvgChart(container, values, metricName, expectations) {
-  const width = 820;
-  const height = 300;
-  const padding = 44;
-  const ys = [
-    ...values.map((value) => value.metric_value),
-    ...expectations.flatMap((expectation) => [expectation.min, expectation.max]).filter((value) => value !== null && value !== undefined),
-  ];
-  const min = Math.min(...ys);
-  const max = Math.max(...ys);
-  const span = Math.max(max - min, 0.000001);
-  const ordered = values.sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
-  const xForIndex = (index) => padding + (index / Math.max(ordered.length - 1, 1)) * (width - padding * 2);
-  const yForValue = (value) => height - padding - ((value - min) / span) * (height - padding * 2);
-  const pointRows = ordered.map((value, index) => {
-    const x = xForIndex(index);
-    const y = yForValue(value.metric_value);
-    return { ...value, x, y, index };
+async function renderEChart(container, values, metricName, expectations) {
+  const echarts = await loadECharts();
+  let canvas = document.getElementById("metric-chart-canvas");
+  if (!canvas) {
+    container.innerHTML = '<div id="metric-chart-canvas" class="metric-chart-canvas"></div>';
+    canvas = document.getElementById("metric-chart-canvas");
+  }
+  chartInstance = chartInstance && !chartInstance.isDisposed?.() ? chartInstance : echarts.init(canvas, "dark");
+  chartInstance.off("click");
+
+  const ordered = [...values].sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
+  const categories = uniqueInOrder(ordered.map((point) => point.run_id));
+  const grouped = groupBy(ordered, (point) => point.group_id);
+  const targetLines = dedupeExpectationLines(expectations);
+  const domain = metricDomain(ordered, targetLines);
+  const series = Object.entries(grouped).map(([groupId, rows], index) => ({
+    name: groupId,
+    type: "line",
+    smooth: true,
+    symbol: "circle",
+    symbolSize: 9,
+    connectNulls: false,
+    emphasis: { focus: "series" },
+    lineStyle: { width: 3 },
+    itemStyle: { borderColor: "#090b12", borderWidth: 1.5 },
+    data: categories.map((runId) => {
+      const point = rows.find((row) => row.run_id === runId);
+      if (!point) return null;
+      return {
+        value: point.metric_value,
+        point,
+        symbolSize: point.run_id === selectedRunId ? 13 : 9,
+        itemStyle: point.run_id === selectedRunId ? { borderColor: "#f6f7fb", borderWidth: 3 } : undefined,
+      };
+    }),
+    markLine:
+      index === 0 && targetLines.length
+        ? {
+            symbol: "none",
+            silent: true,
+            lineStyle: { color: "#f2cc60", type: "dashed", width: 1.5 },
+            label: {
+              color: "#f2cc60",
+              formatter: (params) => params.name,
+              position: "insideEndTop",
+            },
+            data: targetLines.map((line) => ({ name: line.label, yAxis: line.value })),
+          }
+        : undefined,
+  }));
+
+  chartInstance.setOption(
+    {
+      backgroundColor: "transparent",
+      color: SERIES_COLORS,
+      animationDuration: 450,
+      grid: { left: 52, right: 28, top: 70, bottom: categories.length > 12 ? 72 : 42, containLabel: true },
+      legend: {
+        top: 4,
+        left: 0,
+        textStyle: { color: "#9aa4b2" },
+        icon: "roundRect",
+      },
+      tooltip: {
+        trigger: "item",
+        appendToBody: true,
+        confine: false,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.16)",
+        backgroundColor: "rgba(9,11,18,0.96)",
+        textStyle: { color: "#f6f7fb" },
+        extraCssText: "box-shadow:0 20px 60px rgba(0,0,0,.45);border-radius:14px;padding:12px;",
+        formatter: (params) => pointTooltipHtml(params.data?.point),
+      },
+      xAxis: {
+        type: "category",
+        data: categories,
+        boundaryGap: false,
+        axisLine: { lineStyle: { color: "rgba(255,255,255,0.18)" } },
+        axisTick: { show: false },
+        axisLabel: {
+          color: "#9aa4b2",
+          formatter: shortRunId,
+          hideOverlap: true,
+        },
+      },
+      yAxis: {
+        type: "value",
+        name: metricName,
+        min: domain.min,
+        max: domain.max,
+        nameTextStyle: { color: "#9aa4b2" },
+        splitLine: { lineStyle: { color: "rgba(255,255,255,0.08)" } },
+        axisLabel: { color: "#9aa4b2", formatter: formatMetric },
+      },
+      dataZoom:
+        categories.length > 12
+          ? [
+              { type: "inside", throttle: 50 },
+              {
+                type: "slider",
+                height: 24,
+                bottom: 14,
+                borderColor: "rgba(255,255,255,0.12)",
+                fillerColor: "rgba(137,180,255,0.18)",
+                handleStyle: { color: "#89b4ff" },
+                textStyle: { color: "#9aa4b2" },
+              },
+            ]
+          : [],
+      series,
+    },
+    true,
+  );
+  chartInstance.on("click", (params) => {
+    const point = params.data?.point;
+    if (!point) return;
+    selectRun(point.run_id, { scroll: true });
+    void renderChart();
   });
-  const series = groupBy(pointRows, (value) => value.group_id);
-  const polylines = Object.entries(series)
-    .map(([groupId, rows], seriesIndex) => {
-      const color = SERIES_COLORS[seriesIndex % SERIES_COLORS.length];
-      return `<polyline fill="none" stroke="${color}" stroke-width="3" points="${rows.map((row) => `${row.x},${row.y}`).join(" ")}"><title>${escapeHtml(groupId)}</title></polyline>`;
-    })
-    .join("");
-  const expectationLines = expectations
-    .flatMap((expectation) => [
-      expectation.min !== null && expectation.min !== undefined ? { ...expectation, value: expectation.min, label: "min" } : null,
-      expectation.max !== null && expectation.max !== undefined ? { ...expectation, value: expectation.max, label: "max" } : null,
-    ])
-    .filter(Boolean)
-    .map((expectation) => {
-      const y = yForValue(Number(expectation.value));
-      return `
-        <g class="target-line">
-          <line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}"></line>
-          <text x="${width - padding}" y="${y - 6}" text-anchor="end">${escapeHtml(`${expectation.group_id} ${expectation.metric_name} ${expectation.label} ${formatMetric(expectation.value)}`)}</text>
-        </g>
-      `;
-    })
-    .join("");
-  const labelStride = Math.max(1, Math.ceil(pointRows.length / 6));
-  const labels = pointRows
-    .filter((_, index) => index % labelStride === 0 || index === pointRows.length - 1)
-    .map((value) => `<text x="${value.x}" y="${height - 8}" text-anchor="middle">${escapeHtml(shortRunId(value.run_id))}</text>`);
-  const circles = pointRows
-    .map((point) => {
-      const seriesIndex = Object.keys(series).indexOf(point.group_id);
-      const color = SERIES_COLORS[seriesIndex % SERIES_COLORS.length];
-      return `<circle class="metric-point ${point.run_id === selectedRunId ? "active" : ""}" cx="${point.x}" cy="${point.y}" r="5" fill="${color}" data-run-id="${escapeAttribute(point.run_id)}" data-point-index="${point.index}"><title>${escapeHtml(pointTooltipText(point))}</title></circle>`;
-    })
-    .join("");
-  const legend = Object.keys(series)
-    .map((groupId, index) => `<span><i style="background:${SERIES_COLORS[index % SERIES_COLORS.length]}"></i>${escapeHtml(groupId)}</span>`)
-    .join("");
-  container.innerHTML = `
-    <div class="chart-legend">${legend}</div>
-    <svg class="metric-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(metricName)} metric chart">
-      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}"></line>
-      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}"></line>
-      <text x="${padding}" y="18">${escapeHtml(metricName)}: ${formatMetric(min)} to ${formatMetric(max)}</text>
-      ${expectationLines}
-      ${polylines}
-      ${circles}
-      ${labels.join("")}
-    </svg>
-    <div id="chart-tooltip" class="chart-tooltip" hidden></div>
-  `;
-  attachChartInteractions(container, pointRows);
+  if (!resizeListenerAttached) {
+    window.addEventListener("resize", () => chartInstance?.resize());
+    resizeListenerAttached = true;
+  }
 }
 
 function enrichMetricPoint(metric) {
@@ -303,26 +361,6 @@ function expectationLines({ groupId, metricName }) {
   );
 }
 
-function attachChartInteractions(container, points) {
-  const tooltip = container.querySelector("#chart-tooltip");
-  container.querySelectorAll(".metric-point").forEach((point) => {
-    point.addEventListener("mousemove", (event) => {
-      const row = points[Number(point.dataset.pointIndex)];
-      tooltip.innerHTML = pointTooltipHtml(row);
-      tooltip.hidden = false;
-      tooltip.style.left = `${event.offsetX + 18}px`;
-      tooltip.style.top = `${event.offsetY + 18}px`;
-    });
-    point.addEventListener("mouseleave", () => {
-      tooltip.hidden = true;
-    });
-    point.addEventListener("click", () => {
-      selectRun(point.dataset.runId, { scroll: true });
-      renderChart();
-    });
-  });
-}
-
 function selectRun(runId, { scroll }) {
   selectedRunId = runId;
   renderRuns(dashboardData.runs || []);
@@ -333,16 +371,13 @@ function selectRun(runId, { scroll }) {
 }
 
 function pointTooltipHtml(point) {
+  if (!point) return "";
   return `
-    <strong>${escapeHtml(point.group_id)} · ${escapeHtml(point.metric_name)} ${formatMetric(point.metric_value)}</strong>
-    <span>${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</span>
-    <span>${escapeHtml(shortText(point.hypothesis || point.reason || "No summary recorded.", 150))}</span>
-    ${(point.planned_code_changes || []).slice(0, 2).map((item) => `<span>${escapeHtml(shortText(item, 110))}</span>`).join("")}
+    <div class="tooltip-title">${escapeHtml(point.group_id)} · ${escapeHtml(point.metric_name)} ${formatMetric(point.metric_value)}</div>
+    <div class="tooltip-muted">${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</div>
+    <div>${escapeHtml(shortText(point.hypothesis || point.reason || "No summary recorded.", 170))}</div>
+    ${(point.planned_code_changes || []).slice(0, 2).map((item) => `<div class="tooltip-muted">${escapeHtml(shortText(item, 120))}</div>`).join("")}
   `;
-}
-
-function pointTooltipText(point) {
-  return `${point.group_id} ${point.metric_name}=${formatMetric(point.metric_value)} · ${point.outcome} · ${shortText(point.hypothesis || point.reason || "", 140)}`;
 }
 
 function runLinks(run) {
@@ -370,6 +405,38 @@ function groupBy(values, keyFn) {
     groups[key].push(value);
     return groups;
   }, {});
+}
+
+async function loadECharts() {
+  echartsModule = echartsModule || (await import(ECHARTS_URL));
+  return echartsModule;
+}
+
+function dedupeExpectationLines(expectations) {
+  const lines = expectations.flatMap((expectation) => [
+    expectation.min !== null && expectation.min !== undefined
+      ? { key: `min:${expectation.min}`, value: Number(expectation.min), label: `target min ${formatMetric(expectation.min)}` }
+      : null,
+    expectation.max !== null && expectation.max !== undefined
+      ? { key: `max:${expectation.max}`, value: Number(expectation.max), label: `target max ${formatMetric(expectation.max)}` }
+      : null,
+  ]);
+  return [...new Map(lines.filter(Boolean).map((line) => [line.key, line])).values()];
+}
+
+function metricDomain(points, targetLines) {
+  const values = [
+    ...points.map((point) => point.metric_value),
+    ...targetLines.map((line) => line.value),
+  ].filter((value) => Number.isFinite(Number(value)));
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const span = Math.max(maxValue - minValue, 0.000001);
+  const padding = span * 0.1;
+  return {
+    min: Number((minValue - padding).toFixed(6)),
+    max: Number((maxValue + padding).toFixed(6)),
+  };
 }
 
 function shortRunId(runId) {
@@ -434,6 +501,10 @@ function setOptions(id, values, options = {}) {
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))].sort();
+}
+
+function uniqueInOrder(values) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function text(id, value) {
