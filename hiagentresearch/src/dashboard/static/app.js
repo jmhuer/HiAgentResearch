@@ -28,7 +28,14 @@ async function loadDashboardData(manifest) {
 }
 
 async function loadFromSqlite(manifest) {
-  const { createDbWorker } = await import(SQL_HTTPVFS_URL);
+  const sqliteModule = await import(SQL_HTTPVFS_URL);
+  const createDbWorker =
+    sqliteModule.createDbWorker ||
+    sqliteModule.default?.createDbWorker ||
+    (typeof sqliteModule.default === "function" ? sqliteModule.default : null);
+  if (!createDbWorker) {
+    throw new Error("sql.js-httpvfs createDbWorker export was not found");
+  }
   const worker = await createDbWorker(
     [
       {
@@ -162,7 +169,7 @@ async function renderChart() {
     await vegaEmbed(
       container,
       {
-        $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+        $schema: "https://vega.github.io/schema/vega-lite/v6.json",
         background: "transparent",
         data: { values },
         width: "container",

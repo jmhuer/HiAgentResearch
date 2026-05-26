@@ -50,6 +50,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p dashboard-artifacts
+          git fetch --no-tags --prune origin '+refs/heads/research/*:refs/remotes/origin/research/*'
           python - <<'PY'
           import json
           import subprocess
@@ -57,7 +58,9 @@ jobs:
 
           from hiagentresearch.src.config import load_config
 
-          workflow = load_config().github.workflow_name
+          config = load_config()
+          workflow = config.github.workflow_name
+          research_branches = {group.branch for group in config.research_groups}
           result = subprocess.run(
               [
                   "gh",
@@ -68,9 +71,9 @@ jobs:
                   "--status",
                   "completed",
                   "--limit",
-                  "50",
+                  "100",
                   "--json",
-                  "databaseId",
+                  "databaseId,headBranch,headSha",
               ],
               check=True,
               capture_output=True,
@@ -78,6 +81,17 @@ jobs:
           )
           target = Path("dashboard-artifacts")
           for row in json.loads(result.stdout):
+              branch = str(row.get("headBranch", ""))
+              sha = str(row.get("headSha", ""))
+              if branch not in research_branches or not sha:
+                  continue
+              live_ref = f"origin/{branch}"
+              is_current_branch_history = subprocess.run(
+                  ["git", "merge-base", "--is-ancestor", sha, live_ref],
+                  check=False,
+              ).returncode == 0
+              if not is_current_branch_history:
+                  continue
               run_id = str(row["databaseId"])
               subprocess.run(
                   [
