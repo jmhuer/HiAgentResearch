@@ -10,7 +10,7 @@
 
 - registry run row
 - metric rows
-- append-only event log entry
+- transition and artifact rows
 
 ## Rules
 

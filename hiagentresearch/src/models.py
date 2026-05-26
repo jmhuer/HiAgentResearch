@@ -43,6 +43,7 @@ class ResearchGroup:
     supporting_artifact_instructions: dict[str, str] = field(default_factory=dict)
     research_output_expectations: list[str] = field(default_factory=list)
     generated_paths: list[str] = field(default_factory=list)
+    frozen_paths: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

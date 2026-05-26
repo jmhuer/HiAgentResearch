@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
@@ -88,7 +89,6 @@ def run_loops(
     loops: int,
     workdir: Path,
     quick: bool,
-    evidence_path: Path | None,
     agent_model: str,
     config: HiAgentResearchConfig | None = None,
     git: GitLike | None = None,
@@ -115,7 +115,6 @@ def run_loops(
             group_id=group_id,
             workdir=workdir,
             quick=quick,
-            evidence_path=evidence_path,
             agent_model=agent_model,
         )
         local_run_id = str(local.get("run_id", ""))
@@ -178,31 +177,33 @@ def run_loops(
             sleep_sec=loaded_config.github.run_lookup_sleep_sec,
         )
         github_service.watch_run(gh_run.database_id)
-        download_dir = REPO_ROOT / ".hiagentresearch" / "state" / "github_runs" / gh_run.database_id
-        github_service.download_artifacts(run_id=gh_run.database_id, target_dir=download_dir)
-        artifact_dir = github_service.artifact_payload_dir(download_dir)
-        meta = load_run_meta(artifact_dir)
-        if str(meta.get("correlation_id", "")) != local_run_id:
-            return LoopSummary(
-                ok=False,
-                group_id=group_id,
-                branch=target_branch,
-                cycles=cycles,
-                reason="github artifact correlation_id did not match local run_id",
-            )
+        with tempfile.TemporaryDirectory(prefix=f"hiagentresearch-gh-{gh_run.database_id}-") as tmp:
+            download_dir = Path(tmp)
+            github_service.download_artifacts(run_id=gh_run.database_id, target_dir=download_dir)
+            artifact_dir = github_service.artifact_payload_dir(download_dir)
+            meta = load_run_meta(artifact_dir)
+            if str(meta.get("correlation_id", "")) != local_run_id:
+                return LoopSummary(
+                    ok=False,
+                    group_id=group_id,
+                    branch=target_branch,
+                    cycles=cycles,
+                    reason="github artifact correlation_id did not match local run_id",
+                )
 
-        ingest_code = ingest_func(f"gh_{gh_run.database_id}", group_id, target_branch, artifact_dir)
-        if ingest_code != 0:
-            return LoopSummary(
-                ok=False,
-                group_id=group_id,
-                branch=target_branch,
-                cycles=cycles,
-                reason="github artifact ingest failed",
-            )
+            ingest_code = ingest_func(f"gh_{gh_run.database_id}", group_id, target_branch, artifact_dir)
+            if ingest_code != 0:
+                return LoopSummary(
+                    ok=False,
+                    group_id=group_id,
+                    branch=target_branch,
+                    cycles=cycles,
+                    reason="github artifact ingest failed",
+                )
 
-        failure = json.loads((artifact_dir / "failure_class.json").read_text(encoding="utf-8"))
-        outcome = json.loads((artifact_dir / "research_outcome.json").read_text(encoding="utf-8"))
+            failure = json.loads((artifact_dir / "failure_class.json").read_text(encoding="utf-8"))
+            outcome = json.loads((artifact_dir / "research_outcome.json").read_text(encoding="utf-8"))
+            artifact_ref = f"github_actions:{gh_run.database_id}"
         github_failure = str(failure.get("failure_class", "infra_failure"))
         github_outcome = str(outcome.get("research_outcome", "unknown"))
         improved_baseline = bool(outcome.get("improved_baseline", False))
@@ -222,7 +223,7 @@ def run_loops(
                 github_failure_class=github_failure,
                 github_research_outcome=github_outcome,
                 improved_baseline=improved_baseline,
-                artifact_dir=str(artifact_dir),
+                artifact_dir=artifact_ref,
                 decision=decision,
             )
         )
@@ -339,7 +340,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--loops", type=int, default=3)
     parser.add_argument("--workdir", type=Path, default=REPO_ROOT)
     parser.add_argument("--quick", action="store_true")
-    parser.add_argument("--evidence-json", type=Path, default=REPO_ROOT / ".hiagentresearch/state/evidence/model_architecture.json")
     parser.add_argument("--agent-model", default="composer-2.5")
     parser.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
     return parser
@@ -353,7 +353,6 @@ def main(argv: list[str] | None = None) -> int:
         loops=args.loops,
         workdir=args.workdir.resolve(),
         quick=args.quick,
-        evidence_path=args.evidence_json.resolve() if args.evidence_json else None,
         agent_model=args.agent_model,
         stop_on_success=not args.run_exact_loops,
     )

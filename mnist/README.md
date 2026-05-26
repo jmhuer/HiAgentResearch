@@ -47,8 +47,8 @@ Improve test accuracy above the baseline without increasing inference latency be
 From the repository root, run one or more real-agent research loops against this workspace:
 
 ```bash
-scripts/run_phase1_group.sh model_architecture .
-scripts/run_three_loops.sh model_architecture research/model-architecture 3
+hiagentresearch run-group --group-id model_architecture --workdir . --quick
+hiagentresearch loops --group-id model_architecture --branch research/model-architecture --loops 3 --quick
 ```
 
-Runtime artifacts are written under `.hiagentresearch/runs/` and `.hiagentresearch/state/`.
+Runtime artifacts are written under `.hiagentresearch/runs/`; the local registry lives in `.hiagentresearch/state/evals.db`.

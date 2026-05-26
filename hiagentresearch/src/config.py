@@ -93,6 +93,7 @@ class HiAgentResearchConfig(BaseModel):
     editable_paths: list[str]
     dependency_files: list[str] = Field(default_factory=list)
     generated_paths: list[str] = Field(default_factory=list)
+    frozen_paths: list[str] = Field(default_factory=list)
     frozen_eval_entrypoint: str
     evaluation: EvaluationConfig
     research_groups: list[ResearchGroupConfig]
@@ -118,6 +119,10 @@ class HiAgentResearchConfig(BaseModel):
         dependency_outside = sorted(path for path in self.dependency_files if path not in editable)
         if dependency_outside:
             raise ValueError(f"dependency_files must be listed in editable_paths: {dependency_outside}")
+        frozen = set(self.all_frozen_paths())
+        frozen_editable = sorted(path for path in editable if _overlaps_any(path, frozen))
+        if frozen_editable:
+            raise ValueError(f"frozen paths must not be listed in editable_paths: {frozen_editable}")
         for group in self.research_groups:
             if group.policy_mode not in self.policy_modes:
                 raise ValueError(f"group {group.id} has unknown policy_mode: {group.policy_mode}")
@@ -126,6 +131,9 @@ class HiAgentResearchConfig(BaseModel):
                 raise ValueError(
                     f"group {group.id} allowed_paths must be listed in editable_paths: {outside}"
                 )
+            frozen_allowed = sorted(path for path in group.allowed_paths if _overlaps_any(path, frozen))
+            if frozen_allowed:
+                raise ValueError(f"group {group.id} allowed_paths include frozen paths: {frozen_allowed}")
         return self
 
     def workdir_path(self, root: Path = REPO_ROOT) -> Path:
@@ -135,6 +143,9 @@ class HiAgentResearchConfig(BaseModel):
     def frozen_eval_path(self, root: Path = REPO_ROOT) -> Path:
         path = Path(self.frozen_eval_entrypoint)
         return path if path.is_absolute() else (root / path).resolve()
+
+    def all_frozen_paths(self) -> list[str]:
+        return [self.frozen_eval_entrypoint, *self.frozen_paths]
 
     def dependency_file_paths(self, root: Path = REPO_ROOT) -> list[Path]:
         paths: list[Path] = []
@@ -188,6 +199,7 @@ class HiAgentResearchConfig(BaseModel):
             supporting_artifact_instructions={artifact.path: artifact.instruction for artifact in supporting},
             research_output_expectations=list(expectations),
             generated_paths=list(self.generated_paths),
+            frozen_paths=list(self.all_frozen_paths()),
         )
 
     def research_groups_by_id(self) -> dict[str, ResearchGroup]:
@@ -200,6 +212,19 @@ def _safe_format(template: str, values: dict[str, str]) -> str:
         if field_name:
             used[field_name] = values.get(field_name, "")
     return template.format(**used)
+
+
+def _overlaps_any(path: str, candidates: set[str]) -> bool:
+    normalized = path.rstrip("/")
+    for candidate in candidates:
+        candidate_normalized = candidate.rstrip("/")
+        if (
+            normalized == candidate_normalized
+            or normalized.startswith(f"{candidate_normalized}/")
+            or candidate_normalized.startswith(f"{normalized}/")
+        ):
+            return True
+    return False
 
 
 def load_config(path: Path | None = None) -> HiAgentResearchConfig:

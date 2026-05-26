@@ -130,7 +130,6 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
         loops=1,
         workdir=Path(".").resolve(),
         quick=True,
-        evidence_path=None,
         agent_model="composer-2.5",
         config=load_config(Path("config.yaml")),
         git=git,

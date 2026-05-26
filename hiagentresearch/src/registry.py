@@ -8,16 +8,13 @@ from typing import Any
 from hiagentresearch.src.models import IntentPacket, TransitionEvent, utc_now_iso
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class Registry:
     def __init__(self, state_dir: Path) -> None:
         self.state_dir = state_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self.intent_dir = self.state_dir / "intent_packets"
-        self.intent_dir.mkdir(parents=True, exist_ok=True)
-        self.events_path = self.state_dir / "events.jsonl"
         self.db_path = self.state_dir / "evals.db"
 
     def init(self) -> None:
@@ -161,34 +158,13 @@ class Registry:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_experiments_group ON experiments(group_id, loop_index)")
-        self._backfill_research_outcomes_from_artifacts(conn)
         conn.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
         )
 
-    def _backfill_research_outcomes_from_artifacts(self, conn: sqlite3.Connection) -> None:
-        github_runs_dir = self.state_dir / "github_runs"
-        if not github_runs_dir.exists():
-            return
-        for outcome_path in github_runs_dir.glob("*/hiagentresearch-*/research_outcome.json"):
-            run_id = f"gh_{outcome_path.parent.name.rsplit('-', 1)[-1]}"
-            if conn.execute("SELECT 1 FROM research_outcomes WHERE run_id = ?", (run_id,)).fetchone():
-                continue
-            try:
-                outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                continue
-            self._record_research_outcome_conn(conn, run_id=run_id, outcome=outcome)
-
-    def append_event(self, event: dict[str, Any]) -> None:
-        with self.events_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(_redact_secrets(event), ensure_ascii=True) + "\n")
-
-    def write_intent_packet(self, packet: IntentPacket) -> Path:
-        path = self.intent_dir / f"{packet.group_id}.json"
+    def write_intent_packet(self, packet: IntentPacket) -> None:
         payload = packet.to_dict()
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         conn = sqlite3.connect(self.db_path)
         try:
             conn.execute(
@@ -201,13 +177,19 @@ class Registry:
             conn.commit()
         finally:
             conn.close()
-        return path
 
     def read_intent_packet(self, group_id: str) -> IntentPacket | None:
-        path = self.intent_dir / f"{group_id}.json"
-        if not path.exists():
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT payload_json FROM intent_packets WHERE group_id = ?",
+                (group_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
             return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(str(row[0]))
         return IntentPacket(**payload)
 
     def record_run(
@@ -415,7 +397,6 @@ class Registry:
             conn.commit()
         finally:
             conn.close()
-        self.append_event({"event_type": "transition", **transition.to_dict()})
 
     def schema_version(self) -> int:
         conn = sqlite3.connect(self.db_path)
@@ -581,20 +562,6 @@ def _sha256(payload: bytes) -> str:
     import hashlib
 
     return hashlib.sha256(payload).hexdigest()
-
-
-def _redact_secrets(value: Any) -> Any:
-    if isinstance(value, dict):
-        redacted: dict[str, Any] = {}
-        for key, item in value.items():
-            if any(token in key.lower() for token in ("secret", "token", "api_key", "password")):
-                redacted[key] = "[REDACTED]"
-            else:
-                redacted[key] = _redact_secrets(item)
-        return redacted
-    if isinstance(value, list):
-        return [_redact_secrets(item) for item in value]
-    return value
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:

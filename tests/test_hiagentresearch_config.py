@@ -10,6 +10,7 @@ def test_load_root_config() -> None:
 
     assert config.project_id == "mnist"
     assert config.frozen_eval_entrypoint == ".hiagentresearch/eval/run_phase1_eval.py"
+    assert ".hiagentresearch/eval/" in config.frozen_paths
     assert "mnist/data/" in config.generated_paths
     assert "metrics.json" in config.artifact_contract.required
     assert "model_architecture" in config.research_groups_by_id()
@@ -91,4 +92,36 @@ research_groups:
     )
 
     with pytest.raises(Exception, match="dependency_files"):
+        load_config(config_path)
+
+
+def test_config_rejects_frozen_paths_inside_editable_contract(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+project_id: demo
+workdir: .
+editable_paths:
+  - src/app.py
+  - eval/run.py
+frozen_eval_entrypoint: eval/run.py
+evaluation:
+  command_template: "python eval/run.py"
+  parser: pytest_exit_code
+artifact_contract:
+  required: [metrics.json]
+policy_modes:
+  explore: Explore.
+research_groups:
+  - id: demo
+    branch: research/demo
+    objective: Demo
+    policy_mode: explore
+    allowed_paths:
+      - src/app.py
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(Exception, match="frozen paths"):
         load_config(config_path)

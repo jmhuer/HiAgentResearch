@@ -20,34 +20,34 @@ HiAgentResearch uses one small root `config.yaml` to stitch a project into the r
 5. Validate config:
 
 ```bash
-python -m hiagentresearch.src.config validate
+hiagentresearch config validate
 ```
 
 6. Initialize state:
 
 ```bash
-python -m hiagentresearch.src.orchestrator init
+hiagentresearch init
 ```
 
 7. Run one group:
 
 ```bash
-scripts/run_phase1_group.sh model_architecture .
+hiagentresearch run-group --group-id model_architecture --workdir . --quick
 ```
 
 8. Inspect status:
 
 ```bash
-python -m hiagentresearch.src.orchestrator status --group-id model_architecture
+hiagentresearch status --group-id model_architecture
 ```
 
 ## Contract Boundaries
 
 - Agents may inspect code, use tools, form hypotheses, and edit configured `editable_paths`.
 - Agents may write run-local observability artifacts under `.hiagentresearch/runs/<run_id>/`.
-- Agents must not edit frozen eval adapters unless that path is explicitly configured as editable.
+- Agents must not edit frozen eval adapters.
 - GitHub Actions is the committed-branch eval authority.
-- The registry is the durable source for run evidence, metrics, artifact checksums, transitions, and intent packets.
+- Git-tracked experiment manifests are the durable source for per-run intent; the SQLite registry is the local read model for metrics, outcomes, artifacts, transitions, and tactical intent.
 
 ## Quality Retry Policy
 

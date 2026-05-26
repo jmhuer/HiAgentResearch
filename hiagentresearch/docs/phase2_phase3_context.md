@@ -44,4 +44,4 @@ Not the legacy path:
 - Thin Python control plane; no Python-heavy context babysitting.
 - CLI-first operations for operators.
 - Structured artifact contract and deterministic failure classification.
-- State-machine-based transitions and append-only run events.
+- State-machine-based transitions stored in the SQLite registry.

@@ -70,19 +70,6 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
         artifact_type="github_eval",
         base_dir=artifact_dir,
     )
-    registry.append_event(
-        {
-            "event_type": "github_ingest",
-            "run_id": run_id,
-            "correlation_id": correlation_id,
-            "group_id": group_id,
-            "branch": branch,
-            "failure_class": failure_class,
-            "research_outcome": outcome.get("research_outcome", "unknown"),
-            "improved_baseline": bool(outcome.get("improved_baseline", False)),
-            "artifact_dir": str(artifact_dir),
-        }
-    )
     print(
         json.dumps(
             {

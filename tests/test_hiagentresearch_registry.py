@@ -1,4 +1,3 @@
-import json
 import sqlite3
 
 from hiagentresearch.src.models import IntentPacket
@@ -19,9 +18,8 @@ def test_registry_init_and_intent_packet(tmp_path) -> None:
         rollback_anchor_sha="",
         key_evidence_refs=["run_1"],
     )
-    path = registry.write_intent_packet(packet)
+    registry.write_intent_packet(packet)
     loaded = registry.read_intent_packet("model_architecture")
-    assert path.exists()
     assert loaded is not None
     assert loaded.active_hypothesis_id == "h1"
 
@@ -51,10 +49,6 @@ def test_registry_record_run(tmp_path) -> None:
     assert latest is not None
     assert latest["correlation_id"] == "corr-1"
     assert registry.metrics_for_run("run_abc") == {"accuracy": 0.991, "latency_ms": 12.0}
-    # events.jsonl should be writable for external callers
-    registry.append_event({"event_type": "smoke", "ok": True})
-    payloads = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert payloads[-1]["event_type"] == "smoke"
 
 
 def test_registry_records_research_outcome_and_experiment(tmp_path) -> None:
@@ -106,7 +100,7 @@ def test_registry_records_research_outcome_and_experiment(tmp_path) -> None:
     assert summary[0]["accuracy"] == 0.99
 
 
-def test_registry_v3_migrates_existing_database(tmp_path) -> None:
+def test_registry_v4_migrates_existing_database(tmp_path) -> None:
     db_path = tmp_path / "evals.db"
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
@@ -152,26 +146,10 @@ def test_registry_v3_migrates_existing_database(tmp_path) -> None:
     conn.commit()
     conn.close()
 
-    artifact_dir = tmp_path / "github_runs" / "1" / "hiagentresearch-1"
-    artifact_dir.mkdir(parents=True)
-    (artifact_dir / "research_outcome.json").write_text(
-        json.dumps(
-            {
-                "research_outcome": "did_not_improve_baseline",
-                "improved_baseline": False,
-                "metrics_ok": False,
-                "next_action": "continue",
-                "reason": "below baseline",
-            }
-        ),
-        encoding="utf-8",
-    )
-
     registry = Registry(tmp_path)
     registry.init()
 
     assert registry.schema_version() == SCHEMA_VERSION
-    assert registry.outcome_for_run("gh_1")["research_outcome"] == "did_not_improve_baseline"
 
 
 def test_registry_records_artifact(tmp_path) -> None:

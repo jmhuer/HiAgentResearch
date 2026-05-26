@@ -107,6 +107,10 @@ def _validate_edit_boundary(
     if not cycle_changes:
         return False, "agent cycle produced no changed files", []
 
+    frozen = [path for path in cycle_changes if _is_generated_path(path, group.frozen_paths)]
+    if frozen:
+        return False, f"agent cycle modified frozen paths: {frozen}", cycle_changes
+
     run_prefix = f".hiagentresearch/runs/{run_id}/"
     allowed = set(group.allowed_paths)
     outside = [
@@ -268,10 +272,7 @@ def init_state() -> int:
     registry = Registry(STATE_DIR)
     registry.init()
     groups = _load_groups(CONFIG_PATH)
-    for group in groups.values():
-        if registry.read_intent_packet(group.id) is None:
-            registry.write_intent_packet(_seed_intent(group))
-    print(json.dumps({"ok": True, "groups_seeded": sorted(groups.keys())}, indent=2))
+    print(json.dumps({"ok": True, "groups": sorted(groups.keys())}, indent=2))
     return 0
 
 
@@ -291,7 +292,8 @@ def status_report(group_id: str | None = None) -> int:
         payload["research_outcome"] = registry.outcome_for_run(run_id)
         payload["experiment"] = registry.experiment_for_run(run_id)
         payload["artifacts"] = registry.artifacts_for_run(run_id)
-        payload["intent_packet"] = registry.read_intent_packet(str(latest["group_id"])).to_dict() if registry.read_intent_packet(str(latest["group_id"])) else None
+        packet = registry.read_intent_packet(str(latest["group_id"]))
+        payload["intent_packet"] = packet.to_dict() if packet else None
     print(json.dumps(payload, indent=2))
     return 0
 
@@ -305,7 +307,6 @@ def run_group(
     group_id: str,
     workdir: Path,
     quick: bool,
-    evidence_path: Path | None,
     agent_model: str,
 ) -> int:
     config = load_config(CONFIG_PATH)
@@ -600,12 +601,6 @@ def run_group(
         registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
         _append_jsonl(actions_path, {"step": "parse_failure", "error": str(exc)})
 
-    evidence = {"evidence": []}
-    if evidence_path and evidence_path.exists():
-        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
-    _write_json(run_dir / "evidence.json", evidence)
-    _append_jsonl(actions_path, {"step": "evidence_loaded", "count": len(evidence.get("evidence", []))})
-
     status = "finished" if failure_class == "none" else "error"
     registry.record_run(
         run_id=run_id,
@@ -679,7 +674,7 @@ def run_group(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Phase-1 orchestrator for hiagentresearch.")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("init", help="Initialize registry and intent packets.")
+    sub.add_parser("init", help="Initialize the local registry.")
     status = sub.add_parser("status", help="Print registry-backed status.")
     status.add_argument("--group-id", default=None)
     resolve = sub.add_parser("resolve-group", help="Resolve group id for a branch.")
@@ -688,7 +683,6 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--group-id", required=True)
     run.add_argument("--workdir", default=".")
     run.add_argument("--quick", action="store_true")
-    run.add_argument("--evidence-json", type=Path, default=None)
     run.add_argument("--agent-model", default="composer-2.5")
     return parser
 
@@ -707,7 +701,6 @@ def main(argv: list[str] | None = None) -> int:
             group_id=args.group_id,
             workdir=Path(args.workdir).resolve(),
             quick=args.quick,
-            evidence_path=args.evidence_json,
             agent_model=args.agent_model,
         )
     parser.print_help()

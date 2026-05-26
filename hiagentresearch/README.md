@@ -25,24 +25,23 @@ This directory contains the first implementation of the branch-based research ru
 - `docs/` design contracts
 - `skills/` Cursor-first skill contracts
 - `../config.yaml` canonical project stitch contract
-- `../.hiagentresearch/state/` research-group definitions and registry state
+- `../.hiagentresearch/state/evals.db` local registry read model
 - `../.hiagentresearch/runs/` per-run artifacts
-- `workflows/` reusable workflow templates
 
 ## Quick start (local)
 
 ```bash
 export CURSOR_API_KEY="cursor_..."
-python -m hiagentresearch.src.config validate
-python -m hiagentresearch.src.orchestrator init
-python -m hiagentresearch.src.orchestrator run-group --group-id model_architecture --workdir . --quick
-python -m hiagentresearch.src.orchestrator status --group-id model_architecture
+hiagentresearch config validate
+hiagentresearch init
+hiagentresearch run-group --group-id model_architecture --workdir . --quick
+hiagentresearch status --group-id model_architecture
 ```
 
 `run-group` always uses the Cursor SDK agent backend. `CURSOR_API_KEY` is required.
 
 ```bash
-python -m hiagentresearch.src.orchestrator run-group \
+hiagentresearch run-group \
   --group-id model_architecture \
   --workdir . \
   --agent-model composer-2.5
@@ -51,7 +50,7 @@ python -m hiagentresearch.src.orchestrator run-group \
 The run command writes visibility artifacts under:
 
 - `.hiagentresearch/runs/<run_id>/`
-- `.hiagentresearch/state/intent_packets/<group_id>.json`
-- `.hiagentresearch/state/events.jsonl`
+- `.hiagentresearch/state/evals.db`
+- `.hiagentresearch/experiments/<group_id>/<run_id>.json` on research branches
 
 Project-specific context, editable paths, eval commands, artifact requirements, and quality retry expectations are generated from `config.yaml`.

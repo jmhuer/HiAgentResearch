@@ -17,7 +17,7 @@ Clean in-repo reference (canonical for this repo):
 - Registry model (current): `SQLite + JSONL`, with explicit migration path to Postgres/ClickHouse.
 - Agent runtime model: wake cycles (scheduled/event-driven), not always-on loops.
 - Control-plane philosophy: Python remains thin (state/scheduling/gates/persistence).
-- Operator interface: CLI-first scripts/commands.
+- Operator interface: CLI-first Python package commands.
 - Phase lock:
   - Phase 1: stable execution skeleton + observability + registry + onboarding.
   - Phase 2: merge system.
@@ -94,7 +94,7 @@ Runtime requirement:
 Confirmed direction:
 - Internal prompts should be template-driven and config-backed.
 - No hardcoded MNIST assumptions in core orchestrator/agent backend paths.
-- Root scripts/config own project-specific adaptation; library code remains generic.
+- Root config owns project-specific adaptation; library code remains generic.
 
 ## 6) Additional Phase 1 hardening for stable simple execution
 

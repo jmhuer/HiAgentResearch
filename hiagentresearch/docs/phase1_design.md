@@ -7,7 +7,7 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 ## Runtime flow
 
 1. Load the canonical project contract from root `config.yaml`.
-2. Load current intent packet for group (or seed first packet).
+2. Load current intent packet for group from SQLite (or seed first packet).
 3. Record agent actions to `agent_actions.jsonl` (traceability).
 4. Trigger evaluation command (`.hiagentresearch/eval/run_phase1_eval.py` for phase 1).
 5. Normalize outputs into canonical artifacts.
@@ -18,7 +18,7 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
    - research outcome,
    - branch-local experiment manifest,
    - updated intent packet,
-   - append-only event log entry.
+      - SQLite registry rows.
 
 ## Config contract
 
@@ -47,17 +47,18 @@ before committing the experiment branch. Do not maintain accumulating Python lis
 
 The registry is the operator-facing read model. It stores runs, metrics, research
 outcomes, experiment manifests, and artifact metadata in SQLite while keeping full
-payloads on disk. Use `python -m hiagentresearch.src.registry_view summary` for a
+run payloads on disk. Use `hiagentresearch registry summary` for a
 quick health check, or see `hiagentresearch/docs/registry.md` for the full command set.
 
 ## Evidence requirement
 
-Each cycle must include evidence references in `evidence.json`:
+Each cycle must include evidence references in `experiment_intent.json`:
 
 - at least one `code` evidence item, and
 - optional `web` evidence items for external backing.
 
-The orchestrator does not invent evidence; it only validates/persists it.
+The orchestrator does not invent evidence; it validates the planning artifact and
+persists the durable experiment manifest on the research branch.
 
 ## Outcome language
 

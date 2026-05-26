@@ -35,7 +35,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .[dev]
-          python -m pip install -r mnist/requirements.txt
+          python - <<'PY'
+          import subprocess
+          import sys
+          from hiagentresearch.src.config import load_config
+
+          for dependency_file in load_config().dependency_file_paths():
+              subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(dependency_file)], check=True)
+          PY
 
       - name: Resolve group id from branch
         id: group
@@ -165,7 +172,6 @@ jobs:
             failure_class.json
             research_outcome.json
             run_meta.json
-            .hiagentresearch/state/events.jsonl
             .hiagentresearch/state/evals.db
 
       - name: Fail on execution failure

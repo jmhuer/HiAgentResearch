@@ -1,25 +1,26 @@
 # Registry Inspection
 
 Phase 1 keeps the registry local, simple, and queryable. The SQLite database lives at
-`.hiagentresearch/state/evals.db`; append-only events and full run artifacts remain on disk.
+`.hiagentresearch/state/evals.db`; full local run artifacts remain under `.hiagentresearch/runs/`.
 Agents should use concise intent packets and branch manifests for context, not the full registry.
 
 ## Read Commands
 
 ```bash
-python -m hiagentresearch.src.registry_view summary
-python -m hiagentresearch.src.registry_view runs --group-id model_architecture
-python -m hiagentresearch.src.registry_view show --run-id gh_123456789
-python -m hiagentresearch.src.registry_view metrics --group-id model_architecture --metric accuracy
-python -m hiagentresearch.src.registry_view artifacts --run-id gh_123456789
-python -m hiagentresearch.src.registry_view export --json
+hiagentresearch registry summary
+hiagentresearch registry runs --group-id model_architecture
+hiagentresearch registry show --run-id gh_123456789
+hiagentresearch registry metrics --group-id model_architecture --metric accuracy
+hiagentresearch registry artifacts --run-id gh_123456789
+hiagentresearch registry export --json
 ```
 
 Add `--json` to any command for machine-readable output.
 
 ## Schema Direction
 
-The registry stores execution health and research outcome separately:
+The registry stores execution health and research outcome separately in `.hiagentresearch/state/evals.db`.
+Runtime state is intentionally SQLite-only; durable experiment intent belongs in tracked branch manifests.
 
 - `runs` records orchestration state, branch, commit, workflow run, and `failure_class`.
 - `metrics` records numeric metric values by run.
