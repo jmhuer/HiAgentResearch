@@ -1,0 +1,87 @@
+name: eval-reusable
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        required: true
+        type: string
+      eval_command:
+        required: true
+        type: string
+      group_id:
+        required: true
+        type: string
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+
+      - name: Run evaluation
+        id: eval
+        shell: bash
+        run: |
+          set +e
+          ${{ inputs.eval_command }} > eval_stdout.txt 2> eval_stderr.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Normalize outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from hiagentresearch.src.artifact_schema import normalize_mnist_eval
+
+          stdout = Path("eval_stdout.txt").read_text(encoding="utf-8")
+          exit_code = int("${{ steps.eval.outputs.exit_code }}")
+          normalized = normalize_mnist_eval(stdout, exit_code)
+          metrics = normalized.to_metrics()
+          if normalized.raw.get("tests_passed") is not None:
+              metrics["tests_passed"] = float(normalized.raw["tests_passed"])
+          if normalized.raw.get("tests_failed") is not None:
+              metrics["tests_failed"] = float(normalized.raw["tests_failed"])
+          if normalized.raw.get("duration_sec") is not None:
+              metrics["duration_sec"] = float(normalized.raw["duration_sec"])
+          Path("metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+          Path("failure_class.json").write_text(
+              json.dumps({"failure_class": normalized.failure_class, "exit_code": exit_code}, indent=2),
+              encoding="utf-8",
+          )
+          Path("run_meta.json").write_text(
+              json.dumps(
+                  {
+                      "mode": "${{ inputs.mode }}",
+                      "group_id": "${{ inputs.group_id }}",
+                      "commit_sha": "${{ github.sha }}",
+                      "workflow_run_id": "${{ github.run_id }}"
+                  },
+                  indent=2,
+              ),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-artifacts-${{ inputs.group_id }}-${{ github.run_id }}
+          path: |
+            eval_stdout.txt
+            eval_stderr.txt
+            metrics.json
+            failure_class.json
+            run_meta.json

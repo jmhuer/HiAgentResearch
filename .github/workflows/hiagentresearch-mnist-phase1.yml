@@ -1,0 +1,130 @@
+name: hiagentresearch-mnist-phase1
+
+on:
+  push:
+    branches:
+      - "research/**"
+  workflow_dispatch:
+    inputs:
+      group_id:
+        description: "Research group id override"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hiagentresearch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate-and-ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install torch torchvision scikit-learn
+
+      - name: Resolve group id from branch
+        id: group
+        shell: bash
+        run: |
+          branch="${GITHUB_REF_NAME}"
+          input_group="${{ github.event.inputs.group_id }}"
+          if [[ -n "$input_group" ]]; then
+            gid="$input_group"
+          else
+            case "$branch" in
+              research/model-architecture*) gid="model_architecture" ;;
+              research/hyperparameter-optimization*) gid="hyperparameter_optimization" ;;
+              research/data-augmentation*) gid="data_augmentation" ;;
+              research/optimization-strategy*) gid="optimization_strategy" ;;
+              *) gid="unknown" ;;
+            esac
+          fi
+          echo "group_id=$gid" >> "$GITHUB_OUTPUT"
+
+      - name: Run MNIST phase-1 eval
+        id: eval
+        shell: bash
+        run: |
+          set +e
+          python .hiagentresearch/eval/run_phase1_eval.py --mnist-root mnist --quick > eval_stdout.txt 2> eval_stderr.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Normalize phase-1 artifacts
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from hiagentresearch.src.artifact_schema import normalize_eval
+
+          stdout = Path("eval_stdout.txt").read_text(encoding="utf-8")
+          stderr = Path("eval_stderr.txt").read_text(encoding="utf-8")
+          exit_code = int("${{ steps.eval.outputs.exit_code }}")
+          normalized = normalize_eval(
+              parser="mnist_phase1_json_stdout",
+              stdout=stdout,
+              stderr=stderr,
+              exit_code=exit_code,
+          )
+          metrics = normalized.to_metrics()
+          if normalized.raw.get("tests_passed") is not None:
+              metrics["tests_passed"] = float(normalized.raw["tests_passed"])
+          if normalized.raw.get("tests_failed") is not None:
+              metrics["tests_failed"] = float(normalized.raw["tests_failed"])
+          if normalized.raw.get("duration_sec") is not None:
+              metrics["duration_sec"] = float(normalized.raw["duration_sec"])
+          Path("metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+          Path("failure_class.json").write_text(
+              json.dumps({"failure_class": normalized.failure_class, "exit_code": exit_code}, indent=2),
+              encoding="utf-8",
+          )
+          Path("run_meta.json").write_text(
+              json.dumps(
+                  {
+                      "commit_sha": "${{ github.sha }}",
+                      "workflow_run_id": "${{ github.run_id }}",
+                      "branch": "${{ github.ref_name }}",
+                      "group_id": "${{ steps.group.outputs.group_id }}",
+                  },
+                  indent=2,
+              ),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Ingest into phase-1 registry
+        shell: bash
+        run: |
+          python -m hiagentresearch.src.gh_ingest \
+            --run-id "gh_${{ github.run_id }}" \
+            --group-id "${{ steps.group.outputs.group_id }}" \
+            --branch "${{ github.ref_name }}" \
+            --artifact-dir "."
+
+      - name: Upload observability artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hiagentresearch-${{ github.run_id }}
+          path: |
+            eval_stdout.txt
+            eval_stderr.txt
+            metrics.json
+            failure_class.json
+            run_meta.json
+            .hiagentresearch/state/events.jsonl
+            .hiagentresearch/state/evals.db

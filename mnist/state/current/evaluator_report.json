@@ -1,0 +1,37 @@
+{
+  "passed": false,
+  "summary": "Global gate checks failed.",
+  "rework_phase": "format",
+  "checks": [
+    {
+      "name": "plan-json-exists",
+      "passed": true,
+      "detail": "Deliverable found: /home/jmhuer/github/HiAgentControl/mnist/state/current/plan.json",
+      "target_ref": "/home/jmhuer/github/HiAgentControl/mnist/state/current/plan.json"
+    },
+    {
+      "name": "plan-json-schema",
+      "passed": true,
+      "detail": "PlanDefinition schema validation passed.",
+      "target_ref": "/home/jmhuer/github/HiAgentControl/mnist/state/current/plan.json#root"
+    },
+    {
+      "name": "plan-task-count",
+      "passed": true,
+      "detail": "Task count exact match: 5 tasks (required exactly 5).",
+      "target_ref": "/home/jmhuer/github/HiAgentControl/mnist/state/current/plan.json#tasks"
+    },
+    {
+      "name": "plan-task-scope",
+      "passed": false,
+      "detail": "Invalid task scopes: tasks[0] (Evaluate the impact of the ensemble's KW\u2026): CHANGE cites train.py but FILES only lists eval/run_eval.py, pipeline/train.py, pipeline/train_optuna.py",
+      "target_ref": "/home/jmhuer/github/HiAgentControl/mnist/state/current/plan.json#tasks/*/scope"
+    },
+    {
+      "name": "plan-not-skeleton",
+      "passed": true,
+      "detail": "Plan has no skeleton placeholders.",
+      "target_ref": "/home/jmhuer/github/HiAgentControl/mnist/state/current/plan.json"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "accuracy": 0.985,
+  "latency_ms": 13.0,
+  "dataset": "MNIST",
+  "notes": "Example baseline for hierarchical planning PoC."
+}

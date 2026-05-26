@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "project": "mnist",
+  "groups": [
+    {
+      "id": "model_architecture",
+      "branch": "research/model-architecture",
+      "objective": "Improve model architecture while preserving latency budget.",
+      "policy_mode": "explore",
+      "allowed_paths": [
+        "mnist/pipeline/model.py",
+        "mnist/pipeline/train.py",
+        "mnist/eval/run_eval.py",
+        "mnist/pipeline/research_markers.py"
+      ],
+      "evaluation": {
+        "command": "python .hiagentresearch/eval/run_phase1_eval.py --mnist-root mnist --quick",
+        "parser": "mnist_phase1_json_stdout"
+      }
+    },
+    {
+      "id": "hyperparameter_optimization",
+      "branch": "research/hyperparameter-optimization",
+      "objective": "Improve training dynamics through hyperparameter exploration.",
+      "policy_mode": "explore",
+      "allowed_paths": [
+        "mnist/pipeline/train.py",
+        "mnist/pipeline/train_optuna.py",
+        "mnist/baseline.json"
+      ],
+      "evaluation": {
+        "command": "python .hiagentresearch/eval/run_phase1_eval.py --mnist-root mnist --quick",
+        "parser": "mnist_phase1_json_stdout"
+      }
+    },
+    {
+      "id": "data_augmentation",
+      "branch": "research/data-augmentation",
+      "objective": "Improve robustness and accuracy using targeted augmentation strategy.",
+      "policy_mode": "explore",
+      "allowed_paths": [
+        "mnist/pipeline/train.py",
+        "mnist/pipeline/model.py",
+        "mnist/eval/run_eval.py"
+      ],
+      "evaluation": {
+        "command": "python .hiagentresearch/eval/run_phase1_eval.py --mnist-root mnist --quick",
+        "parser": "mnist_phase1_json_stdout"
+      }
+    },
+    {
+      "id": "optimization_strategy",
+      "branch": "research/optimization-strategy",
+      "objective": "Improve optimization strategy and training efficiency tradeoffs.",
+      "policy_mode": "exploit",
+      "allowed_paths": [
+        "mnist/pipeline/train.py",
+        "mnist/pipeline/train_optuna.py",
+        "mnist/pipeline/kwta.py"
+      ],
+      "evaluation": {
+        "command": "python .hiagentresearch/eval/run_phase1_eval.py --mnist-root mnist --quick",
+        "parser": "mnist_phase1_json_stdout"
+      }
+    }
+  ]
+}

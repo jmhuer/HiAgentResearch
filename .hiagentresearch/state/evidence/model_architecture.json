@@ -1,0 +1,14 @@
+{
+  "evidence": [
+    {
+      "type": "code",
+      "path": "mnist/pipeline/model.py",
+      "note": "Current ensemble architecture is defined here and is the primary baseline for architecture changes."
+    },
+    {
+      "type": "web",
+      "url": "https://cursor.com/docs/plugins",
+      "note": "Used as process reference for Cursor-native workflow structure."
+    }
+  ]
+}

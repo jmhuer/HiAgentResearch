@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hiagentresearch"
+version = "0.1.0"
+description = "Cursor-first research orchestration with thin Python control plane."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.9,<3",
+  "cursor-sdk>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+]
+
+[tool.setuptools.packages.find]
+include = ["hiagentresearch*"]
