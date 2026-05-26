@@ -10,5 +10,10 @@ __pycache__/
 .hiagentresearch/state/github_runs/
 .hiagentresearch/state/intent_packets/
 
+# Project-generated training artifacts
+mnist/data/
+mnist/pipeline/checkpoints/
+mnist/pipeline/last_train_metrics.json
+
 # Local credentials
 credentials/
