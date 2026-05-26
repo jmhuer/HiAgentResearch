@@ -49,6 +49,12 @@ def test_registry_view_summary_and_show_json(tmp_path, capsys) -> None:
     assert detail["metrics"]["accuracy"] == 0.99
     assert detail["experiment"]["hypothesis_id"] == "h1"
 
+    assert main(["--state-dir", str(tmp_path), "export"]) == 0
+    exported = json.loads(capsys.readouterr().out)
+    assert exported["export_schema_version"] == 1
+    assert exported["metrics"][0]["metric_name"] == "accuracy"
+    assert exported["experiments"][0]["hypothesis_id"] == "h1"
+
 
 def test_registry_view_metrics_text(tmp_path, capsys) -> None:
     registry = Registry(tmp_path)

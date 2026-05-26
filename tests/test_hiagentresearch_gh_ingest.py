@@ -25,6 +25,20 @@ def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 
     )
     (artifact_dir / "stdout.txt").write_text("{}", encoding="utf-8")
     (artifact_dir / "stderr.txt").write_text("", encoding="utf-8")
+    (artifact_dir / "experiment_manifest.json").write_text(
+        json.dumps(
+            {
+                "group_id": "model_architecture",
+                "branch": "research/model-architecture",
+                "loop_index": 1,
+                "hypothesis_id": "h1",
+                "hypothesis": "Try a clean dashboard-ready experiment.",
+                "target_files": ["mnist/pipeline/model.py"],
+                "planned_code_changes": ["Edit model.py"],
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_ingest_rejects_missing_required_artifacts(tmp_path, monkeypatch) -> None:
@@ -46,11 +60,13 @@ def test_ingest_records_artifacts_and_is_idempotent(tmp_path, monkeypatch) -> No
     registry.init()
     assert registry.metrics_for_run("gh_1") == {"tests_passed": 1.0}
     assert registry.outcome_for_run("gh_1")["research_outcome"] == "improved_baseline"
+    assert registry.experiment_for_run("gh_1")["hypothesis_id"] == "h1"
     assert {artifact["artifact_path"] for artifact in registry.artifacts_for_run("gh_1")} >= {
         "metrics.json",
         "failure_class.json",
         "research_outcome.json",
         "run_meta.json",
+        "experiment_manifest.json",
     }
 
 

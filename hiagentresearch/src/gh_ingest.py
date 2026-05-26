@@ -62,6 +62,18 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
         correlation_id=correlation_id,
     )
     registry.record_research_outcome(run_id=run_id, outcome=outcome)
+    manifest_path = artifact_dir / "experiment_manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            print(json.dumps({"ok": False, "error": f"malformed experiment manifest: {exc}"}, indent=2))
+            return 1
+        registry.record_experiment_manifest(
+            run_id=run_id,
+            manifest_path="experiment_manifest.json",
+            manifest=manifest,
+        )
     registry.record_artifacts(
         run_id=run_id,
         artifact_paths=[

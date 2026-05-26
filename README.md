@@ -10,6 +10,7 @@ Standalone Cursor-first research runtime with a thin Python control plane.
 - `.hiagentresearch/eval/` frozen evaluation entrypoints
 - `.hiagentresearch/runs/` per-run observability artifacts
 - `.hiagentresearch/state/evals.db` local registry read model
+- `.hiagentresearch/dashboard/` optional generated static dashboard bundle
 - `.github/workflows/` GitHub automation for research branches
 
 ## Quick start
@@ -24,7 +25,8 @@ hiagentresearch init
 hiagentresearch loops --group-id model_architecture --branch research/model-architecture --loops 3 --quick
 hiagentresearch status --group-id model_architecture
 hiagentresearch registry summary
+hiagentresearch dashboard build
 ```
 
 The runtime is config-first: project-specific paths and quality expectations belong in `config.yaml`, not in core Python prompts or workflows.
-See `hiagentresearch/docs/registry.md` for registry inspection commands and the Phase 2 dashboard direction.
+See `hiagentresearch/docs/registry.md` for registry inspection and dashboard commands.

@@ -47,11 +47,7 @@ def artifacts(*, registry: Registry, run_id: str, as_json: bool) -> int:
 
 
 def export(*, registry: Registry, as_json: bool) -> int:
-    payload = {
-        "schema_version": registry.schema_version(),
-        "summary": registry.group_summary(),
-        "runs": registry.runs_for_group(None, limit=10_000),
-    }
+    payload = registry.dashboard_snapshot()
     _emit(payload, as_json=as_json, text_formatter=lambda value: json.dumps(value, indent=2))
     return 0
 

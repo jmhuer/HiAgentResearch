@@ -13,7 +13,10 @@ def test_load_root_config() -> None:
     assert ".hiagentresearch/eval/" in config.frozen_paths
     assert "mnist/data/" in config.generated_paths
     assert "metrics.json" in config.artifact_contract.required
+    assert "experiment_manifest.json" in config.artifact_contract.optional
     assert config.evaluation.parser == "canonical_json_stdout"
+    assert config.dashboard.enabled is False
+    assert config.dashboard.metrics == ["accuracy", "latency_ms"]
     assert "--group-id model_architecture" in config.format_eval_command(config.group_by_id("model_architecture"))
     assert config.agent_tools.validation_commands[0].name == "kwta_unit_tests"
     assert "model_architecture" in config.research_groups_by_id()

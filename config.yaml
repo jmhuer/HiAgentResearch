@@ -37,6 +37,7 @@ artifact_contract:
     - parsed_eval.json
     - agent_actions.jsonl
     - train_metrics.json
+    - experiment_manifest.json
     - experiment_intent.json
     - experiment_plan.md
 policy_modes:
@@ -48,6 +49,13 @@ github:
   remote: origin
   run_lookup_attempts: 30
   run_lookup_sleep_sec: 3
+dashboard:
+  enabled: false
+  title: HiAgentResearch
+  metrics:
+    - accuracy
+    - latency_ms
+  output_dir: .hiagentresearch/dashboard
 agent_tools:
   validation_commands:
     - name: kwta_unit_tests

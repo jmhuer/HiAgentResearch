@@ -6,6 +6,7 @@ from pathlib import Path
 
 from hiagentresearch.src import config as config_cli
 from hiagentresearch.src import registry_view
+from hiagentresearch.src.dashboard import cli as dashboard_cli
 from hiagentresearch.src.loop_controller import REPO_ROOT, run_loops
 from hiagentresearch.src.orchestrator import init_state, resolve_group, run_group, status_report
 
@@ -39,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("config", help="Delegate to config helper commands.")
     sub.add_parser("registry", help="Delegate to registry inspection commands.")
+    sub.add_parser("dashboard", help="Delegate to dashboard build commands.")
     return parser
 
 
@@ -52,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
         return registry_view.main(raw_args[1:])
     if raw_args[:1] == ["config"]:
         return config_cli.main(raw_args[1:])
+    if raw_args[:1] == ["dashboard"]:
+        return dashboard_cli.main(raw_args[1:])
 
     parser = build_parser()
     args = parser.parse_args(raw_args)

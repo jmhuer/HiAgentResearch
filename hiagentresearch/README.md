@@ -27,6 +27,7 @@ This directory contains the first implementation of the branch-based research ru
 - `../config.yaml` canonical project stitch contract
 - `../.hiagentresearch/state/evals.db` local registry read model
 - `../.hiagentresearch/runs/` per-run artifacts
+- `../.hiagentresearch/dashboard/` optional generated static dashboard bundle
 
 ## Quick start (local)
 
@@ -58,3 +59,16 @@ Project-specific context, editable paths, eval commands, artifact requirements, 
 Agent validation commands in `config.yaml` are local feedback tools. The frozen
 eval adapter remains the final authority and should emit canonical JSON for the
 generic parser.
+
+## Optional dashboard
+
+The dashboard is an isolated Phase 2 module. It reads registry data or downloaded
+GitHub artifacts and writes a static bundle without changing the research loop:
+
+```bash
+hiagentresearch dashboard build
+hiagentresearch dashboard build-from-artifacts --artifact-root dashboard-artifacts
+```
+
+`dashboard.enabled` in `config.yaml` controls the optional GitHub Pages workflow;
+explicit local build commands remain useful for inspection and testing.

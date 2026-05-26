@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HiAgentResearch Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">HiAgentResearch</p>
+          <h1 id="dashboard-title">Research Dashboard</h1>
+          <p id="dashboard-subtitle" class="subtitle">Loading experiment trajectory...</p>
+        </div>
+        <div class="hero-card">
+          <span class="label">Source</span>
+          <strong id="source-label">unknown</strong>
+          <span class="label">Schema</span>
+          <strong id="schema-label">unknown</strong>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-title">
+          <h2>Research Groups</h2>
+          <p>Latest execution health and research outcome by group.</p>
+        </div>
+        <div id="group-cards" class="cards"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-title inline">
+          <div>
+            <h2>Metric Trajectory</h2>
+            <p>Track metrics over time by research group.</p>
+          </div>
+          <div class="controls">
+            <label>
+              Group
+              <select id="group-filter"></select>
+            </label>
+            <label>
+              Metric
+              <select id="metric-filter"></select>
+            </label>
+          </div>
+        </div>
+        <div id="metric-chart" class="chart"></div>
+      </section>
+
+      <section class="grid">
+        <div class="panel">
+          <div class="section-title">
+            <h2>Runs</h2>
+            <p>Select a run to inspect intent, outcome, and artifacts.</p>
+          </div>
+          <div id="run-list" class="run-list"></div>
+        </div>
+        <div class="panel">
+          <div class="section-title">
+            <h2>Run Detail</h2>
+            <p>Hypothesis, planned changes, and audit metadata.</p>
+          </div>
+          <div id="run-detail" class="detail"></div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

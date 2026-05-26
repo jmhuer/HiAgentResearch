@@ -93,6 +93,7 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import shutil
           from pathlib import Path
           from hiagentresearch.src.artifact_schema import normalize_eval
           from hiagentresearch.src.quality import classify_research_outcome
@@ -150,6 +151,14 @@ jobs:
               ),
               encoding="utf-8",
           )
+          manifest_path = (
+              Path(".hiagentresearch")
+              / "experiments"
+              / "${{ steps.group.outputs.group_id }}"
+              / "${{ steps.group.outputs.correlation_id }}.json"
+          )
+          if manifest_path.exists():
+              shutil.copyfile(manifest_path, "experiment_manifest.json")
           PY
 
       - name: Ingest into phase-1 registry
@@ -172,6 +181,7 @@ jobs:
             failure_class.json
             research_outcome.json
             run_meta.json
+            experiment_manifest.json
             .hiagentresearch/state/evals.db
 
       - name: Fail on execution failure

@@ -14,6 +14,19 @@ def test_cli_delegates_registry(monkeypatch) -> None:
     assert seen["argv"] == ["summary", "--json"]
 
 
+def test_cli_delegates_dashboard(monkeypatch) -> None:
+    seen = {}
+
+    def fake_dashboard(argv):
+        seen["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(cli.dashboard_cli, "main", fake_dashboard)
+
+    assert cli.main(["dashboard", "build"]) == 0
+    assert seen["argv"] == ["build"]
+
+
 def test_cli_runs_loop_command(monkeypatch, tmp_path) -> None:
     seen = {}
 

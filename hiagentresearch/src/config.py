@@ -68,6 +68,13 @@ class GitHubConfig(BaseModel):
     run_lookup_sleep_sec: float = 3.0
 
 
+class DashboardConfig(BaseModel):
+    enabled: bool = False
+    title: str = "HiAgentResearch"
+    metrics: list[str] = Field(default_factory=lambda: ["accuracy", "latency_ms"])
+    output_dir: str = ".hiagentresearch/dashboard"
+
+
 class AgentContractConfig(BaseModel):
     guidance_files: list[str] = Field(default_factory=list)
     context_paths: list[str] = Field(default_factory=list)
@@ -110,6 +117,7 @@ class HiAgentResearchConfig(BaseModel):
     artifact_contract: ArtifactContract
     policy_modes: dict[str, str]
     github: GitHubConfig = Field(default_factory=GitHubConfig)
+    dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     agent_tools: AgentToolsConfig = Field(default_factory=AgentToolsConfig)
     agent_contract: AgentContractConfig = Field(default_factory=AgentContractConfig)
 
@@ -164,6 +172,10 @@ class HiAgentResearchConfig(BaseModel):
             path = Path(dependency_file)
             paths.append(path if path.is_absolute() else (root / path).resolve())
         return paths
+
+    def dashboard_output_path(self, root: Path = REPO_ROOT) -> Path:
+        path = Path(self.dashboard.output_dir)
+        return path if path.is_absolute() else (root / path).resolve()
 
     def group_by_id(self, group_id: str) -> ResearchGroupConfig:
         for group in self.research_groups:
@@ -287,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
                     "ok": True,
                     "project_id": config.project_id,
                     "groups": [group.id for group in config.research_groups],
+                    "dashboard_enabled": config.dashboard.enabled,
                     "agent_validation_tools": [tool.name for tool in config.agent_tools.validation_commands],
                     "required_artifacts": config.artifact_contract.required,
                 },

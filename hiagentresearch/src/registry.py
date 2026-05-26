@@ -557,6 +557,48 @@ class Registry:
         finally:
             conn.close()
 
+    def dashboard_snapshot(self) -> dict[str, Any]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            metrics = [
+                _row_to_dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT r.run_id, r.group_id, r.branch, r.commit_sha, r.workflow_run_id,
+                           r.correlation_id, r.created_at, m.metric_name, m.metric_value
+                    FROM runs r
+                    JOIN metrics m ON r.run_id = m.run_id
+                    ORDER BY r.group_id, r.created_at, m.metric_name
+                    """
+                ).fetchall()
+            ]
+            experiments = []
+            for row in conn.execute("SELECT * FROM experiments ORDER BY group_id, loop_index, created_at").fetchall():
+                payload = _row_to_dict(row)
+                payload["target_files"] = json.loads(str(payload.pop("target_files_json")))
+                payload["planned_code_changes"] = json.loads(str(payload.pop("planned_code_changes_json")))
+                experiments.append(payload)
+            return {
+                "export_schema_version": 1,
+                "registry_schema_version": self.schema_version(),
+                "summary": self.group_summary(),
+                "runs": self.runs_for_group(None, limit=10_000),
+                "metrics": metrics,
+                "metric_names": sorted({str(row["metric_name"]) for row in metrics}),
+                "research_outcomes": [
+                    _row_to_dict(row)
+                    for row in conn.execute("SELECT * FROM research_outcomes ORDER BY created_at").fetchall()
+                ],
+                "experiments": experiments,
+                "artifacts": [
+                    _row_to_dict(row)
+                    for row in conn.execute("SELECT * FROM artifacts ORDER BY run_id, artifact_path").fetchall()
+                ],
+            }
+        finally:
+            conn.close()
+
 
 def _sha256(payload: bytes) -> str:
     import hashlib

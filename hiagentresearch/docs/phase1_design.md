@@ -33,6 +33,7 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 - research groups,
 - artifact contract,
 - policy modes,
+- optional dashboard publishing,
 - agent context and quality expectations.
 
 Core runtime code should stay project-agnostic. If a project needs different files, prompts, or eval behavior, change config or the frozen eval adapter rather than hardcoding a new path in Python.
@@ -67,6 +68,10 @@ The registry is the operator-facing read model. It stores runs, metrics, researc
 outcomes, experiment manifests, and artifact metadata in SQLite while keeping full
 run payloads on disk. Use `hiagentresearch registry summary` for a
 quick health check, or see `hiagentresearch/docs/registry.md` for the full command set.
+
+The static dashboard is an optional read layer over that registry. It must remain
+isolated from agent prompts and loop execution; explicit dashboard commands or the
+separate Pages workflow build the static bundle.
 
 ## Evidence requirement
 
