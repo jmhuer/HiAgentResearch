@@ -8,7 +8,7 @@ from typing import Any
 from hiagentresearch.src.models import IntentPacket, TransitionEvent, utc_now_iso
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Registry:
@@ -92,6 +92,35 @@ class Registry:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS research_outcomes (
+                    run_id TEXT PRIMARY KEY,
+                    research_outcome TEXT NOT NULL,
+                    improved_baseline INTEGER NOT NULL,
+                    metrics_ok INTEGER NOT NULL,
+                    next_action TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS experiments (
+                    run_id TEXT PRIMARY KEY,
+                    group_id TEXT NOT NULL,
+                    branch TEXT NOT NULL,
+                    loop_index INTEGER,
+                    hypothesis_id TEXT NOT NULL,
+                    hypothesis TEXT NOT NULL,
+                    target_files_json TEXT NOT NULL,
+                    planned_code_changes_json TEXT NOT NULL,
+                    manifest_path TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
             self._migrate(conn)
             conn.commit()
         finally:
@@ -122,10 +151,35 @@ class Registry:
             ON metrics(run_id, metric_name)
             """
         )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_group_created ON runs(group_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_correlation ON runs(correlation_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_name_run ON metrics(metric_name, run_id)")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_outcomes_outcome
+            ON research_outcomes(research_outcome, improved_baseline)
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_experiments_group ON experiments(group_id, loop_index)")
+        self._backfill_research_outcomes_from_artifacts(conn)
         conn.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
         )
+
+    def _backfill_research_outcomes_from_artifacts(self, conn: sqlite3.Connection) -> None:
+        github_runs_dir = self.state_dir / "github_runs"
+        if not github_runs_dir.exists():
+            return
+        for outcome_path in github_runs_dir.glob("*/hiagentresearch-*/research_outcome.json"):
+            run_id = f"gh_{outcome_path.parent.name.rsplit('-', 1)[-1]}"
+            if conn.execute("SELECT 1 FROM research_outcomes WHERE run_id = ?", (run_id,)).fetchone():
+                continue
+            try:
+                outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            self._record_research_outcome_conn(conn, run_id=run_id, outcome=outcome)
 
     def append_event(self, event: dict[str, Any]) -> None:
         with self.events_path.open("a", encoding="utf-8") as f:
@@ -210,6 +264,82 @@ class Registry:
                     """,
                     (run_id, name, float(value), now),
                 )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def record_research_outcome(self, *, run_id: str, outcome: dict[str, Any]) -> None:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            self._record_research_outcome_conn(conn, run_id=run_id, outcome=outcome)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _record_research_outcome_conn(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        run_id: str,
+        outcome: dict[str, Any],
+    ) -> None:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO research_outcomes
+            (run_id, research_outcome, improved_baseline, metrics_ok, next_action, reason, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                str(outcome.get("research_outcome", "unknown")),
+                1 if bool(outcome.get("improved_baseline", False)) else 0,
+                1 if bool(outcome.get("metrics_ok", False)) else 0,
+                str(outcome.get("next_action", "")),
+                str(outcome.get("reason", "")),
+                utc_now_iso(),
+            ),
+        )
+
+    def record_experiment_manifest(
+        self,
+        *,
+        run_id: str,
+        manifest_path: str,
+        manifest: dict[str, Any],
+    ) -> None:
+        now = utc_now_iso()
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO experiments
+                (
+                    run_id,
+                    group_id,
+                    branch,
+                    loop_index,
+                    hypothesis_id,
+                    hypothesis,
+                    target_files_json,
+                    planned_code_changes_json,
+                    manifest_path,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    str(manifest.get("group_id", "")),
+                    str(manifest.get("branch", "")),
+                    _as_int_or_none(manifest.get("loop_index")),
+                    str(manifest.get("hypothesis_id", "")),
+                    str(manifest.get("hypothesis", "")),
+                    json.dumps(_as_string_list(manifest.get("target_files")), sort_keys=True),
+                    json.dumps(_as_string_list(manifest.get("planned_code_changes")), sort_keys=True),
+                    manifest_path,
+                    now,
+                ),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -335,6 +465,117 @@ class Registry:
         finally:
             conn.close()
 
+    def outcome_for_run(self, run_id: str) -> dict[str, Any] | None:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM research_outcomes WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            return _row_to_dict(row) if row else None
+        finally:
+            conn.close()
+
+    def experiment_for_run(self, run_id: str) -> dict[str, Any] | None:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM experiments WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if not row:
+                return None
+            payload = _row_to_dict(row)
+            payload["target_files"] = json.loads(str(payload.pop("target_files_json")))
+            payload["planned_code_changes"] = json.loads(str(payload.pop("planned_code_changes_json")))
+            return payload
+        finally:
+            conn.close()
+
+    def runs_for_group(self, group_id: str | None = None, *, limit: int = 20) -> list[dict[str, Any]]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            if group_id:
+                rows = conn.execute(
+                    "SELECT * FROM runs WHERE group_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (group_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def metrics_for_group(self, group_id: str, metric_name: str | None = None) -> list[dict[str, Any]]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            if metric_name:
+                rows = conn.execute(
+                    """
+                    SELECT r.run_id, r.group_id, r.branch, r.commit_sha, r.workflow_run_id,
+                           r.correlation_id, r.created_at, m.metric_name, m.metric_value
+                    FROM runs r
+                    JOIN metrics m ON r.run_id = m.run_id
+                    WHERE r.group_id = ? AND m.metric_name = ?
+                    ORDER BY r.created_at
+                    """,
+                    (group_id, metric_name),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT r.run_id, r.group_id, r.branch, r.commit_sha, r.workflow_run_id,
+                           r.correlation_id, r.created_at, m.metric_name, m.metric_value
+                    FROM runs r
+                    JOIN metrics m ON r.run_id = m.run_id
+                    WHERE r.group_id = ?
+                    ORDER BY r.created_at, m.metric_name
+                    """,
+                    (group_id,),
+                ).fetchall()
+            return [_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def group_summary(self) -> list[dict[str, Any]]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                WITH latest AS (
+                    SELECT *
+                    FROM runs r
+                    WHERE created_at = (
+                        SELECT MAX(created_at)
+                        FROM runs inner_r
+                        WHERE inner_r.group_id = r.group_id
+                    )
+                )
+                SELECT latest.*,
+                       outcome.research_outcome,
+                       outcome.improved_baseline,
+                       outcome.next_action,
+                       accuracy.metric_value AS accuracy,
+                       latency.metric_value AS latency_ms
+                FROM latest
+                LEFT JOIN research_outcomes outcome ON latest.run_id = outcome.run_id
+                LEFT JOIN metrics accuracy ON latest.run_id = accuracy.run_id AND accuracy.metric_name = 'accuracy'
+                LEFT JOIN metrics latency ON latest.run_id = latency.run_id AND latency.metric_name = 'latency_ms'
+                ORDER BY latest.group_id
+                """
+            ).fetchall()
+            return [_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
 
 def _sha256(payload: bytes) -> str:
     import hashlib
@@ -354,3 +595,24 @@ def _redact_secrets(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_secrets(item) for item in value]
     return value
+
+
+def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    payload = dict(row)
+    for key in ("improved_baseline", "metrics_ok"):
+        if key in payload and payload[key] is not None:
+            payload[key] = bool(payload[key])
+    return payload
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _as_int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

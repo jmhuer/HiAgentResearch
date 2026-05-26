@@ -61,6 +61,7 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
         workflow_run_id=str(meta.get("workflow_run_id", "")),
         correlation_id=correlation_id,
     )
+    registry.record_research_outcome(run_id=run_id, outcome=outcome)
     registry.record_artifacts(
         run_id=run_id,
         artifact_paths=[

@@ -163,6 +163,16 @@ def _metadata_payload(
     return payload
 
 
+def _execution_blocked_outcome(*, reason: str, next_action: str) -> dict[str, Any]:
+    return {
+        "research_outcome": "execution_blocked",
+        "improved_baseline": False,
+        "metrics_ok": False,
+        "next_action": next_action,
+        "reason": reason,
+    }
+
+
 def _core_allowed_paths(group: ResearchGroup) -> list[str]:
     supporting = set(group.supporting_artifacts)
     return [path for path in group.allowed_paths if path not in supporting]
@@ -278,6 +288,8 @@ def status_report(group_id: str | None = None) -> int:
     if latest:
         run_id = str(latest["run_id"])
         payload["metrics"] = registry.metrics_for_run(run_id)
+        payload["research_outcome"] = registry.outcome_for_run(run_id)
+        payload["experiment"] = registry.experiment_for_run(run_id)
         payload["artifacts"] = registry.artifacts_for_run(run_id)
         payload["intent_packet"] = registry.read_intent_packet(str(latest["group_id"])).to_dict() if registry.read_intent_packet(str(latest["group_id"])) else None
     print(json.dumps(payload, indent=2))
@@ -348,6 +360,8 @@ def run_group(
         (run_dir / "agent_stdout.txt").write_text(record.summary, encoding="utf-8")
         (run_dir / "agent_stderr.txt").write_text("", encoding="utf-8")
     except AgentBackendError as exc:
+        research_outcome = _execution_blocked_outcome(reason=str(exc), next_action="continue")
+        _write_json(run_dir / "research_outcome.json", research_outcome)
         _write_json(
             metadata_path,
             _metadata_payload(
@@ -369,6 +383,7 @@ def run_group(
             metrics={},
             correlation_id=correlation_id,
         )
+        registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
         registry.record_transition(
             TransitionEvent(
                 run_id=run_id,
@@ -396,6 +411,8 @@ def run_group(
     _append_jsonl(actions_path, {"step": "validate_plan_before_eval"})
     valid_contract, contract_error = _validate_agent_intent_contract(run_dir=run_dir, group=group, run_id=run_id)
     if not valid_contract:
+        research_outcome = _execution_blocked_outcome(reason=contract_error, next_action="repair")
+        _write_json(run_dir / "research_outcome.json", research_outcome)
         _write_json(
             metadata_path,
                 _metadata_payload(
@@ -418,6 +435,7 @@ def run_group(
             metrics={},
             correlation_id=correlation_id,
         )
+        registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
         registry.record_transition(
             TransitionEvent(
                 run_id=run_id,
@@ -455,6 +473,8 @@ def run_group(
         {"step": "edit_boundary_check", "valid": valid_edits, "changed_files": cycle_changes},
     )
     if not valid_edits:
+        research_outcome = _execution_blocked_outcome(reason=edit_error, next_action="repair")
+        _write_json(run_dir / "research_outcome.json", research_outcome)
         _write_json(
             metadata_path,
             _metadata_payload(
@@ -476,6 +496,7 @@ def run_group(
             metrics={},
             correlation_id=correlation_id,
         )
+        registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
         registry.record_transition(
             TransitionEvent(
                 run_id=run_id,
@@ -560,6 +581,7 @@ def run_group(
             {"failure_class": failure_class, "exit_code": proc.returncode},
         )
         _write_json(run_dir / "research_outcome.json", research_outcome)
+        registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
         _write_json(run_dir / "parsed_eval.json", parsed)
     except ArtifactParseError as exc:
         failure_class = classify_non_json_failure(proc.stderr, proc.returncode)
@@ -575,6 +597,7 @@ def run_group(
             {"failure_class": failure_class, "exit_code": proc.returncode, "error": str(exc)},
         )
         _write_json(run_dir / "research_outcome.json", research_outcome)
+        registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
         _append_jsonl(actions_path, {"step": "parse_failure", "error": str(exc)})
 
     evidence = {"evidence": []}

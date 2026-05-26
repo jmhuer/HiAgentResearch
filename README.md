@@ -24,6 +24,8 @@ python -m hiagentresearch.src.config validate
 python -m hiagentresearch.src.orchestrator init
 scripts/run_phase1_loops.sh model_architecture research/model-architecture 3
 python -m hiagentresearch.src.orchestrator status --group-id model_architecture
+python -m hiagentresearch.src.registry_view summary
 ```
 
 The runtime is config-first: project-specific paths and quality expectations belong in `config.yaml`, not in core Python prompts or workflows.
+See `hiagentresearch/docs/registry.md` for registry inspection commands and the Phase 2 dashboard direction.

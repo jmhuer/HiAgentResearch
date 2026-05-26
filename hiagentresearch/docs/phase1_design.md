@@ -43,6 +43,13 @@ Each run has exactly one canonical hypothesis in `.hiagentresearch/runs/<run_id>
 The loop controller copies the concise branch record to `.hiagentresearch/experiments/<group_id>/<run_id>.json`
 before committing the experiment branch. Do not maintain accumulating Python lists for hypotheses or markers.
 
+## Registry Inspection
+
+The registry is the operator-facing read model. It stores runs, metrics, research
+outcomes, experiment manifests, and artifact metadata in SQLite while keeping full
+payloads on disk. Use `python -m hiagentresearch.src.registry_view summary` for a
+quick health check, or see `hiagentresearch/docs/registry.md` for the full command set.
+
 ## Evidence requirement
 
 Each cycle must include evidence references in `evidence.json`:

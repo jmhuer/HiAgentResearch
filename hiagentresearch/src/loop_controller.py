@@ -15,6 +15,7 @@ from hiagentresearch.src.gh_ingest import ingest
 from hiagentresearch.src.git_service import GitService
 from hiagentresearch.src.github_actions import GitHubActionsService, load_run_meta
 from hiagentresearch.src.orchestrator import REPO_ROOT, init_state, run_group
+from hiagentresearch.src.registry import Registry
 
 
 class GitLike(Protocol):
@@ -140,6 +141,13 @@ def run_loops(
             loop_index=loop_index,
             local_run_id=local_run_id,
             local_result=local,
+        )
+        registry = Registry(REPO_ROOT / ".hiagentresearch" / "state")
+        registry.init()
+        registry.record_experiment_manifest(
+            run_id=local_run_id,
+            manifest_path=manifest_path,
+            manifest=manifest,
         )
         supporting_paths = [artifact.path for artifact in loaded_config.agent_contract.supporting_artifacts]
         git_service.stage_paths([*list(group_config.allowed_paths), manifest_path])

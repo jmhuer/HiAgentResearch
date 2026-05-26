@@ -4,6 +4,7 @@ from pathlib import Path
 from hiagentresearch.src.config import load_config
 from hiagentresearch.src.github_actions import GitHubRun
 from hiagentresearch.src.loop_controller import run_loops
+from hiagentresearch.src.registry import Registry
 
 
 class FakeGit:
@@ -140,6 +141,9 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
     ).exists()
     assert ".hiagentresearch/experiments/model_architecture/run_test.json" in git.staged_paths
     assert git.subject == "Phase 1, loop 1: Replace one model layer with a smaller equivalent"
+    registry = Registry(tmp_path / ".hiagentresearch" / "state")
+    registry.init()
+    assert registry.experiment_for_run("run_test")["hypothesis_id"] == "model_architecture-h1"
     assert git.committed is True
     assert git.pushed is True
     assert "HiAgentResearch-Run-ID: run_test" in git.body

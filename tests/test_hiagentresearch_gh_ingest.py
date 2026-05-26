@@ -45,6 +45,7 @@ def test_ingest_records_artifacts_and_is_idempotent(tmp_path, monkeypatch) -> No
     registry = gh_ingest.Registry(tmp_path / "state")
     registry.init()
     assert registry.metrics_for_run("gh_1") == {"tests_passed": 1.0}
+    assert registry.outcome_for_run("gh_1")["research_outcome"] == "improved_baseline"
     assert {artifact["artifact_path"] for artifact in registry.artifacts_for_run("gh_1")} >= {
         "metrics.json",
         "failure_class.json",
