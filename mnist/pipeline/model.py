@@ -43,7 +43,7 @@ class MnistEncoder(nn.Module):
         block = BasicBlock
         self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
-        self.kwta1 = KWTA(k=10)
+        self.relu1 = nn.ReLU(inplace=True)
         self.layer1 = self._make_layer(block, 64, 2, stride=1, activation="relu")
         self.layer2 = self._make_layer(block, 128, 2, stride=2, activation="relu")
         self.proj = nn.Conv2d(128, 64, kernel_size=3, stride=2, padding=1, bias=False)
@@ -58,7 +58,7 @@ class MnistEncoder(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        out = self.kwta1(self.bn1(self.conv1(x)))
+        out = self.relu1(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
         return F.relu(self.bn_proj(self.proj(out)))
@@ -155,7 +155,7 @@ class ResNetTrunk(nn.Module):
         self.in_planes = 64
         self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
-        self.kwta1 = KWTA(k=10)
+        self.relu1 = nn.ReLU(inplace=True)
         self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1, activation="relu")
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2, activation="relu")
         self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2, activation="relu")
@@ -169,7 +169,7 @@ class ResNetTrunk(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        out = self.kwta1(self.bn1(self.conv1(x)))
+        out = self.relu1(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
         return self.layer3(out)

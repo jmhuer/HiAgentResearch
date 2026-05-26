@@ -7,6 +7,25 @@ from __future__ import annotations
 
 RESEARCH_HYPOTHESES: list[dict] = [
     {
+        "hypothesis_id": "model_architecture-h9",
+        "theme": "stem_relu_trunk_sparsity",
+        "hypothesis": (
+            "h8 moved ResNetTrunk/MnistEncoder layer1 to ReLU but stem kwta1 remains "
+            "the sole KWTA in the ensemble trunk forward (model.py ResNetTrunk lines "
+            "158-175). Each KWTA(k=10) runs torch.topk (kwta.py) on 64x28x28 stem maps—"
+            "the largest remaining sparse stage. baseline.json requires latency_ms <= 13.0 "
+            "at accuracy >= 0.985. Replacing stem kwta1 with ReLU in ResNetTrunk and "
+            "MnistEncoder removes the last trunk topk pass. Expected: latency_ms drops "
+            "vs h8 with accuracy >= 0.985."
+        ),
+        "planned_change": (
+            "In mnist/pipeline/model.py: replace ResNetTrunk and MnistEncoder stem "
+            "kwta1 with nn.ReLU(inplace=True); retrain ensemble and re-measure latency_ms."
+        ),
+        "run_id": "run_d766c025a425",
+        "timestamp": "2026-05-25T15:30:00.000000+00:00",
+    },
+    {
         "hypothesis_id": "model_architecture-h8",
         "theme": "layer1_relu_trunk_sparsity",
         "hypothesis": (
