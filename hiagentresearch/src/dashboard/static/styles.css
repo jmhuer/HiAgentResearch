@@ -189,16 +189,24 @@ select {
 
 .grid {
   grid-template-columns: minmax(280px, 0.9fr) minmax(340px, 1.1fr);
-  align-items: start;
+  align-items: stretch;
   margin-top: 28px;
+}
+
+.grid > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: min(720px, 78vh);
 }
 
 .run-list {
   display: grid;
   gap: 10px;
   margin-top: 16px;
-  max-height: min(640px, 72vh);
-  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  max-height: min(720px, 78vh);
+  overflow-y: auto;
   padding-right: 4px;
 }
 
@@ -229,11 +237,17 @@ select {
   display: grid;
   gap: 14px;
   margin-top: 16px;
+  flex: 1;
+  min-height: 0;
+  max-height: min(720px, 78vh);
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .grid > .panel:last-child {
   position: sticky;
   top: 18px;
+  align-self: start;
 }
 
 .detail-block {

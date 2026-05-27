@@ -470,7 +470,10 @@ class Registry:
                 """
                 SELECT *
                 FROM runs
-                WHERE group_id = ? AND failure_class = 'none' AND commit_sha != ''
+                WHERE group_id = ?
+                  AND failure_class = 'none'
+                  AND commit_sha != ''
+                  AND run_id LIKE 'gh_%'
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
@@ -489,7 +492,11 @@ class Registry:
                 SELECT r.*
                 FROM runs r
                 JOIN metrics m ON r.run_id = m.run_id
-                WHERE r.group_id = ? AND r.failure_class = 'none' AND m.metric_name = ?
+                WHERE r.group_id = ?
+                  AND r.failure_class = 'none'
+                  AND m.metric_name = ?
+                  AND r.run_id LIKE 'gh_%'
+                  AND r.commit_sha != ''
                 ORDER BY m.metric_value DESC, r.created_at DESC
                 LIMIT 1
                 """,

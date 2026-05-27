@@ -14,6 +14,7 @@ from typing import Any
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
 from hiagentresearch.src.dashboard.trajectory import assign_trajectory_positions, baseline_metric_points
 from hiagentresearch.src.registry.store import Registry
+from hiagentresearch.src.runtime.loop_controller import _ensure_baseline_snapshot
 
 
 DASHBOARD_SCHEMA_VERSION = 1
@@ -56,6 +57,7 @@ def build_from_registry(
 
     registry = Registry(state_dir.resolve())
     registry.init()
+    _ensure_baseline_snapshot(registry, loaded)
     snapshot = registry.dashboard_snapshot()
     metric_expectations = _metric_expectations(loaded)
     snapshot["metric_expectations"] = metric_expectations

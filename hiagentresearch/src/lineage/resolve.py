@@ -79,12 +79,12 @@ def _resolve_inherit_ref(
         row = registry.best_github_run(parent.id, anchor_metric)
         if row and row.get("commit_sha"):
             return str(row["commit_sha"])
-    elif anchor_policy != "last_commit":
+    elif anchor_policy == "last_commit":
+        row = registry.last_github_run(parent.id)
+        if row and row.get("commit_sha"):
+            return str(row["commit_sha"])
+    else:
         raise LineageError(f"unknown anchor_policy: {anchor_policy}")
-
-    row = registry.last_github_run(parent.id)
-    if row and row.get("commit_sha"):
-        return str(row["commit_sha"])
 
     for ref in (f"origin/{parent.branch}", parent.branch):
         if git.ref_exists(ref):

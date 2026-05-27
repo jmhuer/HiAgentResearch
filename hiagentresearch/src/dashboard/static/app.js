@@ -2,6 +2,7 @@ const SQL_HTTPVFS_URL = "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/+esm";
 const ECHARTS_URL = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.esm.min.js";
 const ALL_GROUPS = "__all__";
 const SERIES_COLORS = ["#89b4ff", "#7ee787", "#f2cc60", "#ff8b8b", "#c9a8ff", "#77d4ff"];
+const THRESHOLD_LINE_COLOR = "#9aa4b2";
 const DISCRETE_LINE_METRICS = new Set(["tests_passed", "tests_failed"]);
 
 let dashboardData = null;
@@ -262,8 +263,9 @@ async function renderEChart(container, values, metricName, expectations) {
   const targetLines = dedupeExpectationLines(expectations);
   const domain = metricDomain(ordered, targetLines);
   const groupSeries = Object.entries(grouped).map(([groupId, rows], index) => {
-    const seriesData = chartSeriesData(rows, trajectoryAxis);
+    const seriesData = seriesDataForGroup(groupId, rows, trajectoryAxis, grouped);
     const visiblePoints = seriesData.filter((entry) => entry != null).length;
+    const hasConnector = seriesData.some((entry) => entry?.point?.is_inheritance_connector);
     return {
     name: groupId,
     type: "line",
@@ -271,9 +273,9 @@ async function renderEChart(container, values, metricName, expectations) {
     symbol: "circle",
     symbolSize: 9,
     showAllSymbol: true,
-    connectNulls: visiblePoints > 1,
+    connectNulls: visiblePoints > 1 || hasConnector,
     emphasis: { focus: "series" },
-    lineStyle: { width: visiblePoints > 1 ? 3 : 0 },
+    lineStyle: { width: visiblePoints > 1 || hasConnector ? 3 : 0, type: "solid" },
     itemStyle: { borderColor: "#090b12", borderWidth: 1.5 },
     data: seriesData,
     markLine:
@@ -281,9 +283,9 @@ async function renderEChart(container, values, metricName, expectations) {
         ? {
             symbol: "none",
             silent: true,
-            lineStyle: { color: "#f2cc60", type: "dashed", width: 1.5 },
+            lineStyle: { color: THRESHOLD_LINE_COLOR, type: "dashed", width: 1.5 },
             label: {
-              color: "#f2cc60",
+              color: THRESHOLD_LINE_COLOR,
               formatter: (params) => params.name,
               position: "insideEndTop",
             },
@@ -292,8 +294,7 @@ async function renderEChart(container, values, metricName, expectations) {
         : undefined,
   };
   });
-  const bridgeSeries = lineageBridgeSeries(ordered, grouped, trajectoryAxis);
-  const series = [...groupSeries, ...bridgeSeries];
+  const series = groupSeries;
 
   chartInstance.setOption(
     {
@@ -463,12 +464,50 @@ function chartSeriesData(rows, trajectoryAxis) {
   });
 }
 
+function seriesDataForGroup(groupId, rows, trajectoryAxis, grouped) {
+  const base = chartSeriesData(rows, trajectoryAxis);
+  if (trajectoryAxis.mode !== "trajectory") {
+    return base;
+  }
+  const parentId = dashboardData.lineage_topology?.groups?.[groupId]?.inherit_from;
+  if (!parentId) {
+    return base;
+  }
+  const parentRows = (grouped[parentId] || [])
+    .filter((point) => !point.is_baseline_anchor)
+    .sort((left, right) => Number(left.trajectory_x) - Number(right.trajectory_x));
+  if (!parentRows.length) {
+    return base;
+  }
+  const parentLast = parentRows[parentRows.length - 1];
+  const parentX = Number(parentLast.trajectory_x);
+  if (rows.some((row) => Number(row.trajectory_x) === parentX)) {
+    return base;
+  }
+  return trajectoryAxis.indices.map((trajectoryX) => {
+    if (Number(trajectoryX) === parentX) {
+      return chartPointDatum({
+        ...parentLast,
+        group_id: groupId,
+        lineage_parent_group_id: parentId,
+        is_inheritance_connector: true,
+      });
+    }
+    const point = rows.find((row) => Number(row.trajectory_x) === trajectoryX);
+    if (!point) return null;
+    return chartPointDatum(point);
+  });
+}
+
 function chartPointDatum(point) {
+  const selected = point.run_id === selectedRunId;
+  const isBaseline = Boolean(point.is_baseline_anchor);
   return {
     value: point.metric_value,
     point,
-    symbolSize: point.run_id === selectedRunId ? 13 : 9,
-    itemStyle: point.run_id === selectedRunId ? { borderColor: "#f6f7fb", borderWidth: 3 } : undefined,
+    symbol: isBaseline ? "diamond" : "circle",
+    symbolSize: selected ? 13 : isBaseline ? 11 : 9,
+    itemStyle: selected ? { borderColor: "#f6f7fb", borderWidth: 3 } : undefined,
   };
 }
 
@@ -520,10 +559,16 @@ function selectRun(runId, { scroll }) {
 
 function pointTooltipHtml(point) {
   if (!point) return "";
+  const connector =
+    point.is_inheritance_connector && point.lineage_parent_group_id
+      ? ` · continues from ${point.lineage_parent_group_id}`
+      : point.is_inheritance_connector
+        ? " · continues from parent"
+        : "";
   const lineage =
     point.lineage_mode === "inherit" && point.lineage_parent_group_id
       ? ` · inherit ${point.lineage_parent_group_id}@${shortSha(point.lineage_anchor_sha)}`
-      : "";
+      : connector;
   return `
     <div class="tooltip-title">${escapeHtml(point.group_id)} · ${escapeHtml(point.metric_name)} ${formatMetric(point.metric_value)}</div>
     <div class="tooltip-muted">${escapeHtml(trajectoryLabel(point))}${lineage} · ${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</div>
@@ -606,13 +651,19 @@ function normalizedLoopIndex(point) {
 }
 
 function trajectoryCategoryAxis(points) {
-  const indices = uniqueInOrder(
+  let indices = uniqueInOrder(
     points
       .map((point) => point.trajectory_x)
       .filter((value) => value != null && value !== "" && Number.isFinite(Number(value)))
       .map((value) => Number(value))
       .sort((left, right) => left - right),
   );
+  const hasBaseline =
+    points.some((point) => point.is_baseline_anchor) ||
+    Boolean(dashboardData.lineage_topology?.baseline_snapshot?.metrics);
+  if (hasBaseline && !indices.includes(0)) {
+    indices = [0, ...indices];
+  }
   if (indices.length) {
     return { mode: "trajectory", labels: indices.map((value) => `L${value}`), indices };
   }
@@ -623,56 +674,6 @@ function trajectoryCategoryAxis(points) {
     indices: sorted.map((_, index) => index),
     points: sorted,
   };
-}
-
-function lineageBridgeSeries(ordered, grouped, trajectoryAxis) {
-  const trajectoryIndices = trajectoryAxis.mode === "trajectory" ? trajectoryAxis.indices : [];
-  if (!trajectoryIndices.length) return [];
-  const topology = dashboardData.lineage_topology || { chains: [] };
-  const bridges = [];
-  topology.chains.forEach((chain) => {
-    for (let index = 1; index < chain.length; index += 1) {
-      const parentId = chain[index - 1];
-      const childId = chain[index];
-      const parentRows = (grouped[parentId] || []).sort(
-        (left, right) => Number(left.trajectory_x) - Number(right.trajectory_x),
-      );
-      const childRows = (grouped[childId] || []).sort(
-        (left, right) => Number(left.trajectory_x) - Number(right.trajectory_x),
-      );
-      if (!parentRows.length || !childRows.length) continue;
-      const parentLast = parentRows[parentRows.length - 1];
-      const childFirst = childRows[0];
-      const colorIndex = Object.keys(grouped).indexOf(childId);
-      bridges.push({
-        name: `${parentId} → ${childId}`,
-        type: "line",
-        smooth: false,
-        symbol: "circle",
-        symbolSize: 6,
-        showSymbol: true,
-        silent: true,
-        legendHoverLink: false,
-        lineStyle: {
-          width: 2,
-          type: "dashed",
-          color: SERIES_COLORS[(colorIndex >= 0 ? colorIndex : index) % SERIES_COLORS.length],
-          opacity: 0.85,
-        },
-        itemStyle: { opacity: 0.85 },
-        data: trajectoryIndices.map((trajectoryX) => {
-          if (Number(parentLast.trajectory_x) === trajectoryX) {
-            return { value: parentLast.metric_value, point: parentLast };
-          }
-          if (Number(childFirst.trajectory_x) === trajectoryX) {
-            return { value: childFirst.metric_value, point: childFirst };
-          }
-          return null;
-        }),
-      });
-    }
-  });
-  return bridges;
 }
 
 function trajectoryLabel(point) {

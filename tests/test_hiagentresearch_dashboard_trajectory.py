@@ -44,6 +44,26 @@ def test_inherited_group_starts_after_prior_wave_depth() -> None:
     assert wave_depths(points, topology["execution_waves"]) == [0, 2]
 
 
+def test_trajectory_axis_includes_l0_when_baseline_present() -> None:
+    topology = {
+        "execution_waves": [["model_architecture"]],
+        "baseline_snapshot": {"ref": "main", "metrics": {"accuracy": 0.81}},
+    }
+    points = [
+        {"group_id": "model_architecture", "loop_index": 1, "metric_value": 0.9, "is_baseline_anchor": False},
+        {
+            "group_id": "model_architecture",
+            "loop_index": 0,
+            "metric_value": 0.81,
+            "is_baseline_anchor": True,
+            "trajectory_x": 0,
+        },
+    ]
+    positioned = assign_trajectory_positions(points, topology)
+    trajectory_values = sorted({row["trajectory_x"] for row in positioned})
+    assert trajectory_values[0] == 0
+
+
 def test_baseline_anchor_points_use_l0() -> None:
     anchors = baseline_metric_points(
         metric_name="accuracy",
