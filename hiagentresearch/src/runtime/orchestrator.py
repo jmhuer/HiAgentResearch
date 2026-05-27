@@ -30,13 +30,18 @@ from hiagentresearch.src.runtime.quality import classify_research_outcome
 from hiagentresearch.src.registry.store import Registry
 
 
-from hiagentresearch.src.paths import REPO_ROOT
+from hiagentresearch.src.paths import (
+    DEFAULT_RUNS_DIR,
+    DEFAULT_STATE_DIR,
+    REPO_ROOT,
+    resolve_config_path,
+    resolve_runs_dir,
+    resolve_state_dir,
+)
 
-DEFAULT_STATE_DIR = REPO_ROOT / ".hiagentresearch" / "state"
-DEFAULT_RUNS_DIR = REPO_ROOT / ".hiagentresearch" / "runs"
-STATE_DIR = Path(os.environ.get("HIAGENTRESEARCH_STATE_DIR", str(DEFAULT_STATE_DIR))).resolve()
-RUNS_DIR = Path(os.environ.get("HIAGENTRESEARCH_RUNS_DIR", str(DEFAULT_RUNS_DIR))).resolve()
-CONFIG_PATH = Path(os.environ.get("HIAGENTRESEARCH_CONFIG", str(REPO_ROOT / "config.yaml"))).resolve()
+STATE_DIR = resolve_state_dir()
+RUNS_DIR = resolve_runs_dir()
+CONFIG_PATH = resolve_config_path()
 
 
 def _load_groups(path: Path) -> dict[str, ResearchGroup]:

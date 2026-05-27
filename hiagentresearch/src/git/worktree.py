@@ -4,13 +4,13 @@ import subprocess
 from pathlib import Path
 
 from hiagentresearch.src.git.service import GitService, GitServiceError
-from hiagentresearch.src.paths import REPO_ROOT
+from hiagentresearch.src.paths import DEFAULT_WORKTREES_DIR, REPO_ROOT
 
 
 class WorktreeManager:
     def __init__(self, repo_root: Path | None = None, worktree_root: str | Path | None = None) -> None:
         self.repo_root = (repo_root or REPO_ROOT).resolve()
-        relative = Path(worktree_root or ".hiagentresearch/worktrees")
+        relative = Path(worktree_root) if worktree_root is not None else DEFAULT_WORKTREES_DIR
         self.worktree_root = relative if relative.is_absolute() else (self.repo_root / relative).resolve()
         self.git = GitService(self.repo_root)
 

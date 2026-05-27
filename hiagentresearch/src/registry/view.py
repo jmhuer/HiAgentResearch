@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hiagentresearch.src.runtime.orchestrator import DEFAULT_STATE_DIR
+from hiagentresearch.src.paths import DEFAULT_STATE_DIR
 from hiagentresearch.src.registry.store import Registry
 
 

@@ -53,7 +53,7 @@ jobs:
           if [[ -n "$input_group" ]]; then
             gid="$input_group"
           else
-            gid="$(python -m hiagentresearch.src.core.config resolve-group --branch "$branch")"
+            gid="$(python -m hiagentresearch.src.core resolve-group --branch "$branch")"
           fi
           echo "group_id=$gid" >> "$GITHUB_OUTPUT"
           commit_msg="$(git log -1 --pretty=%B)"
@@ -95,8 +95,8 @@ jobs:
           import json
           import shutil
           from pathlib import Path
-          from hiagentresearch.src.artifact_schema import normalize_eval
-          from hiagentresearch.src.quality import classify_research_outcome
+          from hiagentresearch.src.core.artifact_schema import normalize_eval
+          from hiagentresearch.src.runtime.quality import classify_research_outcome
 
           from hiagentresearch.src.core.config import load_config
 
@@ -164,7 +164,7 @@ jobs:
       - name: Ingest into phase-1 registry
         shell: bash
         run: |
-          python -m hiagentresearch.src.gh_ingest \
+          python -m hiagentresearch.src.github.ingest \
             --run-id "gh_${{ github.run_id }}" \
             --group-id "${{ steps.group.outputs.group_id }}" \
             --branch "${{ github.ref_name }}" \

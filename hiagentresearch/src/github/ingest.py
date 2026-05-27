@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import json
 import sys
 from pathlib import Path
@@ -10,9 +9,9 @@ from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.registry.store import Registry
 
 
-from hiagentresearch.src.paths import REPO_ROOT
-DEFAULT_STATE_DIR = REPO_ROOT / ".hiagentresearch" / "state"
-STATE_DIR = Path(os.environ.get("HIAGENTRESEARCH_STATE_DIR", str(DEFAULT_STATE_DIR))).resolve()
+from hiagentresearch.src.paths import resolve_state_dir
+
+STATE_DIR = resolve_state_dir()
 
 
 def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:

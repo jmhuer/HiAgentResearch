@@ -4,8 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from hiagentresearch.src import config as config_cli
-from hiagentresearch.src import registry_view
+from hiagentresearch.src.core import config as config_cli
+from hiagentresearch.src.registry import view as registry_view
 from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
 from hiagentresearch.src.dashboard import cli as dashboard_cli
 from hiagentresearch.src.paths import REPO_ROOT

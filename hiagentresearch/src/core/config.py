@@ -12,9 +12,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from hiagentresearch.src.core.models import AgentValidationCommand, EvaluationSpec, ResearchGroup
-from hiagentresearch.src.paths import REPO_ROOT
-
-DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
+from hiagentresearch.src.paths import DEFAULT_CONFIG_PATH, REPO_ROOT
 
 
 class MetricExpectation(BaseModel):
