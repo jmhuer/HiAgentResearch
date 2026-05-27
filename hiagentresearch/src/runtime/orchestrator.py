@@ -370,18 +370,32 @@ def run_group(
         (run_dir / "agent_stdout.txt").write_text(record.summary, encoding="utf-8")
         (run_dir / "agent_stderr.txt").write_text("", encoding="utf-8")
     except AgentBackendError as exc:
+        failure_class = exc.failure_class
+        cursor_run_status = ""
+        if exc.record is not None:
+            cursor_run_status = str(exc.record.raw_result.get("cursor_run_status") or exc.record.status)
         research_outcome = _execution_blocked_outcome(reason=str(exc), next_action="continue")
         _write_json(run_dir / "research_outcome.json", research_outcome)
+        _write_json(
+            run_dir / "failure_class.json",
+            {
+                "failure_class": failure_class,
+                "exit_code": 1,
+                "error": str(exc),
+                "cursor_run_status": cursor_run_status,
+            },
+        )
         _write_json(
             metadata_path,
             _metadata_payload(
                 run_id=run_id,
                 group=group,
                 status="error",
-                failure_class="invalid_cycle",
+                failure_class=failure_class,
                 correlation_id=correlation_id,
                 error=str(exc),
                 agent_backend="cursor_sdk",
+                cursor_run_status=cursor_run_status,
             ),
         )
         registry.record_run(
@@ -389,7 +403,7 @@ def run_group(
             group_id=group.id,
             branch=group.branch,
             status="error",
-            failure_class="invalid_cycle",
+            failure_class=failure_class,
             metrics={},
             correlation_id=correlation_id,
         )
@@ -400,7 +414,7 @@ def run_group(
                 group_id=group.id,
                 from_state="running_agent_cycle",
                 to_state="blocked",
-                reason="cursor_agent_backend_failed",
+                reason=f"cursor_agent_backend_failed:{failure_class}",
                 actor="orchestrator",
             )
         )
@@ -410,7 +424,8 @@ def run_group(
                     "ok": False,
                     "run_id": run_id,
                     "status": "error",
-                    "failure_class": "invalid_cycle",
+                    "failure_class": failure_class,
+                    "cursor_run_status": cursor_run_status,
                     "run_dir": str(run_dir.relative_to(REPO_ROOT)),
                 },
                 indent=2,

@@ -2,17 +2,29 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
+from typing import Any
 
 from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
 from hiagentresearch.src.agents.prompts import build_phase1_prompt
-from hiagentresearch.src.core.models import IntentPacket, ResearchGroup, utc_now_iso
+from hiagentresearch.src.core.models import FailureClass, IntentPacket, ResearchGroup, utc_now_iso
 from hiagentresearch.src.lineage.resolve import BranchBootstrap
 
 
 class AgentBackendError(RuntimeError):
     """Raised when agent backend execution fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_class: FailureClass = "invalid_cycle",
+        record: AgentExecutionRecord | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.failure_class = failure_class
+        self.record = record
 
 
 @dataclass(slots=True)
@@ -20,9 +32,27 @@ class AgentExecutionRecord:
     backend: str
     success: bool
     status: str
+    failure_class: FailureClass
     summary: str
-    raw_result: dict
+    raw_result: dict[str, Any]
     timestamp: str
+
+
+def failure_class_for_cursor_run_status(run_status: str) -> FailureClass:
+    """Map terminal Cursor run status to phase-1 execution failure classes."""
+    normalized = run_status.strip().lower()
+    if normalized == "finished":
+        return "none"
+    if normalized == "cancelled":
+        return "infra_failure"
+    if normalized == "error":
+        return "invalid_cycle"
+    return "invalid_cycle"
+
+
+def failure_class_for_cursor_agent_error() -> FailureClass:
+    """Cursor SDK errors mean the run did not start (auth, rate limit, network, config)."""
+    return "infra_failure"
 
 
 def run_cursor_agent_cycle(
@@ -39,13 +69,15 @@ def run_cursor_agent_cycle(
     api_key = os.environ.get("CURSOR_API_KEY", "").strip()
     if not api_key:
         raise AgentBackendError(
-            "CURSOR_API_KEY is missing. Export CURSOR_API_KEY or add credentials/cursor_secret.txt."
+            "CURSOR_API_KEY is missing. Export CURSOR_API_KEY or add credentials/cursor_secret.txt.",
+            failure_class="infra_failure",
         )
     try:
-        from cursor_sdk import Agent, AgentOptions, LocalAgentOptions
+        from cursor_sdk import Agent, AgentOptions, CursorAgentError, LocalAgentOptions
     except ModuleNotFoundError as exc:
         raise AgentBackendError(
-            "cursor-sdk is not installed. Install the project dependencies before running real agent loops."
+            "cursor-sdk is not installed. Install the project dependencies before running real agent loops.",
+            failure_class="infra_failure",
         ) from exc
 
     prompt = build_phase1_prompt(
@@ -54,35 +86,99 @@ def run_cursor_agent_cycle(
         run_id=run_id,
         lineage_bootstrap=lineage_bootstrap,
     )
-    result = Agent.prompt(
-        prompt,
-        AgentOptions(
-            api_key=api_key,
-            model=model,
-            local=LocalAgentOptions(cwd=str(workdir)),
-        ),
-    )
+    try:
+        result = Agent.prompt(
+            prompt,
+            AgentOptions(
+                api_key=api_key,
+                model=model,
+                local=LocalAgentOptions(cwd=str(workdir)),
+            ),
+        )
+    except CursorAgentError as exc:
+        record = _record_from_cursor_error(exc)
+        _write_record(run_dir=run_dir, record=record, prompt=prompt)
+        raise AgentBackendError(
+            f"Cursor agent failed to start ({type(exc).__name__}): {exc}",
+            failure_class=failure_class_for_cursor_agent_error(),
+            record=record,
+        ) from exc
+
     status = str(result.status)
-    success = status == "finished"
+    failure_class = failure_class_for_cursor_run_status(status)
+    success = failure_class == "none"
     record = AgentExecutionRecord(
         backend="cursor_sdk",
         success=success,
         status=status,
+        failure_class=failure_class,
         summary=str(result.result)[:2000],
-        raw_result={
-            "id": getattr(result, "id", ""),
-            "agent_id": getattr(result, "agent_id", ""),
-            "status": status,
-            "result": str(getattr(result, "result", "")),
-            "duration_ms": int(getattr(result, "duration_ms", 0)),
-            "created_at": getattr(result, "created_at", None),
-        },
+        raw_result=_run_result_payload(result, cursor_run_status=status),
         timestamp=utc_now_iso(),
     )
     _write_record(run_dir=run_dir, record=record, prompt=prompt)
     if not success:
-        raise AgentBackendError(f"Cursor agent run did not finish successfully (status={status}).")
+        raise AgentBackendError(
+            f"Cursor agent run did not finish successfully (status={status}).",
+            failure_class=failure_class,
+            record=record,
+        )
     return record
+
+
+def _record_from_cursor_error(exc: Any) -> AgentExecutionRecord:
+    return AgentExecutionRecord(
+        backend="cursor_sdk",
+        success=False,
+        status="startup_error",
+        failure_class=failure_class_for_cursor_agent_error(),
+        summary=str(exc)[:2000],
+        raw_result=_cursor_error_payload(exc),
+        timestamp=utc_now_iso(),
+    )
+
+
+def _cursor_error_payload(exc: Any) -> dict[str, Any]:
+    return {
+        "status": "startup_error",
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+        "request_id": getattr(exc, "request_id", None),
+        "is_retryable": bool(getattr(exc, "is_retryable", False)),
+        "retry_after": getattr(exc, "retry_after", None),
+        "code": getattr(exc, "code", None),
+        "status_code": getattr(exc, "status_code", None),
+    }
+
+
+def _run_result_payload(result: Any, *, cursor_run_status: str) -> dict[str, Any]:
+    return {
+        "id": getattr(result, "id", ""),
+        "agent_id": getattr(result, "agent_id", ""),
+        "status": cursor_run_status,
+        "cursor_run_status": cursor_run_status,
+        "result": str(getattr(result, "result", "")),
+        "duration_ms": int(getattr(result, "duration_ms", 0) or 0),
+        "created_at": getattr(result, "created_at", None),
+        "git": _serialize_git(getattr(result, "git", None)),
+        "request_id": None,
+        "is_retryable": False,
+        "retry_after": None,
+    }
+
+
+def _serialize_git(git: Any) -> dict[str, Any] | None:
+    if git is None:
+        return None
+    if is_dataclass(git):
+        return asdict(git)
+    if isinstance(git, dict):
+        return git
+    payload: dict[str, Any] = {}
+    for key in ("branch", "commit", "repo", "url"):
+        if hasattr(git, key):
+            payload[key] = getattr(git, key)
+    return payload or None
 
 
 def _write_record(run_dir: Path, record: AgentExecutionRecord, prompt: str) -> None:
@@ -90,6 +186,7 @@ def _write_record(run_dir: Path, record: AgentExecutionRecord, prompt: str) -> N
         "backend": record.backend,
         "success": record.success,
         "status": record.status,
+        "failure_class": record.failure_class,
         "summary": record.summary,
         "raw_result": record.raw_result,
         "timestamp": record.timestamp,
