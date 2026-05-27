@@ -95,9 +95,40 @@ def test_dashboard_summary_includes_baseline_snapshot(tmp_path) -> None:
     baseline = snapshot["lineage_topology"]["baseline_snapshot"]
     assert baseline["metrics"]["accuracy"] == 0.81
     assert summary["lineage_topology"]["baseline_snapshot"]["metrics"]["accuracy"] == 0.81
+    assert summary["lineage_topology"]["inherit_anchors"] == {}
     anchors = [row for row in snapshot["metrics"] if row.get("is_baseline_anchor")]
     assert anchors
     assert all(row["trajectory_x"] == 0 for row in anchors)
+
+
+def test_dashboard_topology_includes_inherit_anchors(tmp_path) -> None:
+    state_dir = tmp_path / "state"
+    registry = _seed_registry(state_dir)
+    registry.record_run(
+        run_id="gh_parent",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.95, "latency_ms": 10.0},
+        commit_sha="parentsha",
+    )
+    registry.record_experiment_manifest(
+        run_id="run_child",
+        manifest_path=".hiagentresearch/experiments/optimization_strategy/run_child.json",
+        manifest={
+            "group_id": "optimization_strategy",
+            "loop_index": 1,
+            "lineage_mode": "inherit",
+            "lineage_parent_group_id": "model_architecture",
+            "lineage_anchor_sha": "parentsha",
+            "lineage_anchor_policy": "best_commit",
+        },
+    )
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+    topology = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))["lineage_topology"]
+    assert topology["inherit_anchors"]["optimization_strategy"]["commit_sha"] == "parentsha"
 
 
 def test_dashboard_build_from_artifacts(tmp_path) -> None:

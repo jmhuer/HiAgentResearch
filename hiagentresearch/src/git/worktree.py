@@ -17,17 +17,43 @@ class WorktreeManager:
     def path_for(self, group_id: str) -> Path:
         return self.worktree_root / group_id
 
-    def ensure(self, group_id: str, branch: str, *, start_ref: str | None = None) -> Path:
+    def ensure(
+        self,
+        group_id: str,
+        branch: str,
+        *,
+        start_ref: str | None = None,
+        sync_to_ref: bool = False,
+    ) -> Path:
         path = self.path_for(group_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             self.remove(group_id)
         if self.git.branch_exists(branch):
+            if sync_to_ref and start_ref:
+                previous = self._current_branch()
+                self.git.checkout(branch)
+                self.git.sync_to_ref(start_ref)
+                if previous:
+                    self.git.checkout(previous)
             self._run(["worktree", "add", str(path), branch])
         else:
             ref = start_ref or "main"
             self._run(["worktree", "add", "-b", branch, str(path), ref])
         return path
+
+    def _current_branch(self) -> str | None:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return None
+        branch = proc.stdout.strip()
+        return branch if branch and branch != "HEAD" else None
 
     def remove(self, group_id: str) -> None:
         path = self.path_for(group_id)

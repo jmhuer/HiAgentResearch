@@ -16,11 +16,17 @@ class FakeGit:
         self.branch = branch
 
     def checkout_or_create(
-        self, branch: str, *, base_branch: str = "main", start_ref: str | None = None
+        self,
+        branch: str,
+        *,
+        base_branch: str = "main",
+        start_ref: str | None = None,
+        sync_to_ref: bool = False,
     ) -> None:
         self.branch = branch
         self.base_branch = base_branch
         self.start_ref = start_ref
+        self.sync_to_ref = sync_to_ref
 
     def resolve_ref(self, ref: str) -> str:
         return "mainsha"

@@ -746,23 +746,70 @@ function seriesDataForGroup(groupId, rows, trajectoryAxis, grouped, metricName) 
   if (!parentId) {
     return withTrajectoryAnchor(series, trajectoryAxis, 0, () => resolveBaselineAnchorPoint(groupId, metricName, rows));
   }
-  const parentRows = (grouped[parentId] || [])
-    .filter((point) => !point.is_baseline_anchor)
-    .sort((left, right) => Number(left.trajectory_x) - Number(right.trajectory_x));
-  if (!parentRows.length) {
-    return withTrajectoryAnchor(series, trajectoryAxis, 0, () => resolveBaselineAnchorPoint(groupId, metricName, rows));
+  const parentAnchor = resolveInheritAnchorPoint(groupId, parentId, grouped);
+  if (!parentAnchor) {
+    return series;
   }
-  const parentLast = parentRows[parentRows.length - 1];
-  const parentX = Number(parentLast.trajectory_x);
+  const parentX = Number(parentAnchor.trajectory_x);
   if (rows.some((row) => Number(row.trajectory_x) === parentX && !row.is_baseline_anchor)) {
     return series;
   }
   return withTrajectoryAnchor(series, trajectoryAxis, parentX, () => ({
-    ...parentLast,
+    ...parentAnchor,
     group_id: groupId,
     lineage_parent_group_id: parentId,
     is_inheritance_connector: true,
   }));
+}
+
+function resolveInheritAnchorPoint(groupId, parentId, grouped) {
+  const parentRows = (grouped[parentId] || [])
+    .filter((point) => !point.is_baseline_anchor)
+    .sort((left, right) => Number(left.trajectory_x) - Number(right.trajectory_x));
+  if (!parentRows.length) {
+    return null;
+  }
+  const anchorSha = inheritAnchorShaForGroup(groupId);
+  if (anchorSha) {
+    const matched = parentRows.find((row) => shaMatches(row.commit_sha, anchorSha));
+    if (matched) {
+      return matched;
+    }
+  }
+  const topology = dashboardData.lineage_topology || {};
+  const resolved = topology.inherit_anchors?.[groupId];
+  if (resolved?.commit_sha) {
+    const matched = parentRows.find((row) => shaMatches(row.commit_sha, resolved.commit_sha));
+    if (matched) {
+      return matched;
+    }
+  }
+  return parentRows[parentRows.length - 1];
+}
+
+function inheritAnchorShaForGroup(groupId) {
+  const topology = dashboardData.lineage_topology || {};
+  const fromTopology = topology.inherit_anchors?.[groupId]?.commit_sha;
+  if (fromTopology) {
+    return String(fromTopology);
+  }
+  const experiments = (dashboardData.experiments || [])
+    .filter((row) => row.group_id === groupId && row.lineage_anchor_sha)
+    .sort((left, right) => Number(left.loop_index || 0) - Number(right.loop_index || 0));
+  return experiments[0]?.lineage_anchor_sha ? String(experiments[0].lineage_anchor_sha) : "";
+}
+
+function shaMatches(left, right) {
+  if (!left || !right) {
+    return false;
+  }
+  const normalizedLeft = String(left).trim().toLowerCase();
+  const normalizedRight = String(right).trim().toLowerCase();
+  return (
+    normalizedLeft === normalizedRight ||
+    normalizedLeft.startsWith(normalizedRight) ||
+    normalizedRight.startsWith(normalizedLeft)
+  );
 }
 
 function withTrajectoryAnchor(series, trajectoryAxis, anchorX, resolveAnchor) {

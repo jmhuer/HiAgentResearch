@@ -127,7 +127,11 @@ def run_loops(
         registry=registry,
         git=git_service,
     )
-    git_service.checkout_or_create(target_branch, start_ref=bootstrap.start_ref)
+    git_service.checkout_or_create(
+        target_branch,
+        start_ref=bootstrap.start_ref,
+        sync_to_ref=bootstrap.mode == "inherit",
+    )
 
     cycles: list[CycleResult] = []
     for loop_index in range(1, loops + 1):
@@ -477,6 +481,7 @@ def _run_wave_parallel(
             group_id,
             group_config.branch,
             start_ref=bootstrap.start_ref,
+            sync_to_ref=bootstrap.mode == "inherit",
         )
         cmd = [
             sys.executable,

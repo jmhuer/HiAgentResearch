@@ -30,12 +30,24 @@ class GitService:
         *,
         base_branch: str = "main",
         start_ref: str | None = None,
+        sync_to_ref: bool = False,
     ) -> None:
+        ref = start_ref or base_branch
         if self.branch_exists(branch):
             self.checkout(branch)
+            if sync_to_ref and start_ref:
+                self.sync_to_ref(start_ref)
             return
-        ref = start_ref or base_branch
         self._run(["checkout", "-b", branch, ref])
+
+    def sync_to_ref(self, ref: str) -> bool:
+        target = self.resolve_ref(ref)
+        if self.head_sha() == target:
+            return False
+        if self.changed_files():
+            raise GitServiceError(f"cannot sync to {ref}: working tree has local changes")
+        self._run(["reset", "--hard", target])
+        return True
 
     def resolve_ref(self, ref: str) -> str:
         return self._run(["rev-parse", ref]).stdout.strip()

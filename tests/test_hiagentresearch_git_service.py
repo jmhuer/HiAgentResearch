@@ -52,6 +52,30 @@ def test_git_service_creates_missing_branch_from_main(monkeypatch, tmp_path) -> 
     assert ["git", "checkout", "-b", "research/demo", "main"] in calls
 
 
+def test_git_service_syncs_existing_branch_to_start_ref(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[1:] == ["rev-parse", "--verify", "research/demo"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args[1:] == ["rev-parse", "abc123"]:
+            return subprocess.CompletedProcess(args, 0, "abc123\n", "")
+        if args[1:] == ["rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(args, 0, "old456\n", "")
+        if args[1:] == ["status", "--porcelain"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    service = GitService(tmp_path)
+
+    service.checkout_or_create("research/demo", start_ref="abc123", sync_to_ref=True)
+
+    assert ["git", "checkout", "research/demo"] in calls
+    assert ["git", "reset", "--hard", "abc123"] in calls
+
+
 def test_git_service_checks_out_existing_branch(monkeypatch, tmp_path) -> None:
     calls = []
 

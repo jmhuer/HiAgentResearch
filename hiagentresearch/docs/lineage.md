@@ -14,6 +14,6 @@ The dashboard plots **lineage trajectory** on a shared research axis:
 
 - **L0** — frozen-eval baseline on `orchestration.baseline_ref` (recorded in the registry when `loops-all` or `dashboard build` runs). Shown as a diamond marker per group series.
 - **L1+** — loop results positioned by `orchestration.execution_waves`. Groups in the same wave with the same `loop_index` share the same x position (parallel wave-1 baselines align).
-- **Inherited groups** — continue after the deepest loop completed in all prior waves. The child series includes a solid connector segment (child color) from the parent’s last point.
+- **Inherited groups** — continue after the deepest loop completed in all prior waves. The child series includes a solid connector segment (child color) from the parent run whose `commit_sha` matches the child’s recorded `lineage_anchor_sha` (`best_commit` / `last_commit` bootstrap), not from L0 baseline or the parent’s latest loop by default.
 
-Inheritance anchors come from ingested GitHub eval runs (`gh_*` + `commit_sha`). `best_commit` selects the highest metric among those canonical runs; it does not fall back to “latest local run.” Threshold `markLine`s use a neutral color separate from series lines.
+Inheritance anchors come from ingested GitHub eval runs (`gh_*` + `commit_sha`). `best_commit` selects the highest metric among those canonical runs; it does not fall back to “latest local run.” When a child wave starts, inherit-mode branches are hard-reset to the resolved anchor if they already exist (clean worktree required). Threshold `markLine`s use a neutral color separate from series lines.

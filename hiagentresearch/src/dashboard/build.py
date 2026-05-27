@@ -64,7 +64,9 @@ def build_from_registry(
     snapshot = registry.dashboard_snapshot()
     metric_targets = _metric_targets(loaded)
     snapshot["metric_targets"] = metric_targets
-    snapshot["lineage_topology"] = _lineage_topology(loaded, registry=registry)
+    topology = _lineage_topology(loaded, registry=registry)
+    topology["inherit_anchors"] = _inherit_anchors_from_experiments(snapshot.get("experiments", []))
+    snapshot["lineage_topology"] = topology
     snapshot["metrics"] = _enrich_metrics_for_dashboard(
         snapshot["metrics"],
         snapshot.get("experiments", []),
@@ -426,6 +428,30 @@ def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | Non
         "chains": chains,
         "execution_waves": config.execution_waves(),
         "baseline_snapshot": baseline_snapshot,
+        "inherit_anchors": {},
+    }
+
+
+def _inherit_anchors_from_experiments(experiments: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    anchors: dict[str, dict[str, Any]] = {}
+    for row in experiments:
+        group_id = str(row.get("group_id", ""))
+        commit_sha = str(row.get("lineage_anchor_sha", "") or "").strip()
+        if not group_id or not commit_sha:
+            continue
+        loop_index = int(row.get("loop_index") or 999)
+        existing = anchors.get(group_id)
+        if existing is not None and int(existing.get("loop_index") or 999) <= loop_index:
+            continue
+        anchors[group_id] = {
+            "loop_index": loop_index,
+            "parent_group_id": row.get("lineage_parent_group_id"),
+            "commit_sha": commit_sha,
+            "anchor_policy": row.get("lineage_anchor_policy"),
+        }
+    return {
+        group_id: {key: value for key, value in payload.items() if key != "loop_index"}
+        for group_id, payload in anchors.items()
     }
 
 
