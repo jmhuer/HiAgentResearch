@@ -240,6 +240,10 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
             target_files_json TEXT NOT NULL,
             planned_code_changes_json TEXT NOT NULL,
             manifest_path TEXT NOT NULL,
+            lineage_mode TEXT,
+            lineage_parent_group_id TEXT,
+            lineage_anchor_sha TEXT,
+            lineage_anchor_policy TEXT,
             created_at TEXT NOT NULL
         );
         CREATE TABLE artifacts (
@@ -287,9 +291,12 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
             LEFT JOIN metrics latency ON latest.run_id = latency.run_id AND latency.metric_name = 'latency_ms';
         CREATE VIEW metric_series AS
             SELECT r.run_id, r.group_id, r.branch, r.commit_sha, r.workflow_run_id,
-                   r.correlation_id, r.created_at, m.metric_name, m.metric_value
+                   r.correlation_id, r.created_at, m.metric_name, m.metric_value,
+                   e.loop_index, e.lineage_mode, e.lineage_parent_group_id,
+                   e.lineage_anchor_sha, e.lineage_anchor_policy
             FROM runs r
-            JOIN metrics m ON r.run_id = m.run_id;
+            JOIN metrics m ON r.run_id = m.run_id
+            LEFT JOIN experiments e ON r.run_id = e.run_id;
         """
     )
 

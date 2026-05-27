@@ -15,6 +15,7 @@ from typing import Callable, Protocol
 from hiagentresearch.src.config import HiAgentResearchConfig, load_config
 from hiagentresearch.src.gh_ingest import ingest
 from hiagentresearch.src.git_service import GitService
+from hiagentresearch.src.lineage.resolve import BranchBootstrap, resolve_branch_bootstrap
 from hiagentresearch.src.github_actions import GitHubActionsService, load_run_meta
 from hiagentresearch.src.orchestrator import REPO_ROOT, init_state, run_group
 from hiagentresearch.src.registry import Registry
@@ -22,7 +23,9 @@ from hiagentresearch.src.registry import Registry
 
 class GitLike(Protocol):
     def checkout(self, branch: str) -> None: ...
-    def checkout_or_create(self, branch: str, *, base_branch: str = "main") -> None: ...
+    def checkout_or_create(
+        self, branch: str, *, base_branch: str = "main", start_ref: str | None = None
+    ) -> None: ...
     def stage_paths(self, paths: list[str]) -> None: ...
     def changed_files(self, *, staged: bool = False) -> list[str]: ...
     def has_core_staged_change(self, *, allowed_paths: list[str], supporting_paths: list[str]) -> bool: ...
@@ -106,7 +109,15 @@ def run_loops(
     _install_dependency_files(loaded_config)
     with contextlib.redirect_stdout(io.StringIO()):
         init_state()
-    git_service.checkout_or_create(target_branch, base_branch="main")
+    registry = Registry(REPO_ROOT / ".hiagentresearch" / "state")
+    registry.init()
+    bootstrap = resolve_branch_bootstrap(
+        group_config,
+        loaded_config,
+        registry=registry,
+        git=git_service,
+    )
+    git_service.checkout_or_create(target_branch, start_ref=bootstrap.start_ref)
 
     cycles: list[CycleResult] = []
     for loop_index in range(1, loops + 1):
@@ -116,6 +127,7 @@ def run_loops(
             workdir=workdir,
             quick=quick,
             agent_model=agent_model,
+            lineage_bootstrap=bootstrap,
         )
         local_run_id = str(local.get("run_id", ""))
         local_failure = str(local.get("failure_class", "invalid_cycle"))
@@ -142,9 +154,8 @@ def run_loops(
             loop_index=loop_index,
             local_run_id=local_run_id,
             local_result=local,
+            bootstrap=bootstrap,
         )
-        registry = Registry(REPO_ROOT / ".hiagentresearch" / "state")
-        registry.init()
         registry.record_experiment_manifest(
             run_id=local_run_id,
             manifest_path=manifest_path,
@@ -266,6 +277,7 @@ def _write_experiment_manifest(
     loop_index: int,
     local_run_id: str,
     local_result: dict,
+    bootstrap: BranchBootstrap,
 ) -> tuple[str, dict]:
     run_dir = REPO_ROOT / ".hiagentresearch" / "runs" / local_run_id
     intent = _read_json(run_dir / "experiment_intent.json")
@@ -285,6 +297,10 @@ def _write_experiment_manifest(
         "local_failure_class": local_result.get("failure_class", ""),
         "local_research_outcome": local_result.get("research_outcome", ""),
         "local_improved_baseline": bool(local_result.get("improved_baseline", False)),
+        "lineage_mode": bootstrap.mode,
+        "lineage_parent_group_id": bootstrap.parent_group_id,
+        "lineage_anchor_sha": bootstrap.start_ref,
+        "lineage_anchor_policy": bootstrap.anchor_policy,
     }
     path = EXPERIMENT_MANIFEST_ROOT / group_id / f"{local_run_id}.json"
     absolute_path = REPO_ROOT / path
@@ -331,6 +347,37 @@ def _manifest_summary(manifest: dict) -> str:
     if len(text) > 72:
         text = text[:69].rstrip() + "..."
     return text or "experiment update"
+
+
+def run_loops_all(
+    *,
+    loops: int,
+    workdir: Path,
+    quick: bool,
+    agent_model: str,
+    config: HiAgentResearchConfig | None = None,
+    stop_on_success: bool = True,
+) -> int:
+    loaded_config = config or load_config()
+    summaries: list[LoopSummary] = []
+    for wave in loaded_config.execution_waves():
+        for group_id in wave:
+            summary = run_loops(
+                group_id=group_id,
+                branch=None,
+                loops=loops,
+                workdir=workdir,
+                quick=quick,
+                agent_model=agent_model,
+                config=loaded_config,
+                stop_on_success=stop_on_success,
+            )
+            summaries.append(summary)
+            if not summary.ok:
+                print(json.dumps({"ok": False, "summaries": [item.to_dict() for item in summaries]}, indent=2))
+                return 1
+    print(json.dumps({"ok": True, "summaries": [item.to_dict() for item in summaries]}, indent=2))
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:

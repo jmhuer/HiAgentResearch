@@ -28,3 +28,5 @@ def test_prompt_is_config_backed() -> None:
     assert "kwta_unit_tests" in prompt
     assert "GitHub final eval remains authoritative" in prompt
     assert "core MNIST" not in prompt
+    assert "registry invariants" not in prompt
+    assert "Research north star" in prompt

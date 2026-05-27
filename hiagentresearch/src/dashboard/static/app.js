@@ -60,7 +60,7 @@ async function loadFromSqlite(manifest) {
   );
   const [summary, runs, metrics, outcomes, experiments, artifacts, metricNames, expectations] = await Promise.all([
     query(worker, "SELECT * FROM latest_group_summary ORDER BY group_id"),
-    query(worker, "SELECT * FROM runs ORDER BY created_at DESC"),
+    query(worker, "SELECT * FROM runs ORDER BY group_id, created_at DESC"),
     query(worker, "SELECT * FROM metric_series ORDER BY group_id, created_at, metric_name"),
     query(worker, "SELECT * FROM research_outcomes ORDER BY created_at"),
     query(worker, "SELECT * FROM experiments ORDER BY group_id, loop_index, created_at"),
@@ -130,17 +130,18 @@ function renderFilters(data) {
 
 function renderRuns(runs) {
   const container = document.getElementById("run-list");
-  if (!runs.length) {
+  const sorted = sortRunsForDisplay(runs);
+  if (!sorted.length) {
     container.textContent = "No runs found.";
     return;
   }
-  selectedRunId = selectedRunId || runs[0].run_id;
-  container.innerHTML = runs
+  selectedRunId = selectedRunId || sorted[0].run_id;
+  container.innerHTML = sorted
     .map(
       (run) => `
         <button class="run-button ${run.run_id === selectedRunId ? "active" : ""}" data-run-id="${escapeHtml(run.run_id)}">
           <strong>${escapeHtml(run.group_id)}</strong>
-          <div>${escapeHtml(run.run_id)} · ${escapeHtml(run.failure_class)}</div>
+          <div>${escapeHtml(loopLabel(run))} · ${escapeHtml(run.run_id)} · ${escapeHtml(run.failure_class)}</div>
           <div class="run-meta">${escapeHtml(formatRunMeta(run))}</div>
           <small>${escapeHtml(run.created_at || "")}</small>
         </button>
@@ -226,8 +227,16 @@ async function renderEChart(container, values, metricName, expectations) {
   chartInstance = chartInstance && !chartInstance.isDisposed?.() ? chartInstance : echarts.init(canvas, "dark");
   chartInstance.off("click");
 
-  const ordered = [...values].sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
-  const categories = uniqueInOrder(ordered.map((point) => point.run_id));
+  const ordered = [...values].sort((left, right) => {
+    const group = String(left.group_id).localeCompare(String(right.group_id));
+    if (group !== 0) return group;
+    const loopA = Number(left.loop_index || 0);
+    const loopB = Number(right.loop_index || 0);
+    if (loopA !== loopB) return loopA - loopB;
+    return String(left.created_at).localeCompare(String(right.created_at));
+  });
+  const loopAxis = loopCategoryAxis(ordered);
+  const categories = loopAxis.labels;
   const grouped = groupBy(ordered, (point) => point.group_id);
   const targetLines = dedupeExpectationLines(expectations);
   const domain = metricDomain(ordered, targetLines);
@@ -241,8 +250,10 @@ async function renderEChart(container, values, metricName, expectations) {
     emphasis: { focus: "series" },
     lineStyle: { width: 3 },
     itemStyle: { borderColor: "#090b12", borderWidth: 1.5 },
-    data: categories.map((runId) => {
-      const point = rows.find((row) => row.run_id === runId);
+    data: categories.map((category, index) => {
+      const point = loopAxis.indices
+        ? rows.find((row) => Number(row.loop_index) === loopAxis.indices[index])
+        : rows.find((row) => row.run_id === category);
       if (!point) return null;
       return {
         value: point.metric_value,
@@ -299,9 +310,10 @@ async function renderEChart(container, values, metricName, expectations) {
         axisTick: { show: false },
         axisLabel: {
           color: "#9aa4b2",
-          formatter: shortRunId,
+          formatter: (value) => value,
           hideOverlap: true,
         },
+        name: loopAxis.indices ? "Loop" : "Run",
       },
       yAxis: {
         type: "value",
@@ -352,6 +364,11 @@ function enrichMetricPoint(metric, indexes) {
     branch: run.branch || metric.branch || "",
     commit_sha: run.commit_sha || metric.commit_sha || "",
     workflow_run_id: run.workflow_run_id || metric.workflow_run_id || "",
+    loop_index: experiment.loop_index != null ? Number(experiment.loop_index) : null,
+    lineage_mode: experiment.lineage_mode || "",
+    lineage_parent_group_id: experiment.lineage_parent_group_id || "",
+    lineage_anchor_sha: experiment.lineage_anchor_sha || "",
+    lineage_anchor_policy: experiment.lineage_anchor_policy || "",
     outcome: outcome.research_outcome || "unknown",
     reason: outcome.reason || "",
     hypothesis: experiment.hypothesis || "",
@@ -377,9 +394,13 @@ function selectRun(runId, { scroll }) {
 
 function pointTooltipHtml(point) {
   if (!point) return "";
+  const lineage =
+    point.lineage_mode === "inherit" && point.lineage_parent_group_id
+      ? ` · inherit ${point.lineage_parent_group_id}@${shortSha(point.lineage_anchor_sha)}`
+      : "";
   return `
     <div class="tooltip-title">${escapeHtml(point.group_id)} · ${escapeHtml(point.metric_name)} ${formatMetric(point.metric_value)}</div>
-    <div class="tooltip-muted">${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</div>
+    <div class="tooltip-muted">${escapeHtml(loopLabel(point))}${lineage} · ${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</div>
     <div class="tooltip-body">${escapeHtml(shortText(point.hypothesis || point.reason || "No summary recorded.", 190))}</div>
     ${(point.planned_code_changes || []).slice(0, 2).map((item) => `<div class="tooltip-muted">${escapeHtml(shortText(item, 130))}</div>`).join("")}
   `;
@@ -401,6 +422,37 @@ function fillTemplate(template, values) {
     const encoded = key === "branch" ? encodeURI(value) : encodeURIComponent(value);
     return result.replaceAll(`{${key}}`, encoded);
   }, template);
+}
+
+function loopCategoryAxis(points) {
+  const indices = uniqueInOrder(
+    points
+      .map((point) => point.loop_index)
+      .filter((value) => value != null && value !== "")
+      .map((value) => Number(value))
+      .sort((left, right) => left - right),
+  );
+  if (!indices.length) {
+    return { labels: uniqueInOrder(points.map((point) => point.run_id)), indices: null };
+  }
+  return { labels: indices.map((value) => `L${value}`), indices };
+}
+
+function sortRunsForDisplay(runs) {
+  const indexes = dashboardIndexes();
+  return [...runs].sort((left, right) => {
+    const group = String(left.group_id).localeCompare(String(right.group_id));
+    if (group !== 0) return group;
+    const loopLeft = Number((indexes.experiments.get(left.run_id) || {}).loop_index || 0);
+    const loopRight = Number((indexes.experiments.get(right.run_id) || {}).loop_index || 0);
+    if (loopLeft !== loopRight) return loopLeft - loopRight;
+    return String(left.created_at).localeCompare(String(right.created_at));
+  });
+}
+
+function loopLabel(runOrPoint) {
+  const loopIndex = runOrPoint.loop_index ?? (dashboardIndexes().experiments.get(runOrPoint.run_id) || {}).loop_index;
+  return loopIndex ? `L${loopIndex}` : shortRunId(runOrPoint.run_id);
 }
 
 function groupBy(values, keyFn) {

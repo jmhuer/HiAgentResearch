@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from hiagentresearch.src.agent_backends import AgentBackendError, run_cursor_agent_cycle
+from hiagentresearch.src.lineage.resolve import BranchBootstrap
 from hiagentresearch.src.artifact_schema import (
     ArtifactParseError,
     classify_non_json_failure,
@@ -308,6 +309,7 @@ def run_group(
     workdir: Path,
     quick: bool,
     agent_model: str,
+    lineage_bootstrap: BranchBootstrap | None = None,
 ) -> int:
     config = load_config(CONFIG_PATH)
     registry = Registry(STATE_DIR)
@@ -357,6 +359,7 @@ def run_group(
             intent_packet=prior_intent,
             run_id=run_id,
             model=agent_model,
+            lineage_bootstrap=lineage_bootstrap,
         )
         (run_dir / "agent_stdout.txt").write_text(record.summary, encoding="utf-8")
         (run_dir / "agent_stderr.txt").write_text("", encoding="utf-8")

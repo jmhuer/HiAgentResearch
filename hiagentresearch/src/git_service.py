@@ -24,12 +24,31 @@ class GitService:
     def checkout(self, branch: str) -> None:
         self._run(["checkout", branch])
 
-    def checkout_or_create(self, branch: str, *, base_branch: str = "main") -> None:
+    def checkout_or_create(
+        self,
+        branch: str,
+        *,
+        base_branch: str = "main",
+        start_ref: str | None = None,
+    ) -> None:
         if self.branch_exists(branch):
             self.checkout(branch)
             return
-        self._run(["checkout", base_branch])
-        self._run(["checkout", "-b", branch])
+        ref = start_ref or base_branch
+        self._run(["checkout", "-b", branch, ref])
+
+    def resolve_ref(self, ref: str) -> str:
+        return self._run(["rev-parse", ref]).stdout.strip()
+
+    def ref_exists(self, ref: str) -> bool:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--verify", ref],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return proc.returncode == 0
 
     def branch_exists(self, branch: str) -> bool:
         proc = subprocess.run(

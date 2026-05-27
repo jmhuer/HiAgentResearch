@@ -8,7 +8,7 @@ from typing import Any
 from hiagentresearch.src.models import IntentPacket, TransitionEvent, utc_now_iso
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class Registry:
@@ -158,6 +158,17 @@ class Registry:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_experiments_group ON experiments(group_id, loop_index)")
+        experiment_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(experiments)").fetchall()
+        }
+        for column, ddl in (
+            ("lineage_mode", "ALTER TABLE experiments ADD COLUMN lineage_mode TEXT"),
+            ("lineage_parent_group_id", "ALTER TABLE experiments ADD COLUMN lineage_parent_group_id TEXT"),
+            ("lineage_anchor_sha", "ALTER TABLE experiments ADD COLUMN lineage_anchor_sha TEXT"),
+            ("lineage_anchor_policy", "ALTER TABLE experiments ADD COLUMN lineage_anchor_policy TEXT"),
+        ):
+            if column not in experiment_columns:
+                conn.execute(ddl)
         conn.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -305,9 +316,13 @@ class Registry:
                     target_files_json,
                     planned_code_changes_json,
                     manifest_path,
+                    lineage_mode,
+                    lineage_parent_group_id,
+                    lineage_anchor_sha,
+                    lineage_anchor_policy,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -319,6 +334,10 @@ class Registry:
                     json.dumps(_as_string_list(manifest.get("target_files")), sort_keys=True),
                     json.dumps(_as_string_list(manifest.get("planned_code_changes")), sort_keys=True),
                     manifest_path,
+                    _optional_str(manifest.get("lineage_mode")),
+                    _optional_str(manifest.get("lineage_parent_group_id")),
+                    _optional_str(manifest.get("lineage_anchor_sha")),
+                    _optional_str(manifest.get("lineage_anchor_policy")),
                     now,
                 ),
             )
@@ -405,6 +424,43 @@ class Registry:
                 "SELECT value FROM schema_meta WHERE key = 'schema_version'"
             ).fetchone()
             return int(row[0]) if row else 0
+        finally:
+            conn.close()
+
+    def last_github_run(self, group_id: str) -> dict[str, Any] | None:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM runs
+                WHERE group_id = ? AND failure_class = 'none' AND commit_sha != ''
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (group_id,),
+            ).fetchone()
+            return _row_to_dict(row) if row else None
+        finally:
+            conn.close()
+
+    def best_github_run(self, group_id: str, metric_name: str) -> dict[str, Any] | None:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                """
+                SELECT r.*
+                FROM runs r
+                JOIN metrics m ON r.run_id = m.run_id
+                WHERE r.group_id = ? AND r.failure_class = 'none' AND m.metric_name = ?
+                ORDER BY m.metric_value DESC, r.created_at DESC
+                LIMIT 1
+                """,
+                (group_id, metric_name),
+            ).fetchone()
+            return _row_to_dict(row) if row else None
         finally:
             conn.close()
 
@@ -625,3 +681,10 @@ def _as_int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

@@ -49,6 +49,12 @@ github:
   remote: origin
   run_lookup_attempts: 30
   run_lookup_sleep_sec: 3
+orchestration:
+  baseline_ref: main
+  execution_waves:
+    - [model_architecture, data_augmentation]
+    - [optimization_strategy]
+    - [hyperparameter_optimization]
 dashboard:
   enabled: true
   title: HiAgentResearch
@@ -86,6 +92,8 @@ research_groups:
     branch: research/model-architecture
     objective: Improve model architecture while preserving latency budget.
     policy_mode: explore
+    lineage:
+      mode: baseline
     allowed_paths:
       - mnist/requirements.txt
       - mnist/pipeline/model.py
@@ -95,6 +103,11 @@ research_groups:
     branch: research/hyperparameter-optimization
     objective: Improve training dynamics through hyperparameter exploration.
     policy_mode: explore
+    lineage:
+      mode: inherit
+      inherit_from: optimization_strategy
+      anchor_policy: best_commit
+      anchor_metric: accuracy
     allowed_paths:
       - mnist/requirements.txt
       - mnist/pipeline/train.py
@@ -103,6 +116,8 @@ research_groups:
     branch: research/data-augmentation
     objective: Improve robustness and accuracy using targeted augmentation strategy.
     policy_mode: explore
+    lineage:
+      mode: baseline
     allowed_paths:
       - mnist/requirements.txt
       - mnist/pipeline/train.py
@@ -112,6 +127,11 @@ research_groups:
     branch: research/optimization-strategy
     objective: Improve optimization strategy and training efficiency tradeoffs.
     policy_mode: exploit
+    lineage:
+      mode: inherit
+      inherit_from: model_architecture
+      anchor_policy: best_commit
+      anchor_metric: accuracy
     allowed_paths:
       - mnist/requirements.txt
       - mnist/pipeline/train.py

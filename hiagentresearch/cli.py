@@ -7,7 +7,7 @@ from pathlib import Path
 from hiagentresearch.src import config as config_cli
 from hiagentresearch.src import registry_view
 from hiagentresearch.src.dashboard import cli as dashboard_cli
-from hiagentresearch.src.loop_controller import REPO_ROOT, run_loops
+from hiagentresearch.src.loop_controller import REPO_ROOT, run_loops, run_loops_all
 from hiagentresearch.src.orchestrator import init_state, resolve_group, run_group, status_report
 
 
@@ -34,6 +34,13 @@ def build_parser() -> argparse.ArgumentParser:
     loops.add_argument("--quick", action="store_true")
     loops.add_argument("--agent-model", default="composer-2.5")
     loops.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
+
+    loops_all = sub.add_parser("loops-all", help="Run all research groups in configured execution waves.")
+    loops_all.add_argument("--loops", type=int, default=3)
+    loops_all.add_argument("--workdir", type=Path, default=REPO_ROOT)
+    loops_all.add_argument("--quick", action="store_true")
+    loops_all.add_argument("--agent-model", default="composer-2.5")
+    loops_all.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
 
     resolve = sub.add_parser("resolve-group", help="Resolve group id for a branch.")
     resolve.add_argument("--branch", required=True)
@@ -82,6 +89,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(summary.to_dict(), indent=2))
         return 0 if summary.ok else 1
+    if args.cmd == "loops-all":
+        return run_loops_all(
+            loops=args.loops,
+            workdir=args.workdir.resolve(),
+            quick=args.quick,
+            agent_model=args.agent_model,
+            stop_on_success=not args.run_exact_loops,
+        )
     if args.cmd == "resolve-group":
         return resolve_group(branch=args.branch)
     parser.print_help()

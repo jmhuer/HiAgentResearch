@@ -49,8 +49,7 @@ def test_git_service_creates_missing_branch_from_main(monkeypatch, tmp_path) -> 
 
     service.checkout_or_create("research/demo", base_branch="main")
 
-    assert ["git", "checkout", "main"] in calls
-    assert ["git", "checkout", "-b", "research/demo"] in calls
+    assert ["git", "checkout", "-b", "research/demo", "main"] in calls
 
 
 def test_git_service_checks_out_existing_branch(monkeypatch, tmp_path) -> None:

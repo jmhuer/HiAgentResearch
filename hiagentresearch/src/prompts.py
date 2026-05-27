@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from hiagentresearch.src.lineage.resolve import BranchBootstrap
 from hiagentresearch.src.models import IntentPacket, ResearchGroup
 
 
-def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, run_id: str) -> str:
+def build_phase1_prompt(
+    *,
+    group: ResearchGroup,
+    intent_packet: IntentPacket,
+    run_id: str,
+    lineage_bootstrap: BranchBootstrap | None = None,
+) -> str:
     run_plan_md = f".hiagentresearch/runs/{run_id}/experiment_plan.md"
     run_intent_json = f".hiagentresearch/runs/{run_id}/experiment_intent.json"
     core_paths = _core_allowed_paths(group)
@@ -20,6 +27,7 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
         else "5) Do not create branch-memory source files; experiment intent is recorded by the runtime.\n"
     )
     expectations_text = _bullets(group.research_output_expectations)
+    lineage_text = _lineage_stanza(lineage_bootstrap)
 
     return (
         f"You are the phase-1 research agent for group '{group.id}'.\n"
@@ -30,10 +38,12 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
         f"Current hypothesis text: {intent_packet.hypothesis_text}\n"
         f"Previous failure class: {intent_packet.last_failure_class}\n"
         f"Next action: {intent_packet.next_action}\n\n"
-        "Design north star:\n"
-        "- Keep the runtime simple; power comes from trusted modular services.\n"
-        "- Use configured contracts instead of project-specific assumptions.\n"
-        "- Fix issues canonically by improving contracts, eval adapters, registry invariants, or docs.\n\n"
+        f"{lineage_text}"
+        "Research north star:\n"
+        "- Start from evidence and a written plan before making edits.\n"
+        "- Make one bounded change in configured core files per cycle.\n"
+        "- Respect frozen eval entrypoints and configured allowed paths.\n"
+        "- Treat metric regressions as learning, not execution failure.\n\n"
         "Before changes, read and follow:\n"
         f"{guidance_text}\n\n"
         "Inspect configured context before editing:\n"
@@ -72,6 +82,18 @@ def build_phase1_prompt(*, group: ResearchGroup, intent_packet: IntentPacket, ru
         "- If you add or change project dependencies, install the configured requirements file before validation.\n"
         "- If previous output did not improve the configured baseline, treat that as evidence and continue or pivot using the intent packet.\n"
         "- Only revert when the current branch state is a worse basis for future research.\n"
+    )
+
+
+def _lineage_stanza(bootstrap: BranchBootstrap | None) -> str:
+    if not bootstrap or bootstrap.mode == "baseline":
+        return ""
+    parent = bootstrap.parent_group_id or "unknown"
+    short_sha = bootstrap.start_ref[:7]
+    policy = bootstrap.anchor_policy or "last_commit"
+    return (
+        f"Lineage: this group continues from '{parent}' at commit {short_sha} ({policy}). "
+        "Build on that state; do not reset unrelated files unless the hypothesis requires it.\n\n"
     )
 
 

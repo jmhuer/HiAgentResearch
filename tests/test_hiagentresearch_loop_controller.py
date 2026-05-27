@@ -15,9 +15,15 @@ class FakeGit:
     def checkout(self, branch: str) -> None:
         self.branch = branch
 
-    def checkout_or_create(self, branch: str, *, base_branch: str = "main") -> None:
+    def checkout_or_create(
+        self, branch: str, *, base_branch: str = "main", start_ref: str | None = None
+    ) -> None:
         self.branch = branch
         self.base_branch = base_branch
+        self.start_ref = start_ref
+
+    def resolve_ref(self, ref: str) -> str:
+        return "mainsha"
 
     def stage_paths(self, paths: list[str]) -> None:
         self.staged_paths = paths

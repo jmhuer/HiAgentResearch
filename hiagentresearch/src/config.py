@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 from string import Formatter
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -83,12 +83,34 @@ class AgentContractConfig(BaseModel):
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
 
 
+class LineageConfig(BaseModel):
+    mode: Literal["baseline", "inherit", "force"] = "baseline"
+    inherit_from: str | None = None
+    anchor_policy: Literal["last_commit", "best_commit"] = "last_commit"
+    anchor_metric: str = "accuracy"
+
+    @model_validator(mode="after")
+    def validate_inherit(self) -> "LineageConfig":
+        if self.mode == "inherit" and not self.inherit_from:
+            raise ValueError("lineage.inherit_from is required when mode is inherit")
+        return self
+
+
+class OrchestrationConfig(BaseModel):
+    baseline_ref: str = "main"
+    execution_waves: list[list[str]] | None = None
+    execution_order: list[str] | None = None
+    max_parallel_groups: int = 2
+    worktree_root: str = ".hiagentresearch/worktrees"
+
+
 class ResearchGroupConfig(BaseModel):
     id: str
     branch: str
     objective: str
     policy_mode: str
     allowed_paths: list[str]
+    lineage: LineageConfig = Field(default_factory=LineageConfig)
     evaluation: EvaluationConfig | None = None
     context_paths: list[str] | None = None
     supporting_artifacts: list[SupportingArtifactConfig] | None = None
@@ -114,6 +136,7 @@ class HiAgentResearchConfig(BaseModel):
     frozen_eval_entrypoint: str
     evaluation: EvaluationConfig
     research_groups: list[ResearchGroupConfig]
+    orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
     artifact_contract: ArtifactContract
     policy_modes: dict[str, str]
     github: GitHubConfig = Field(default_factory=GitHubConfig)
@@ -153,7 +176,38 @@ class HiAgentResearchConfig(BaseModel):
             frozen_allowed = sorted(path for path in group.allowed_paths if _overlaps_any(path, frozen))
             if frozen_allowed:
                 raise ValueError(f"group {group.id} allowed_paths include frozen paths: {frozen_allowed}")
+            if group.lineage.mode == "inherit" and group.lineage.inherit_from not in group_ids:
+                raise ValueError(
+                    f"group {group.id} lineage.inherit_from references unknown group: {group.lineage.inherit_from}"
+                )
+        self._validate_orchestration_order(group_ids)
         return self
+
+    def _validate_orchestration_order(self, group_ids: list[str]) -> None:
+        waves = self.execution_waves()
+        position: dict[str, int] = {}
+        for wave_index, wave in enumerate(waves):
+            for group_id in wave:
+                if group_id not in group_ids:
+                    raise ValueError(f"orchestration references unknown group_id: {group_id}")
+                position[group_id] = wave_index
+        for group in self.research_groups:
+            if group.lineage.mode != "inherit" or not group.lineage.inherit_from:
+                continue
+            parent = group.lineage.inherit_from
+            if parent not in position or group.id not in position:
+                continue
+            if position[parent] >= position[group.id]:
+                raise ValueError(
+                    f"group {group.id} must run after parent {parent} in orchestration waves/order"
+                )
+
+    def execution_waves(self) -> list[list[str]]:
+        if self.orchestration.execution_waves:
+            return self.orchestration.execution_waves
+        if self.orchestration.execution_order:
+            return [[group_id] for group_id in self.orchestration.execution_order]
+        return [[group.id] for group in self.research_groups]
 
     def workdir_path(self, root: Path = REPO_ROOT) -> Path:
         path = Path(self.workdir)
