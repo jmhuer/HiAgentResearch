@@ -168,19 +168,31 @@ function renderRuns(runs) {
 }
 
 async function renderChart() {
-  const groupId = document.getElementById("group-filter").value;
-  const metricName = document.getElementById("metric-filter").value;
-  const indexes = dashboardIndexes();
-  const values = (dashboardData.metrics || [])
-    .filter((metric) => (groupId === ALL_GROUPS || metric.group_id === groupId) && metric.metric_name === metricName)
-    .map((metric) => enrichMetricPoint(metric, indexes));
   const container = document.getElementById("metric-chart");
-  if (!values.length) {
-    container.textContent = "No metric data for this selection.";
-    return;
+  try {
+    const groupId = document.getElementById("group-filter").value;
+    const metricName = document.getElementById("metric-filter").value;
+    const indexes = dashboardIndexes();
+    const values = chartMetricPoints(
+      (dashboardData.metrics || []).filter(
+        (metric) => (groupId === ALL_GROUPS || metric.group_id === groupId) && metric.metric_name === metricName,
+      ),
+      indexes,
+    );
+    if (!values.length) {
+      if (chartInstance && !chartInstance.isDisposed?.()) {
+        chartInstance.dispose();
+        chartInstance = null;
+      }
+      container.textContent = "No metric data for this selection.";
+      return;
+    }
+    const expectations = expectationLines({ groupId, metricName });
+    await renderEChart(container, values, metricName, expectations);
+  } catch (error) {
+    console.error("Dashboard chart render failed", error);
+    container.textContent = `Chart failed to render: ${error.message}`;
   }
-  const expectations = expectationLines({ groupId, metricName });
-  await renderEChart(container, values, metricName, expectations);
 }
 
 function renderRunDetail() {
@@ -249,26 +261,21 @@ async function renderEChart(container, values, metricName, expectations) {
   const grouped = groupBy(ordered, (point) => point.group_id);
   const targetLines = dedupeExpectationLines(expectations);
   const domain = metricDomain(ordered, targetLines);
-  const groupSeries = Object.entries(grouped).map(([groupId, rows], index) => ({
+  const groupSeries = Object.entries(grouped).map(([groupId, rows], index) => {
+    const seriesData = chartSeriesData(rows, trajectoryAxis);
+    const visiblePoints = seriesData.filter((entry) => entry != null).length;
+    return {
     name: groupId,
     type: "line",
     smooth: true,
     symbol: "circle",
     symbolSize: 9,
-    connectNulls: false,
+    showAllSymbol: true,
+    connectNulls: visiblePoints > 1,
     emphasis: { focus: "series" },
-    lineStyle: { width: 3 },
+    lineStyle: { width: visiblePoints > 1 ? 3 : 0 },
     itemStyle: { borderColor: "#090b12", borderWidth: 1.5 },
-    data: trajectoryAxis.indices.map((trajectoryX) => {
-      const point = rows.find((row) => Number(row.trajectory_x) === trajectoryX);
-      if (!point) return null;
-      return {
-        value: point.metric_value,
-        point,
-        symbolSize: point.run_id === selectedRunId ? 13 : 9,
-        itemStyle: point.run_id === selectedRunId ? { borderColor: "#f6f7fb", borderWidth: 3 } : undefined,
-      };
-    }),
+    data: seriesData,
     markLine:
       index === 0 && targetLines.length
         ? {
@@ -283,8 +290,9 @@ async function renderEChart(container, values, metricName, expectations) {
             data: targetLines.map((line) => ({ name: line.label, yAxis: line.value })),
           }
         : undefined,
-  }));
-  const bridgeSeries = lineageBridgeSeries(ordered, grouped, trajectoryAxis.indices);
+  };
+  });
+  const bridgeSeries = lineageBridgeSeries(ordered, grouped, trajectoryAxis);
   const series = [...groupSeries, ...bridgeSeries];
 
   chartInstance.setOption(
@@ -314,7 +322,7 @@ async function renderEChart(container, values, metricName, expectations) {
       xAxis: {
         type: "category",
         data: categories,
-        boundaryGap: false,
+        boundaryGap: categories.length <= 1,
         axisLine: { lineStyle: { color: "rgba(255,255,255,0.18)" } },
         axisTick: { show: false },
         axisLabel: {
@@ -362,18 +370,72 @@ async function renderEChart(container, values, metricName, expectations) {
     window.addEventListener("resize", () => chartInstance?.resize());
     resizeListenerAttached = true;
   }
+  chartInstance.resize();
+}
+
+function chartMetricPoints(metrics, indexes) {
+  const enriched = metrics
+    .map((metric) => enrichMetricPoint(metric, indexes))
+    .filter((point) => Number.isFinite(point.metric_value));
+  const byGroupLoop = new Map();
+  for (const point of enriched) {
+    const loopKey = point.loop_index != null ? String(point.loop_index) : point.run_id;
+    const key = `${point.group_id}:${loopKey}`;
+    const existing = byGroupLoop.get(key);
+    if (!existing || preferCanonicalRun(point.run_id, existing.run_id)) {
+      byGroupLoop.set(key, point);
+    }
+  }
+  return [...byGroupLoop.values()];
+}
+
+function preferCanonicalRun(candidate, incumbent) {
+  const candidateGithub = String(candidate).startsWith("gh_");
+  const incumbentGithub = String(incumbent).startsWith("gh_");
+  if (candidateGithub && !incumbentGithub) return true;
+  if (!candidateGithub && incumbentGithub) return false;
+  return String(candidate).localeCompare(String(incumbent)) > 0;
+}
+
+function chartSeriesData(rows, trajectoryAxis) {
+  if (trajectoryAxis.mode === "run_id") {
+    return trajectoryAxis.points.map((point) => {
+      if (!rows.some((row) => row.run_id === point.run_id)) return null;
+      return chartPointDatum(point);
+    });
+  }
+  return trajectoryAxis.indices.map((trajectoryX) => {
+    const point = rows.find((row) => Number(row.trajectory_x) === trajectoryX);
+    if (!point) return null;
+    return chartPointDatum(point);
+  });
+}
+
+function chartPointDatum(point) {
+  return {
+    value: point.metric_value,
+    point,
+    symbolSize: point.run_id === selectedRunId ? 13 : 9,
+    itemStyle: point.run_id === selectedRunId ? { borderColor: "#f6f7fb", borderWidth: 3 } : undefined,
+  };
 }
 
 function enrichMetricPoint(metric, indexes) {
   const run = indexes.runs.get(metric.run_id) || {};
   const outcome = indexes.outcomes.get(metric.run_id) || {};
   const experiment = indexes.experiments.get(metric.run_id) || {};
+  const loopIndex =
+    experiment.loop_index != null
+      ? Number(experiment.loop_index)
+      : metric.loop_index != null
+        ? Number(metric.loop_index)
+        : null;
   return {
     ...metric,
     branch: run.branch || metric.branch || "",
     commit_sha: run.commit_sha || metric.commit_sha || "",
     workflow_run_id: run.workflow_run_id || metric.workflow_run_id || "",
-    loop_index: experiment.loop_index != null ? Number(experiment.loop_index) : null,
+    loop_index: Number.isFinite(loopIndex) && loopIndex > 0 ? loopIndex : null,
     lineage_mode: experiment.lineage_mode || "",
     lineage_parent_group_id: experiment.lineage_parent_group_id || "",
     lineage_anchor_sha: experiment.lineage_anchor_sha || "",
@@ -466,18 +528,25 @@ function trajectoryCategoryAxis(points) {
   const indices = uniqueInOrder(
     points
       .map((point) => point.trajectory_x)
-      .filter((value) => value != null && value !== "")
+      .filter((value) => value != null && value !== "" && Number.isFinite(Number(value)))
       .map((value) => Number(value))
       .sort((left, right) => left - right),
   );
-  if (!indices.length) {
-    return { labels: uniqueInOrder(points.map((point) => point.run_id)), indices: null };
+  if (indices.length) {
+    return { mode: "trajectory", labels: indices.map((value) => `L${value}`), indices };
   }
-  return { labels: indices.map((value) => `L${value}`), indices };
+  const sorted = sortRunsForDisplay(points);
+  return {
+    mode: "run_id",
+    labels: sorted.map((point) => loopLabel(point)),
+    indices: sorted.map((_, index) => index),
+    points: sorted,
+  };
 }
 
-function lineageBridgeSeries(ordered, grouped, trajectoryIndices) {
-  if (!trajectoryIndices?.length) return [];
+function lineageBridgeSeries(ordered, grouped, trajectoryAxis) {
+  const trajectoryIndices = trajectoryAxis.mode === "trajectory" ? trajectoryAxis.indices : [];
+  if (!trajectoryIndices.length) return [];
   const topology = dashboardData.lineage_topology || { chains: [] };
   const bridges = [];
   topology.chains.forEach((chain) => {
@@ -595,6 +664,9 @@ function metricDomain(points, targetLines) {
     ...points.map((point) => point.metric_value),
     ...targetLines.map((line) => line.value),
   ].filter((value) => Number.isFinite(Number(value)));
+  if (!values.length) {
+    return { min: 0, max: 1 };
+  }
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   const span = Math.max(maxValue - minValue, 0.000001);
