@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -14,7 +15,7 @@ from typing import Any
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
 from hiagentresearch.src.dashboard.trajectory import assign_trajectory_positions, baseline_metric_points
 from hiagentresearch.src.registry.store import Registry
-from hiagentresearch.src.runtime.loop_controller import _ensure_baseline_snapshot
+from hiagentresearch.src.runtime.loop_controller import _ensure_baseline_snapshot, _install_dependency_files
 
 
 DASHBOARD_SCHEMA_VERSION = 1
@@ -57,6 +58,8 @@ def build_from_registry(
 
     registry = Registry(state_dir.resolve())
     registry.init()
+    if source_label.startswith("github_artifacts") or os.environ.get("CI"):
+        _install_dependency_files(loaded)
     _ensure_baseline_snapshot(registry, loaded)
     snapshot = registry.dashboard_snapshot()
     metric_targets = _metric_targets(loaded)

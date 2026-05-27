@@ -15,13 +15,10 @@ let chartResizeObserver = null;
 async function main() {
   const manifest = await fetchJson("./manifest.json");
   const summary = await fetchJson("./summary.json");
-  dashboardData = await loadDashboardData(manifest);
+  dashboardData = mergePublishedSnapshot(await loadDashboardData(manifest, summary), summary);
   dashboardData.repository = manifest.repository || dashboardData.repository || {};
   dashboardData.summary = dashboardData.summary?.length ? dashboardData.summary : summary.groups;
   dashboardData.metric_names = chartMetricNames(dashboardData, summary);
-  dashboardData.lineage_topology = dashboardData.lineage_topology || summary.lineage_topology || { chains: [], groups: {} };
-  dashboardData.metric_targets =
-    dashboardData.metric_targets || summary.metric_targets || summary.metric_expectations || [];
   renderShell(manifest, summary);
   renderGroups(dashboardData.summary || []);
   renderFilters(dashboardData);
@@ -45,19 +42,45 @@ async function withTimeout(promise, ms, label) {
   }
 }
 
-async function loadDashboardData(manifest) {
+function mergePublishedSnapshot(data, summary = {}) {
+  const summaryTopology = summary.lineage_topology || {};
+  const dataTopology = data.lineage_topology || {};
+  const baselineSnapshot = dataTopology.baseline_snapshot || summaryTopology.baseline_snapshot || null;
+  return {
+    ...data,
+    lineage_topology: {
+      ...summaryTopology,
+      ...dataTopology,
+      ...(baselineSnapshot ? { baseline_snapshot: baselineSnapshot } : {}),
+      groups: { ...(summaryTopology.groups || {}), ...(dataTopology.groups || {}) },
+      chains: dataTopology.chains?.length ? dataTopology.chains : summaryTopology.chains || [],
+      execution_waves: dataTopology.execution_waves?.length
+        ? dataTopology.execution_waves
+        : summaryTopology.execution_waves || [],
+    },
+    metric_targets:
+      data.metric_targets?.length
+        ? data.metric_targets
+        : summary.metric_targets || summary.metric_expectations || [],
+  };
+}
+
+async function loadDashboardData(manifest, summary = {}) {
   if (shouldPreferJsonSnapshot(manifest)) {
     try {
-      return await fetchJson("./dashboard.json");
+      return mergePublishedSnapshot(await fetchJson("./dashboard.json"), summary);
     } catch (error) {
       console.warn("JSON snapshot unavailable, trying SQLite", error);
     }
   }
   try {
-    return await withTimeout(loadFromSqlite(manifest), 20000, "SQLite dashboard load");
+    return mergePublishedSnapshot(
+      await withTimeout(loadFromSqlite(manifest), 20000, "SQLite dashboard load"),
+      summary,
+    );
   } catch (error) {
     console.warn("SQLite adapter unavailable, using JSON fallback", error);
-    return fetchJson("./dashboard.json");
+    return mergePublishedSnapshot(await fetchJson("./dashboard.json"), summary);
   }
 }
 

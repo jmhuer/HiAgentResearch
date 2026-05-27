@@ -22,7 +22,12 @@ from hiagentresearch.src.lineage.resolve import BranchBootstrap, resolve_branch_
 from hiagentresearch.src.github.actions import GitHubActionsService, load_run_meta
 from hiagentresearch.src.paths import REPO_ROOT, resolve_execution_root, resolve_runs_dir
 from hiagentresearch.src.runtime.orchestrator import init_state, run_group
-from hiagentresearch.src.core.outcomes import normalize_research_outcome_name, outcome_met_targets
+from hiagentresearch.src.core.outcomes import (
+    baseline_metrics_complete,
+    baseline_metrics_from_eval_payload,
+    normalize_research_outcome_name,
+    outcome_met_targets,
+)
 from hiagentresearch.src.registry.store import Registry
 
 
@@ -356,19 +361,13 @@ def _manifest_summary(manifest: dict) -> str:
     return text or "experiment update"
 
 
-_BASELINE_REQUIRED_METRICS = ("accuracy", "latency_ms")
-
-
-def _baseline_metrics_complete(metrics: dict[str, float]) -> bool:
-    return all(name in metrics and metrics[name] is not None for name in _BASELINE_REQUIRED_METRICS)
-
-
 def _ensure_baseline_snapshot(registry: Registry, config: HiAgentResearchConfig) -> None:
     existing = registry.baseline_snapshot()
-    if existing and _baseline_metrics_complete(existing.get("metrics") or {}):
+    if existing and baseline_metrics_complete(existing.get("metrics") or {}):
         return
     entrypoint = config.frozen_eval_path(REPO_ROOT)
     if not entrypoint.exists():
+        print(f"warning: baseline eval entrypoint missing: {entrypoint}", file=sys.stderr)
         return
     anchor_group = next((group.id for group in config.research_groups), "model_architecture")
     proc = subprocess.run(
@@ -379,17 +378,20 @@ def _ensure_baseline_snapshot(registry: Registry, config: HiAgentResearchConfig)
         check=False,
     )
     if proc.returncode not in {0, 2}:
+        print(
+            "warning: baseline quick eval failed "
+            f"(exit={proc.returncode}): {proc.stderr[-400:] if proc.stderr else proc.stdout[-400:]}",
+            file=sys.stderr,
+        )
         return
     try:
         payload = json.loads(proc.stdout)
     except json.JSONDecodeError:
+        print("warning: baseline quick eval did not return JSON", file=sys.stderr)
         return
-    metrics = {
-        name: float(payload[name])
-        for name in ("accuracy", "latency_ms", "duration_sec")
-        if name in payload and payload[name] is not None
-    }
-    if not _baseline_metrics_complete(metrics):
+    metrics = baseline_metrics_from_eval_payload(payload)
+    if not baseline_metrics_complete(metrics):
+        print(f"warning: baseline quick eval missing required metrics: {metrics}", file=sys.stderr)
         return
     registry.record_baseline_snapshot(ref=config.orchestration.baseline_ref, metrics=metrics)
 

@@ -2,9 +2,19 @@ import json
 import sqlite3
 
 from hiagentresearch.src.core.config import load_config
+from hiagentresearch.src.core.outcomes import baseline_metrics_from_eval_payload
 from hiagentresearch.src.dashboard.build import build_from_artifacts, build_from_registry
 from hiagentresearch.src.dashboard.cli import main
 from hiagentresearch.src.registry.store import Registry
+
+
+def test_baseline_metrics_from_eval_report_fallback() -> None:
+    metrics = baseline_metrics_from_eval_payload(
+        {"eval_report": {"accuracy": 0.81, "latency_ms": 42.0}, "duration_sec": 1.5}
+    )
+    assert metrics["accuracy"] == 0.81
+    assert metrics["latency_ms"] == 42.0
+    assert metrics["duration_sec"] == 1.5
 
 
 def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None:
@@ -68,6 +78,26 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'intent_packets'").fetchone() is None
     finally:
         conn.close()
+
+
+def test_dashboard_summary_includes_baseline_snapshot(tmp_path) -> None:
+    state_dir = tmp_path / "state"
+    registry = _seed_registry(state_dir)
+    registry.record_baseline_snapshot(
+        ref="main",
+        metrics={"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
+    )
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+
+    snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    baseline = snapshot["lineage_topology"]["baseline_snapshot"]
+    assert baseline["metrics"]["accuracy"] == 0.81
+    assert summary["lineage_topology"]["baseline_snapshot"]["metrics"]["accuracy"] == 0.81
+    anchors = [row for row in snapshot["metrics"] if row.get("is_baseline_anchor")]
+    assert anchors
+    assert all(row["trajectory_x"] == 0 for row in anchors)
 
 
 def test_dashboard_build_from_artifacts(tmp_path) -> None:
