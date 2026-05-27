@@ -80,8 +80,10 @@ def test_dashboard_build_from_artifacts(tmp_path) -> None:
 
     assert result.database_path.exists()
     snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     assert snapshot["runs"][0]["run_id"] == "gh_123"
     assert snapshot["experiments"][0]["hypothesis_id"] == "h1"
+    assert summary["metric_targets"]
 
 
 def test_dashboard_cli_build(tmp_path, capsys) -> None:

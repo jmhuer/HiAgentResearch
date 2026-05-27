@@ -29,9 +29,32 @@ async function main() {
   await renderChart();
 }
 
-async function loadDashboardData(manifest) {
+function shouldPreferJsonSnapshot(manifest) {
+  return String(manifest.source || "").startsWith("github_artifacts");
+}
+
+async function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
   try {
-    return await loadFromSqlite(manifest);
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadDashboardData(manifest) {
+  if (shouldPreferJsonSnapshot(manifest)) {
+    try {
+      return await fetchJson("./dashboard.json");
+    } catch (error) {
+      console.warn("JSON snapshot unavailable, trying SQLite", error);
+    }
+  }
+  try {
+    return await withTimeout(loadFromSqlite(manifest), 20000, "SQLite dashboard load");
   } catch (error) {
     console.warn("SQLite adapter unavailable, using JSON fallback", error);
     return fetchJson("./dashboard.json");
@@ -1125,7 +1148,10 @@ function uniqueInOrder(values) {
 }
 
 function text(id, value) {
-  document.getElementById(id).textContent = value;
+  const element = document.getElementById(id);
+  if (element) {
+    element.textContent = value;
+  }
 }
 
 function displayResearchOutcome(outcome) {

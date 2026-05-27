@@ -123,6 +123,7 @@ def _write_dashboard_files(
         "title": config.dashboard.title,
         "metric_names": metric_names,
         "groups": snapshot.get("summary", []),
+        "metric_targets": snapshot.get("metric_targets", []),
         "lineage_topology": snapshot.get("lineage_topology", {}),
     }
     manifest = {
