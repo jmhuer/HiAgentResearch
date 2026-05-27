@@ -20,7 +20,7 @@ from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.git.worktree import WorktreeManager
 from hiagentresearch.src.lineage.resolve import BranchBootstrap, resolve_branch_bootstrap
 from hiagentresearch.src.github.actions import GitHubActionsService, load_run_meta
-from hiagentresearch.src.paths import REPO_ROOT
+from hiagentresearch.src.paths import REPO_ROOT, resolve_execution_root, resolve_runs_dir
 from hiagentresearch.src.runtime.orchestrator import init_state, run_group
 from hiagentresearch.src.registry.store import Registry
 
@@ -89,13 +89,6 @@ IngestCallable = Callable[[str, str, str, Path], int]
 EXPERIMENT_MANIFEST_ROOT = Path(".hiagentresearch") / "experiments"
 
 
-def _git_root(workdir: Path) -> Path:
-    override = os.environ.get("HIAGENTRESEARCH_WORKTREE", "").strip()
-    if override:
-        return Path(override).resolve()
-    return workdir.resolve()
-
-
 def run_loops(
     *,
     group_id: str,
@@ -114,7 +107,7 @@ def run_loops(
     loaded_config = config or load_config()
     group_config = loaded_config.group_by_id(group_id)
     target_branch = branch or group_config.branch
-    git_root = _git_root(workdir)
+    git_root = resolve_execution_root(workdir)
     git_service = git or GitService(git_root)
     github_service = github or GitHubActionsService(REPO_ROOT)
 
@@ -167,6 +160,7 @@ def run_loops(
             local_run_id=local_run_id,
             local_result=local,
             bootstrap=bootstrap,
+            checkout_root=git_root,
         )
         registry.record_experiment_manifest(
             run_id=local_run_id,
@@ -290,8 +284,9 @@ def _write_experiment_manifest(
     local_run_id: str,
     local_result: dict,
     bootstrap: BranchBootstrap,
+    checkout_root: Path,
 ) -> tuple[str, dict]:
-    run_dir = REPO_ROOT / ".hiagentresearch" / "runs" / local_run_id
+    run_dir = resolve_runs_dir(checkout_root) / local_run_id
     intent = _read_json(run_dir / "experiment_intent.json")
     manifest = {
         "schema_version": 1,
@@ -315,7 +310,7 @@ def _write_experiment_manifest(
         "lineage_anchor_policy": bootstrap.anchor_policy,
     }
     path = EXPERIMENT_MANIFEST_ROOT / group_id / f"{local_run_id}.json"
-    absolute_path = REPO_ROOT / path
+    absolute_path = checkout_root / path
     absolute_path.parent.mkdir(parents=True, exist_ok=True)
     absolute_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return str(path), manifest
@@ -449,6 +444,8 @@ def _run_wave_parallel(
             group_id,
             "--loops",
             str(loops),
+            "--workdir",
+            str(worktree_path),
             "--agent-model",
             agent_model,
         ]
@@ -456,11 +453,10 @@ def _run_wave_parallel(
             cmd.append("--quick")
         if not stop_on_success:
             cmd.append("--run-exact-loops")
-        env = {**os.environ, "HIAGENTRESEARCH_WORKTREE": str(worktree_path)}
         proc = subprocess.Popen(
             cmd,
             cwd=REPO_ROOT,
-            env=env,
+            env=os.environ.copy(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

@@ -73,17 +73,17 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         f.write(json.dumps(payload, ensure_ascii=True) + "\n")
 
 
-def _repo_relative(path: Path) -> str:
+def _path_relative_to(path: Path, base: Path) -> str:
     try:
-        return str(path.resolve().relative_to(REPO_ROOT))
+        return str(path.resolve().relative_to(base.resolve()))
     except ValueError:
         return str(path.resolve())
 
 
-def _git_changed_files(_workdir: Path) -> set[str]:
+def _git_changed_files(workdir: Path) -> set[str]:
     proc = subprocess.run(
         ["git", "status", "--porcelain"],
-        cwd=REPO_ROOT,
+        cwd=workdir,
         capture_output=True,
         text=True,
         check=False,
@@ -326,11 +326,13 @@ def run_group(
         return 1
 
     group = groups[group_id]
-    preexisting_changes = _git_changed_files(workdir)
+    checkout_root = workdir.resolve()
+    runs_dir = resolve_runs_dir(checkout_root)
+    preexisting_changes = _git_changed_files(checkout_root)
     run_id = f"run_{uuid.uuid4().hex[:12]}"
     correlation_id = run_id
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    run_dir = RUNS_DIR / run_id
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = runs_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     actions_path = run_dir / "agent_actions.jsonl"
     metadata_path = run_dir / "run_meta.json"
@@ -426,7 +428,7 @@ def run_group(
                     "status": "error",
                     "failure_class": failure_class,
                     "cursor_run_status": cursor_run_status,
-                    "run_dir": str(run_dir.relative_to(REPO_ROOT)),
+                    "run_dir": _path_relative_to(run_dir, checkout_root),
                 },
                 indent=2,
             )
@@ -479,7 +481,7 @@ def run_group(
                     "status": "error",
                     "failure_class": "invalid_cycle",
                     "error": contract_error,
-                    "run_dir": str(run_dir.relative_to(REPO_ROOT)),
+                    "run_dir": _path_relative_to(run_dir, checkout_root),
                 },
                 indent=2,
             )
@@ -540,7 +542,7 @@ def run_group(
                     "status": "error",
                     "failure_class": "invalid_cycle",
                     "error": edit_error,
-                    "run_dir": str(run_dir.relative_to(REPO_ROOT)),
+                    "run_dir": _path_relative_to(run_dir, checkout_root),
                 },
                 indent=2,
             )
@@ -686,7 +688,7 @@ def run_group(
                 "research_outcome": research_outcome["research_outcome"],
                 "improved_baseline": research_outcome["improved_baseline"],
                 "next_action": research_outcome["next_action"],
-                "run_dir": str(run_dir.relative_to(REPO_ROOT)),
+                "run_dir": _path_relative_to(run_dir, checkout_root),
             },
             indent=2,
         )

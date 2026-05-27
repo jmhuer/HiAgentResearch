@@ -134,7 +134,7 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
         group_id="model_architecture",
         branch="research/model-architecture",
         loops=1,
-        workdir=Path(".").resolve(),
+        workdir=tmp_path,
         quick=True,
         agent_model="composer-2.5",
         config=load_config(Path("config.yaml")),
