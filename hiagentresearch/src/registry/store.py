@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from hiagentresearch.src.core.models import IntentPacket, TransitionEvent, utc_now_iso
+from hiagentresearch.src.core.outcomes import normalize_research_outcome_name, outcome_met_targets
 
 
 SCHEMA_VERSION = 5
@@ -311,6 +312,8 @@ class Registry:
         run_id: str,
         outcome: dict[str, Any],
     ) -> None:
+        research_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
+        met_targets = outcome_met_targets(research_outcome)
         conn.execute(
             """
             INSERT OR REPLACE INTO research_outcomes
@@ -319,9 +322,9 @@ class Registry:
             """,
             (
                 run_id,
-                str(outcome.get("research_outcome", "unknown")),
-                1 if bool(outcome.get("improved_baseline", False)) else 0,
-                1 if bool(outcome.get("metrics_ok", False)) else 0,
+                research_outcome,
+                1 if met_targets else 0,
+                1 if met_targets else 0,
                 str(outcome.get("next_action", "")),
                 str(outcome.get("reason", "")),
                 utc_now_iso(),

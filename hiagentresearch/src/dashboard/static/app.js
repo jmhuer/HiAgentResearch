@@ -3,13 +3,14 @@ const ECHARTS_URL = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.esm.min
 const ALL_GROUPS = "__all__";
 const SERIES_COLORS = ["#89b4ff", "#7ee787", "#f2cc60", "#ff8b8b", "#c9a8ff", "#77d4ff"];
 const THRESHOLD_LINE_COLOR = "#9aa4b2";
-const DISCRETE_LINE_METRICS = new Set(["tests_passed", "tests_failed"]);
+const DISCRETE_LINE_METRICS = new Set(["tests_failed"]);
 
 let dashboardData = null;
 let selectedRunId = null;
 let chartInstance = null;
 let echartsModule = null;
 let resizeListenerAttached = false;
+let chartResizeObserver = null;
 
 async function main() {
   const manifest = await fetchJson("./manifest.json");
@@ -19,6 +20,8 @@ async function main() {
   dashboardData.summary = dashboardData.summary?.length ? dashboardData.summary : summary.groups;
   dashboardData.metric_names = chartMetricNames(dashboardData, summary);
   dashboardData.lineage_topology = dashboardData.lineage_topology || summary.lineage_topology || { chains: [], groups: {} };
+  dashboardData.metric_targets =
+    dashboardData.metric_targets || summary.metric_targets || summary.metric_expectations || [];
   renderShell(manifest, summary);
   renderGroups(dashboardData.summary || []);
   renderFilters(dashboardData);
@@ -75,10 +78,13 @@ async function loadFromSqlite(manifest) {
     runs,
     metrics,
     metric_names: metricNames.map((row) => row.metric_name),
-    research_outcomes: outcomes.map(coerceBooleans),
+    research_outcomes: outcomes.map((row) => ({
+      ...coerceBooleans(row),
+      research_outcome: normalizeResearchOutcomeName(row.research_outcome),
+    })),
     experiments: experiments.map(parseExperiment),
     artifacts,
-    metric_expectations: expectations.map(normalizeExpectation),
+    metric_targets: expectations.map(normalizeTarget),
   };
 }
 
@@ -98,9 +104,23 @@ async function fetchJson(path) {
 function renderShell(manifest, summary) {
   document.title = manifest.title || summary.title || "HiAgentResearch Dashboard";
   text("dashboard-title", manifest.title || summary.title || "HiAgentResearch");
-  text("dashboard-subtitle", `${dashboardData.runs?.length || 0} runs across ${dashboardData.summary?.length || 0} groups`);
+  text("dashboard-tagline", "Experiment trajectory and research outcomes.");
   text("source-label", manifest.source || "dashboard");
   text("schema-label", `dashboard v${manifest.dashboard_schema_version || "?"}`);
+  const repository = dashboardData.repository || manifest.repository || {};
+  const repoLink = document.getElementById("repo-link");
+  const repoLabel = document.getElementById("repo-label");
+  if (repoLink && repoLabel) {
+    const slug = String(repository.repository || "").trim();
+    const webUrl = String(repository.web_url || "").trim();
+    if (slug && webUrl) {
+      repoLink.href = webUrl;
+      repoLink.hidden = false;
+      repoLabel.textContent = slug;
+    } else {
+      repoLink.hidden = true;
+    }
+  }
 }
 
 function groupLineageLabel(groupId) {
@@ -118,17 +138,55 @@ function renderGroups(groups) {
     .map(
       (group) => `
         <article class="card">
-          <h3>${escapeHtml(group.group_id || "unknown")}</h3>
-          <div class="metric-row"><span>Lineage</span><strong>${escapeHtml(groupLineageLabel(group.group_id))}</strong></div>
-          <span class="badge ${outcomeClass(group.research_outcome)}">${escapeHtml(group.research_outcome || "unknown")}</span>
-          <div class="metric-row"><span>Failure class</span><strong>${escapeHtml(group.failure_class || "unknown")}</strong></div>
-          <div class="metric-row"><span>Accuracy</span><strong>${formatMetric(group.accuracy)}</strong></div>
-          <div class="metric-row"><span>Latency</span><strong>${formatMetric(group.latency_ms)} ms</strong></div>
-          <div class="metric-row"><span>Next action</span><strong>${escapeHtml(group.next_action || "")}</strong></div>
+          <header class="card-header">
+            <h3>${escapeHtml(group.group_id || "unknown")}</h3>
+          </header>
+          <div class="card-body">
+            <div class="metric-row"><span>Lineage</span><strong>${escapeHtml(groupLineageLabel(group.group_id))}</strong></div>
+            <div class="metric-row"><span>Failure class</span><strong>${escapeHtml(group.failure_class || "unknown")}</strong></div>
+            <div class="metric-row"><span>Accuracy</span><strong>${formatMetric(group.accuracy)}</strong></div>
+            <div class="metric-row"><span>Latency</span><strong>${formatMetric(group.latency_ms)} ms</strong></div>
+            <div class="metric-row"><span>Next action</span><strong>${escapeHtml(group.next_action || "")}</strong></div>
+          </div>
+          <footer class="card-footer">
+            <span class="card-footer-label">Outcome</span>
+            <span class="badge ${outcomeClass(group.research_outcome)}">${escapeHtml(displayResearchOutcome(group.research_outcome))}</span>
+          </footer>
         </article>
       `,
     )
     .join("");
+}
+
+function runCountLabel(groupId) {
+  const runs = dashboardData.runs || [];
+  if (groupId === ALL_GROUPS) {
+    const groupCount = new Set(runs.map((run) => run.group_id).filter(Boolean)).size;
+    return `${runs.length} runs · ${groupCount} groups`;
+  }
+  const filtered = runs.filter((run) => run.group_id === groupId);
+  return `${filtered.length} runs · ${groupId}`;
+}
+
+function updateChartRunSummary(groupId) {
+  const summary = document.getElementById("chart-run-summary");
+  if (!summary) {
+    return;
+  }
+  summary.textContent = runCountLabel(groupId);
+}
+
+function chartLegendRows(seriesCount) {
+  const width = window.innerWidth || 1200;
+  if (width <= 820) {
+    return 1;
+  }
+  const itemsPerRow = width <= 1100 ? 3 : 4;
+  return Math.max(1, Math.ceil(seriesCount / itemsPerRow));
+}
+
+function legendBandHeight(seriesCount) {
+  return 16 + chartLegendRows(seriesCount) * 34;
 }
 
 function renderFilters(data) {
@@ -168,11 +226,32 @@ function renderRuns(runs) {
   renderRunDetail();
 }
 
+function showChartMessage(container, message) {
+  if (chartInstance && !chartInstance.isDisposed?.()) {
+    chartInstance.dispose();
+    chartInstance = null;
+  }
+  container.innerHTML = `<div class="chart-message">${escapeHtml(message)}</div>`;
+}
+
+function ensureChartCanvas(container) {
+  container.querySelector(".chart-message")?.remove();
+  let canvas = document.getElementById("metric-chart-canvas");
+  if (!canvas) {
+    canvas = document.createElement("div");
+    canvas.id = "metric-chart-canvas";
+    canvas.className = "metric-chart-canvas";
+    container.appendChild(canvas);
+  }
+  return canvas;
+}
+
 async function renderChart() {
   const container = document.getElementById("metric-chart");
   try {
     const groupId = document.getElementById("group-filter").value;
     const metricName = document.getElementById("metric-filter").value;
+    updateChartRunSummary(groupId);
     const indexes = dashboardIndexes();
     const filtered = (dashboardData.metrics || []).filter(
       (metric) => (groupId === ALL_GROUPS || metric.group_id === groupId) && metric.metric_name === metricName,
@@ -181,18 +260,16 @@ async function renderChart() {
     values = appendBaselinePoints(values, metricName, groupId);
     values = assignTrajectoryPositions(values, dashboardData.lineage_topology);
     if (!values.length) {
-      if (chartInstance && !chartInstance.isDisposed?.()) {
-        chartInstance.dispose();
-        chartInstance = null;
-      }
-      container.textContent = "No metric data for this selection.";
+      showChartMessage(container, "No metric data for this selection.");
+      updateChartRunSummary(groupId);
       return;
     }
-    const expectations = expectationLines({ groupId, metricName });
-    await renderEChart(container, values, metricName, expectations);
+    await renderEChart(container, values, metricName, groupId);
   } catch (error) {
     console.error("Dashboard chart render failed", error);
-    container.textContent = `Chart failed to render: ${error.message}`;
+    showChartMessage(container, `Chart failed to render: ${error.message}`);
+    const groupId = document.getElementById("group-filter")?.value || ALL_GROUPS;
+    updateChartRunSummary(groupId);
   }
 }
 
@@ -220,7 +297,7 @@ function renderRunDetail() {
     </div>
     <div class="detail-block">
       <strong>Outcome</strong>
-      ${escapeHtml(outcome?.research_outcome || "unknown")} — ${escapeHtml(outcome?.reason || "")}
+      ${escapeHtml(displayResearchOutcome(outcome?.research_outcome))} — ${escapeHtml(outcome?.reason || "")}
     </div>
     <div class="detail-block">
       <strong>Hypothesis</strong>
@@ -241,15 +318,78 @@ function renderRunDetail() {
   `;
 }
 
-async function renderEChart(container, values, metricName, expectations) {
-  const echarts = await loadECharts();
-  let canvas = document.getElementById("metric-chart-canvas");
-  if (!canvas) {
-    container.innerHTML = '<div id="metric-chart-canvas" class="metric-chart-canvas"></div>';
-    canvas = document.getElementById("metric-chart-canvas");
+function computeChartLayout({ seriesCount, hasDataZoom }) {
+  return {
+    left: 12,
+    right: 16,
+    top: legendBandHeight(seriesCount) + 16,
+    bottom: (hasDataZoom ? 56 : 40) + 28,
+    containLabel: true,
+  };
+}
+
+function thresholdMarkSeries(thresholdLines) {
+  if (!thresholdLines.length) {
+    return null;
   }
+  return {
+    type: "line",
+    name: "Thresholds",
+    data: [],
+    showSymbol: false,
+    silent: true,
+    animation: false,
+    tooltip: { show: false },
+    legendHoverLink: false,
+    itemStyle: { color: THRESHOLD_LINE_COLOR },
+    lineStyle: { color: THRESHOLD_LINE_COLOR, type: "dashed", width: 2 },
+    z: 20,
+    zlevel: 1,
+    markLine: {
+      z: 20,
+      symbol: "none",
+      silent: true,
+      lineStyle: { color: THRESHOLD_LINE_COLOR, type: "dashed", width: 1.5 },
+      label: {
+        show: true,
+        color: THRESHOLD_LINE_COLOR,
+        formatter: (params) => params.name,
+        position: "insideEndTop",
+        fontSize: 11,
+        backgroundColor: "rgba(9, 11, 18, 0.92)",
+        borderColor: "rgba(154, 164, 178, 0.35)",
+        borderWidth: 1,
+        borderRadius: 4,
+        padding: [2, 6],
+      },
+      data: thresholdLines.map((line) => ({ name: line.label, yAxis: line.value })),
+    },
+  };
+}
+
+function axisNameStyle() {
+  return { color: "#9aa4b2", fontSize: 12 };
+}
+
+function attachChartResizeObserver(container) {
+  if (chartResizeObserver || !window.ResizeObserver) {
+    return;
+  }
+  chartResizeObserver = new ResizeObserver(() => {
+    if (chartInstance && !chartInstance.isDisposed?.()) {
+      chartInstance.resize();
+    }
+  });
+  chartResizeObserver.observe(container);
+}
+
+async function renderEChart(container, values, metricName, groupId) {
+  const echarts = await loadECharts();
+  updateChartRunSummary(groupId);
+  const canvas = ensureChartCanvas(container);
   chartInstance = chartInstance && !chartInstance.isDisposed?.() ? chartInstance : echarts.init(canvas, "dark");
   chartInstance.off("click");
+  attachChartResizeObserver(container);
 
   const positioned = assignTrajectoryPositions(values, dashboardData.lineage_topology);
   const ordered = [...positioned].sort((left, right) => {
@@ -257,57 +397,87 @@ async function renderEChart(container, values, metricName, expectations) {
     if (traj !== 0) return traj;
     return String(left.group_id).localeCompare(String(right.group_id));
   });
-  const trajectoryAxis = trajectoryCategoryAxis(ordered);
+  const trajectoryAxis = trajectoryCategoryAxis(ordered, metricName);
   const categories = trajectoryAxis.labels;
   const grouped = groupBy(ordered, (point) => point.group_id);
-  const targetLines = dedupeExpectationLines(expectations);
-  const domain = metricDomain(ordered, targetLines);
-  const groupSeries = Object.entries(grouped).map(([groupId, rows], index) => {
+  const thresholdLines = referenceThresholdLines(metricName, groupId);
+  const domain = metricDomain(ordered, thresholdLines);
+  const useValueAxis = trajectoryAxis.mode === "trajectory";
+  const trajectoryMin = useValueAxis ? trajectoryAxis.indices[0] : null;
+  const trajectoryMax = useValueAxis ? trajectoryAxis.indices[trajectoryAxis.indices.length - 1] : null;
+  const groupSeries = Object.entries(grouped).map(([groupId, rows]) => {
     const seriesData = seriesDataForGroup(groupId, rows, trajectoryAxis, grouped, metricName);
     const visiblePoints = seriesData.filter((entry) => entry != null).length;
     const hasConnector = seriesData.some(
       (entry) => entry?.point?.is_inheritance_connector || entry?.point?.is_baseline_anchor,
     );
     return {
-    name: groupId,
-    type: "line",
-    smooth: true,
-    symbol: "circle",
-    symbolSize: 8,
-    showAllSymbol: true,
-    connectNulls: visiblePoints > 1 || hasConnector,
-    emphasis: { focus: "series" },
-    lineStyle: { width: visiblePoints > 1 || hasConnector ? 3 : 0, type: "solid" },
-    data: seriesData,
-    markLine:
-      index === 0 && targetLines.length
-        ? {
-            symbol: "none",
-            silent: true,
-            lineStyle: { color: THRESHOLD_LINE_COLOR, type: "dashed", width: 1.5 },
-            label: {
-              color: THRESHOLD_LINE_COLOR,
-              formatter: (params) => params.name,
-              position: "insideEndTop",
-            },
-            data: targetLines.map((line) => ({ name: line.label, yAxis: line.value })),
-          }
-        : undefined,
-  };
+      name: groupId,
+      type: "line",
+      smooth: true,
+      symbol: "circle",
+      symbolSize: 8,
+      showAllSymbol: true,
+      connectNulls: visiblePoints > 1 || hasConnector,
+      emphasis: { focus: "series" },
+      lineStyle: { width: visiblePoints > 1 || hasConnector ? 3 : 0, type: "solid" },
+      z: 2,
+      data: seriesData,
+    };
   });
-  const series = groupSeries;
+  const trajectorySeries = useValueAxis
+    ? groupSeries.map((entry) => ({ ...entry, data: toTrajectorySeriesEntries(entry.data, trajectoryAxis) }))
+    : groupSeries;
+  const referenceSeries = thresholdMarkSeries(thresholdLines);
+  const series = referenceSeries ? [...trajectorySeries, referenceSeries] : trajectorySeries;
+  const legendItemCount = trajectorySeries.length + (thresholdLines.length ? 1 : 0);
+  const hasDataZoom = (useValueAxis ? trajectoryAxis.indices.length : categories.length) > 12;
+  const chartLayout = computeChartLayout({ seriesCount: legendItemCount, hasDataZoom });
+  const axisName = {
+    show: true,
+    name: "Lineage step",
+    nameLocation: "middle",
+    nameGap: 32,
+    nameTextStyle: axisNameStyle(),
+  };
+  const yAxisName = {
+    name: metricName,
+    nameLocation: "middle",
+    nameGap: 44,
+    nameRotate: 90,
+    nameTextStyle: axisNameStyle(),
+  };
 
   chartInstance.setOption(
     {
       backgroundColor: "transparent",
       color: SERIES_COLORS,
       animationDuration: 450,
-      grid: { left: 52, right: 28, top: 70, bottom: categories.length > 12 ? 72 : 42, containLabel: true },
+      grid: chartLayout,
       legend: {
-        top: 4,
-        left: 0,
-        textStyle: { color: "#9aa4b2" },
-        icon: "roundRect",
+        data: [
+          ...Object.keys(grouped).map((name) => ({ name, icon: "roundRect" })),
+          ...(thresholdLines.length
+            ? [
+                {
+                  name: "Thresholds",
+                  itemStyle: { color: THRESHOLD_LINE_COLOR },
+                  lineStyle: { color: THRESHOLD_LINE_COLOR, type: "dashed", width: 2 },
+                },
+              ]
+            : []),
+        ],
+        type: legendItemCount > 4 ? "scroll" : "plain",
+        top: 8,
+        left: "center",
+        width: "92%",
+        align: "auto",
+        itemGap: 14,
+        itemWidth: 12,
+        textStyle: { color: "#9aa4b2", fontSize: 12 },
+        pageIconColor: THRESHOLD_LINE_COLOR,
+        pageIconInactiveColor: "rgba(154, 164, 178, 0.45)",
+        pageTextStyle: { color: THRESHOLD_LINE_COLOR },
       },
       tooltip: {
         trigger: "item",
@@ -321,30 +491,53 @@ async function renderEChart(container, values, metricName, expectations) {
           "max-width:min(340px,calc(100vw - 48px));white-space:normal;word-break:break-word;line-height:1.45;box-shadow:0 20px 60px rgba(0,0,0,.45);border-radius:14px;padding:12px;",
         formatter: (params) => pointTooltipHtml(params.data?.point),
       },
-      xAxis: {
-        type: "category",
-        data: categories,
-        boundaryGap: categories.length <= 1,
-        axisLine: { lineStyle: { color: "rgba(255,255,255,0.18)" } },
-        axisTick: { show: false },
-        axisLabel: {
-          color: "#9aa4b2",
-          formatter: (value) => value,
-          hideOverlap: true,
-        },
-        name: "Lineage step",
-      },
+      xAxis: useValueAxis
+        ? {
+            type: "value",
+            min: trajectoryMin,
+            max: trajectoryMax === trajectoryMin ? trajectoryMax + 1 : trajectoryMax,
+            minInterval: 1,
+            splitLine: { show: false },
+            axisLine: { onZero: true, lineStyle: { color: "rgba(255,255,255,0.18)" } },
+            axisTick: { show: false },
+            axisLabel: {
+              color: "#9aa4b2",
+              formatter: (value) => `L${value}`,
+              hideOverlap: true,
+            },
+            ...axisName,
+          }
+        : {
+            type: "category",
+            data: categories,
+            boundaryGap: true,
+            axisLine: { lineStyle: { color: "rgba(255,255,255,0.18)" } },
+            axisTick: { show: false },
+            axisLabel: {
+              color: "#9aa4b2",
+              formatter: (value) => value,
+              hideOverlap: true,
+            },
+            ...axisName,
+          },
       yAxis: {
         type: "value",
-        name: metricName,
         min: domain.min,
         max: domain.max,
-        nameTextStyle: { color: "#9aa4b2" },
         splitLine: { lineStyle: { color: "rgba(255,255,255,0.08)" } },
         axisLabel: { color: "#9aa4b2", formatter: formatMetric },
+        ...yAxisName,
       },
-      dataZoom:
-        categories.length > 12
+      media: [
+        {
+          query: { maxWidth: 820 },
+          option: {
+            legend: { type: "scroll", width: "96%", top: 6 },
+            grid: { ...chartLayout, top: chartLayout.top + 10 },
+          },
+        },
+      ],
+      dataZoom: hasDataZoom
           ? [
               { type: "inside", throttle: 50 },
               {
@@ -352,8 +545,25 @@ async function renderEChart(container, values, metricName, expectations) {
                 height: 24,
                 bottom: 14,
                 borderColor: "rgba(255,255,255,0.12)",
-                fillerColor: "rgba(137,180,255,0.18)",
-                handleStyle: { color: "#89b4ff" },
+                fillerColor: "rgba(154, 164, 178, 0.2)",
+                handleStyle: {
+                  color: THRESHOLD_LINE_COLOR,
+                  borderColor: THRESHOLD_LINE_COLOR,
+                },
+                moveHandleStyle: {
+                  color: THRESHOLD_LINE_COLOR,
+                  borderColor: THRESHOLD_LINE_COLOR,
+                },
+                emphasis: {
+                  handleStyle: {
+                    color: THRESHOLD_LINE_COLOR,
+                    borderColor: THRESHOLD_LINE_COLOR,
+                  },
+                  moveHandleStyle: {
+                    color: THRESHOLD_LINE_COLOR,
+                    borderColor: THRESHOLD_LINE_COLOR,
+                  },
+                },
                 textStyle: { color: "#9aa4b2" },
               },
             ]
@@ -373,6 +583,7 @@ async function renderEChart(container, values, metricName, expectations) {
     resizeListenerAttached = true;
   }
   chartInstance.resize();
+  updateChartRunSummary(groupId);
 }
 
 function chartMetricPoints(metrics, indexes) {
@@ -449,6 +660,20 @@ function preferCanonicalRun(candidate, incumbent) {
   if (candidateGithub && !incumbentGithub) return true;
   if (!candidateGithub && incumbentGithub) return false;
   return String(candidate).localeCompare(String(incumbent)) > 0;
+}
+
+function toTrajectorySeriesEntries(series, trajectoryAxis) {
+  return trajectoryAxis.indices.map((trajectoryX, index) => {
+    const entry = series[index];
+    if (!entry) {
+      return null;
+    }
+    const metricValue = Array.isArray(entry.value) ? entry.value[1] : entry.value;
+    return {
+      ...entry,
+      value: [Number(trajectoryX), metricValue],
+    };
+  });
 }
 
 function chartSeriesData(rows, trajectoryAxis) {
@@ -581,10 +806,41 @@ function enrichMetricPoint(metric, indexes) {
   };
 }
 
-function expectationLines({ groupId, metricName }) {
-  return (dashboardData.metric_expectations || []).filter(
-    (expectation) => (groupId === ALL_GROUPS || expectation.group_id === groupId) && expectation.metric_name === metricName,
+function baselineMetricValue(metricName) {
+  const metrics = dashboardData.lineage_topology?.baseline_snapshot?.metrics;
+  if (!metrics || metrics[metricName] == null) {
+    return null;
+  }
+  const value = Number(metrics[metricName]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function targetThresholdLines(groupId, metricName) {
+  const rows = (dashboardData.metric_targets || dashboardData.metric_expectations || []).filter(
+    (row) => (groupId === ALL_GROUPS || row.group_id === groupId) && row.metric_name === metricName,
   );
+  const lines = [];
+  for (const row of rows) {
+    const min = row.min ?? row.min_value;
+    const max = row.max ?? row.max_value;
+    if (min !== null && min !== undefined && min !== "") {
+      lines.push({ key: `targets_min:${min}`, value: Number(min), label: "targets_min" });
+    }
+    if (max !== null && max !== undefined && max !== "") {
+      lines.push({ key: `targets_max:${max}`, value: Number(max), label: "targets_max" });
+    }
+  }
+  return [...new Map(lines.map((line) => [line.key, line])).values()];
+}
+
+function referenceThresholdLines(metricName, groupId) {
+  const lines = [];
+  const baselineValue = baselineMetricValue(metricName);
+  if (baselineValue != null) {
+    lines.push({ key: `baseline:${baselineValue}`, value: baselineValue, label: "baseline" });
+  }
+  lines.push(...targetThresholdLines(groupId, metricName));
+  return [...new Map(lines.map((line) => [line.key, line])).values()];
 }
 
 function selectRun(runId, { scroll }) {
@@ -690,7 +946,16 @@ function normalizedLoopIndex(point) {
   return loopIndex;
 }
 
-function trajectoryCategoryAxis(points) {
+function baselineMetricAvailable(metricName) {
+  const metrics = dashboardData.lineage_topology?.baseline_snapshot?.metrics;
+  if (!metrics || metricName == null) {
+    return false;
+  }
+  const value = Number(metrics[metricName]);
+  return Number.isFinite(value);
+}
+
+function trajectoryCategoryAxis(points, metricName) {
   let indices = uniqueInOrder(
     points
       .map((point) => point.trajectory_x)
@@ -699,8 +964,7 @@ function trajectoryCategoryAxis(points) {
       .sort((left, right) => left - right),
   );
   const hasBaseline =
-    points.some((point) => point.is_baseline_anchor) ||
-    Boolean(dashboardData.lineage_topology?.baseline_snapshot?.metrics);
+    points.some((point) => point.is_baseline_anchor) || baselineMetricAvailable(metricName);
   if (hasBaseline && !indices.includes(0)) {
     indices = [0, ...indices];
   }
@@ -772,22 +1036,10 @@ async function loadECharts() {
   return echartsModule;
 }
 
-function dedupeExpectationLines(expectations) {
-  const lines = expectations.flatMap((expectation) => [
-    expectation.min !== null && expectation.min !== undefined
-      ? { key: `min:${expectation.min}`, value: Number(expectation.min), label: `target min ${formatMetric(expectation.min)}` }
-      : null,
-    expectation.max !== null && expectation.max !== undefined
-      ? { key: `max:${expectation.max}`, value: Number(expectation.max), label: `target max ${formatMetric(expectation.max)}` }
-      : null,
-  ]);
-  return [...new Map(lines.filter(Boolean).map((line) => [line.key, line])).values()];
-}
-
-function metricDomain(points, targetLines) {
+function metricDomain(points, thresholdLines) {
   const values = [
     ...points.map((point) => point.metric_value),
-    ...targetLines.map((line) => line.value),
+    ...thresholdLines.map((line) => line.value),
   ].filter((value) => Number.isFinite(Number(value)));
   if (!values.length) {
     return { min: 0, max: 1 };
@@ -826,7 +1078,7 @@ function cssEscape(value) {
   return String(value).replaceAll('"', '\\"');
 }
 
-function normalizeExpectation(row) {
+function normalizeTarget(row) {
   return {
     group_id: row.group_id,
     metric_name: row.metric_name,
@@ -845,11 +1097,7 @@ function parseExperiment(row) {
 }
 
 function coerceBooleans(row) {
-  return {
-    ...row,
-    improved_baseline: asBoolean(row.improved_baseline),
-    metrics_ok: asBoolean(row.metrics_ok),
-  };
+  return { ...row };
 }
 
 function asBoolean(value) {
@@ -880,10 +1128,30 @@ function text(id, value) {
   document.getElementById(id).textContent = value;
 }
 
+function displayResearchOutcome(outcome) {
+  const normalized = normalizeResearchOutcomeName(outcome);
+  return normalized || "unknown";
+}
+
+function normalizeResearchOutcomeName(outcome) {
+  const value = String(outcome || "").trim();
+  if (!value) {
+    return "";
+  }
+  if (value === "improved_baseline") {
+    return "met_targets";
+  }
+  if (value === "did_not_improve_baseline") {
+    return "below_targets";
+  }
+  return value;
+}
+
 function outcomeClass(outcome) {
-  if (outcome === "improved_baseline") return "good";
-  if (outcome === "did_not_improve_baseline") return "warn";
-  if (outcome === "execution_blocked") return "bad";
+  const normalized = normalizeResearchOutcomeName(outcome);
+  if (normalized === "met_targets") return "good";
+  if (normalized === "below_targets") return "warn";
+  if (normalized === "execution_blocked") return "bad";
   return "";
 }
 
@@ -921,5 +1189,5 @@ function escapeHtml(value) {
 
 main().catch((error) => {
   console.error(error);
-  text("dashboard-subtitle", `Dashboard failed to load: ${error.message}`);
+  text("dashboard-tagline", `Dashboard failed to load: ${error.message}`);
 });

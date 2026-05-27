@@ -88,7 +88,6 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
                 "run_id": run_id,
                 "failure_class": failure_class,
                 "research_outcome": outcome.get("research_outcome", "unknown"),
-                "improved_baseline": bool(outcome.get("improved_baseline", False)),
             },
             indent=2,
         )

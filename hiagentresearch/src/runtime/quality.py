@@ -9,8 +9,8 @@ class MetricBounds(Protocol):
     max: float | None
 
 
-def metrics_meet_expectations(metrics: dict[str, float], expectations: dict[str, MetricBounds]) -> tuple[bool, str]:
-    for name, bounds in expectations.items():
+def metrics_meet_expectations(metrics: dict[str, float], targets: dict[str, MetricBounds]) -> tuple[bool, str]:
+    for name, bounds in targets.items():
         if name not in metrics:
             return False, f"missing expected metric: {name}"
         value = metrics[name]
@@ -24,16 +24,12 @@ def metrics_meet_expectations(metrics: dict[str, float], expectations: dict[str,
 @dataclass(slots=True)
 class ResearchOutcome:
     research_outcome: str
-    improved_baseline: bool
-    metrics_ok: bool
     next_action: str
     reason: str
 
-    def to_dict(self) -> dict[str, bool | str]:
+    def to_dict(self) -> dict[str, str]:
         return {
             "research_outcome": self.research_outcome,
-            "improved_baseline": self.improved_baseline,
-            "metrics_ok": self.metrics_ok,
             "next_action": self.next_action,
             "reason": self.reason,
         }
@@ -44,32 +40,26 @@ def classify_research_outcome(
     execution_failure_class: str,
     eval_passed: bool,
     metrics: dict[str, float],
-    expectations: dict[str, MetricBounds],
+    targets: dict[str, MetricBounds],
 ) -> ResearchOutcome:
     if execution_failure_class != "none":
         return ResearchOutcome(
             research_outcome="execution_blocked",
-            improved_baseline=False,
-            metrics_ok=False,
             next_action="repair" if execution_failure_class == "code_failure" else "continue",
             reason=f"execution did not complete cleanly: {execution_failure_class}",
         )
 
-    metrics_ok, metrics_error = metrics_meet_expectations(metrics, expectations)
-    if eval_passed and metrics_ok:
+    targets_met, targets_error = metrics_meet_expectations(metrics, targets)
+    if eval_passed and targets_met:
         return ResearchOutcome(
-            research_outcome="improved_baseline",
-            improved_baseline=True,
-            metrics_ok=True,
+            research_outcome="met_targets",
             next_action="continue",
-            reason="configured improvement metrics were met",
+            reason="configured targets were met",
         )
 
-    reason = metrics_error or "eval completed but did not report baseline improvement"
+    reason = targets_error or "eval completed but configured targets were not met"
     return ResearchOutcome(
-        research_outcome="did_not_improve_baseline",
-        improved_baseline=False,
-        metrics_ok=False,
+        research_outcome="below_targets",
         next_action="continue",
         reason=reason,
     )

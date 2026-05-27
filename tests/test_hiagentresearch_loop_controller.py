@@ -101,11 +101,9 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
     (artifact_dir / "research_outcome.json").write_text(
         json.dumps(
             {
-                "research_outcome": "improved_baseline",
-                "improved_baseline": True,
-                "metrics_ok": True,
+                "research_outcome": "met_targets",
                 "next_action": "continue",
-                "reason": "configured improvement metrics were met",
+                "reason": "configured targets were met",
             }
         ),
         encoding="utf-8",
@@ -146,7 +144,7 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
 
     assert summary.ok is True
     assert installed["called"] is True
-    assert summary.cycles[0].github_research_outcome == "improved_baseline"
+    assert summary.cycles[0].github_research_outcome == "met_targets"
     assert (
         tmp_path / ".hiagentresearch" / "experiments" / "model_architecture" / "run_test.json"
     ).exists()

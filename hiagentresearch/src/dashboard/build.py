@@ -59,8 +59,8 @@ def build_from_registry(
     registry.init()
     _ensure_baseline_snapshot(registry, loaded)
     snapshot = registry.dashboard_snapshot()
-    metric_expectations = _metric_expectations(loaded)
-    snapshot["metric_expectations"] = metric_expectations
+    metric_targets = _metric_targets(loaded)
+    snapshot["metric_targets"] = metric_targets
     snapshot["lineage_topology"] = _lineage_topology(loaded, registry=registry)
     snapshot["metrics"] = _enrich_metrics_for_dashboard(
         snapshot["metrics"],
@@ -71,7 +71,7 @@ def build_from_registry(
     _write_dashboard_db(
         source_db=registry.db_path,
         destination_db=database_path,
-        metric_expectations=metric_expectations,
+        metric_targets=metric_targets,
     )
     _copy_static_assets(target_dir)
     _copy_sqlite_runtime_assets(target_dir, require=require_sqlite_assets)
@@ -163,7 +163,7 @@ def _write_dashboard_db(
     *,
     source_db: Path,
     destination_db: Path,
-    metric_expectations: list[dict[str, Any]],
+    metric_targets: list[dict[str, Any]],
 ) -> None:
     if destination_db.exists():
         destination_db.unlink()
@@ -196,7 +196,7 @@ def _write_dashboard_db(
                     row.get("max"),
                     row["source"],
                 )
-                for row in metric_expectations
+                for row in metric_targets
             ],
         )
         destination.execute(
@@ -425,12 +425,12 @@ def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | Non
     }
 
 
-def _metric_expectations(config: HiAgentResearchConfig) -> list[dict[str, Any]]:
+def _metric_targets(config: HiAgentResearchConfig) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for group in config.research_groups:
         eval_config = group.evaluation or config.evaluation
         source = "group" if group.evaluation else "global"
-        for metric_name, expectation in sorted(eval_config.success_metrics.items()):
+        for metric_name, expectation in sorted(eval_config.targets.items()):
             rows.append(
                 {
                     "group_id": group.id,

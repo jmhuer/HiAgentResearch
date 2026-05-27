@@ -177,8 +177,6 @@ def _metadata_payload(
 def _execution_blocked_outcome(*, reason: str, next_action: str) -> dict[str, Any]:
     return {
         "research_outcome": "execution_blocked",
-        "improved_baseline": False,
-        "metrics_ok": False,
         "next_action": next_action,
         "reason": reason,
     }
@@ -569,8 +567,6 @@ def run_group(
     parsed: dict[str, Any] = {}
     research_outcome = {
         "research_outcome": "execution_blocked",
-        "improved_baseline": False,
-        "metrics_ok": False,
         "next_action": "continue",
         "reason": "evaluation did not complete",
     }
@@ -584,10 +580,6 @@ def run_group(
         failure_class = normalized.failure_class
         passed = normalized.passed
         metrics = normalized.to_metrics()
-        if normalized.raw.get("tests_passed") is not None:
-            metrics["tests_passed"] = float(normalized.raw["tests_passed"])
-        if normalized.raw.get("tests_failed") is not None:
-            metrics["tests_failed"] = float(normalized.raw["tests_failed"])
         if normalized.raw.get("duration_sec") is not None:
             metrics["duration_sec"] = float(normalized.raw["duration_sec"])
         parsed = normalized.raw
@@ -596,11 +588,10 @@ def run_group(
             execution_failure_class=failure_class,
             eval_passed=passed,
             metrics=metrics,
-            expectations=eval_config.success_metrics,
+            targets=eval_config.targets,
         )
         research_outcome = outcome.to_dict()
         parsed["research_outcome"] = research_outcome["research_outcome"]
-        parsed["improved_baseline"] = research_outcome["improved_baseline"]
         _write_json(run_dir / "metrics.json", metrics)
         _write_json(
             run_dir / "failure_class.json",
@@ -613,8 +604,6 @@ def run_group(
         failure_class = classify_non_json_failure(proc.stderr, proc.returncode)
         research_outcome = {
             "research_outcome": "execution_blocked",
-            "improved_baseline": False,
-            "metrics_ok": False,
             "next_action": "repair" if failure_class == "code_failure" else "continue",
             "reason": str(exc),
         }
@@ -668,7 +657,6 @@ def run_group(
             exit_code=proc.returncode,
             passed=passed,
             research_outcome=research_outcome["research_outcome"],
-            improved_baseline=research_outcome["improved_baseline"],
             next_action=research_outcome["next_action"],
         ),
     )
@@ -686,7 +674,6 @@ def run_group(
                 "status": status,
                 "failure_class": failure_class,
                 "research_outcome": research_outcome["research_outcome"],
-                "improved_baseline": research_outcome["improved_baseline"],
                 "next_action": research_outcome["next_action"],
                 "run_dir": _path_relative_to(run_dir, checkout_root),
             },

@@ -66,9 +66,7 @@ def test_registry_records_research_outcome_and_experiment(tmp_path) -> None:
     registry.record_research_outcome(
         run_id="run_abc",
         outcome={
-            "research_outcome": "improved_baseline",
-            "improved_baseline": True,
-            "metrics_ok": True,
+            "research_outcome": "met_targets",
             "next_action": "continue",
             "reason": "ok",
         },
@@ -93,10 +91,10 @@ def test_registry_records_research_outcome_and_experiment(tmp_path) -> None:
     summary = registry.group_summary()
 
     assert outcome is not None
-    assert outcome["improved_baseline"] is True
+    assert outcome["research_outcome"] == "met_targets"
     assert experiment is not None
     assert experiment["target_files"] == ["mnist/pipeline/model.py"]
-    assert summary[0]["research_outcome"] == "improved_baseline"
+    assert summary[0]["research_outcome"] == "met_targets"
     assert summary[0]["accuracy"] == 0.99
 
 

@@ -22,6 +22,7 @@ from hiagentresearch.src.lineage.resolve import BranchBootstrap, resolve_branch_
 from hiagentresearch.src.github.actions import GitHubActionsService, load_run_meta
 from hiagentresearch.src.paths import REPO_ROOT, resolve_execution_root, resolve_runs_dir
 from hiagentresearch.src.runtime.orchestrator import init_state, run_group
+from hiagentresearch.src.core.outcomes import normalize_research_outcome_name, outcome_met_targets
 from hiagentresearch.src.registry.store import Registry
 
 
@@ -61,7 +62,6 @@ class CycleResult:
     github_run_id: str
     github_failure_class: str
     github_research_outcome: str
-    improved_baseline: bool
     artifact_dir: str
     decision: str
 
@@ -222,12 +222,12 @@ def run_loops(
             outcome = json.loads((artifact_dir / "research_outcome.json").read_text(encoding="utf-8"))
             artifact_ref = f"github_actions:{gh_run.database_id}"
         github_failure = str(failure.get("failure_class", "infra_failure"))
-        github_outcome = str(outcome.get("research_outcome", "unknown"))
-        improved_baseline = bool(outcome.get("improved_baseline", False))
+        github_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
+        met_targets = outcome_met_targets(github_outcome)
         decision = str(
             outcome.get(
                 "next_action",
-                "done" if improved_baseline else ("repair" if github_failure == "code_failure" else "continue"),
+                "done" if met_targets else ("repair" if github_failure == "code_failure" else "continue"),
             )
         )
         cycles.append(
@@ -239,13 +239,12 @@ def run_loops(
                 github_run_id=gh_run.database_id,
                 github_failure_class=github_failure,
                 github_research_outcome=github_outcome,
-                improved_baseline=improved_baseline,
                 artifact_dir=artifact_ref,
                 decision=decision,
             )
         )
-        if stop_on_success and improved_baseline:
-            return LoopSummary(ok=True, group_id=group_id, branch=target_branch, cycles=cycles, reason="baseline improved")
+        if stop_on_success and met_targets:
+            return LoopSummary(ok=True, group_id=group_id, branch=target_branch, cycles=cycles, reason="targets met")
 
     ok = bool(cycles) and all(cycle.github_failure_class == "none" for cycle in cycles)
     reason = "requested loops completed" if ok else "max loops reached with execution blockers"
@@ -302,8 +301,9 @@ def _write_experiment_manifest(
         "rollback_plan": intent.get("rollback_plan", ""),
         "local_status": local_result.get("status", ""),
         "local_failure_class": local_result.get("failure_class", ""),
-        "local_research_outcome": local_result.get("research_outcome", ""),
-        "local_improved_baseline": bool(local_result.get("improved_baseline", False)),
+        "local_research_outcome": normalize_research_outcome_name(
+            str(local_result.get("research_outcome", "")),
+        ),
         "lineage_mode": bootstrap.mode,
         "lineage_parent_group_id": bootstrap.parent_group_id,
         "lineage_anchor_sha": bootstrap.start_ref,
@@ -356,8 +356,16 @@ def _manifest_summary(manifest: dict) -> str:
     return text or "experiment update"
 
 
+_BASELINE_REQUIRED_METRICS = ("accuracy", "latency_ms")
+
+
+def _baseline_metrics_complete(metrics: dict[str, float]) -> bool:
+    return all(name in metrics and metrics[name] is not None for name in _BASELINE_REQUIRED_METRICS)
+
+
 def _ensure_baseline_snapshot(registry: Registry, config: HiAgentResearchConfig) -> None:
-    if registry.baseline_snapshot():
+    existing = registry.baseline_snapshot()
+    if existing and _baseline_metrics_complete(existing.get("metrics") or {}):
         return
     entrypoint = config.frozen_eval_path(REPO_ROOT)
     if not entrypoint.exists():
@@ -378,10 +386,10 @@ def _ensure_baseline_snapshot(registry: Registry, config: HiAgentResearchConfig)
         return
     metrics = {
         name: float(payload[name])
-        for name in ("accuracy", "latency_ms", "tests_passed", "tests_failed", "duration_sec")
+        for name in ("accuracy", "latency_ms", "duration_sec")
         if name in payload and payload[name] is not None
     }
-    if not metrics:
+    if not _baseline_metrics_complete(metrics):
         return
     registry.record_baseline_snapshot(ref=config.orchestration.baseline_ref, metrics=metrics)
 

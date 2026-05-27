@@ -32,14 +32,14 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
     assert snapshot["metric_names"] == ["accuracy", "latency_ms"]
     assert snapshot["experiments"][0]["hypothesis_id"] == "h1"
     config = load_config()
-    accuracy_min = config.evaluation.success_metrics["accuracy"].min
+    accuracy_min = config.evaluation.targets["accuracy"].min
     assert {
         "group_id": "model_architecture",
         "metric_name": "accuracy",
         "min": accuracy_min,
         "max": None,
         "source": "global",
-    } in snapshot["metric_expectations"]
+    } in snapshot["metric_targets"]
     assert snapshot["lineage_topology"]["chains"] == [
         ["model_architecture", "optimization_strategy", "hyperparameter_optimization"],
         ["data_augmentation"],
@@ -109,9 +109,7 @@ def _seed_registry(state_dir):
     registry.record_research_outcome(
         run_id="run_abc",
         outcome={
-            "research_outcome": "improved_baseline",
-            "improved_baseline": True,
-            "metrics_ok": True,
+            "research_outcome": "met_targets",
             "next_action": "continue",
             "reason": "ok",
         },
@@ -128,7 +126,7 @@ def _write_artifacts(artifact_dir) -> None:
     (artifact_dir / "metrics.json").write_text('{"accuracy": 0.99, "latency_ms": 12.1}', encoding="utf-8")
     (artifact_dir / "failure_class.json").write_text('{"failure_class": "none", "exit_code": 0}', encoding="utf-8")
     (artifact_dir / "research_outcome.json").write_text(
-        '{"research_outcome": "improved_baseline", "improved_baseline": true, "metrics_ok": true, "next_action": "continue", "reason": "ok"}',
+        '{"research_outcome": "met_targets", "next_action": "continue", "reason": "ok"}',
         encoding="utf-8",
     )
     (artifact_dir / "run_meta.json").write_text(

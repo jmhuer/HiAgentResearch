@@ -23,7 +23,7 @@ class MetricExpectation(BaseModel):
 class EvaluationConfig(BaseModel):
     command_template: str
     parser: str
-    success_metrics: dict[str, MetricExpectation] = Field(default_factory=dict)
+    targets: dict[str, MetricExpectation] = Field(default_factory=dict)
 
 
 class AgentValidationCommandConfig(BaseModel):

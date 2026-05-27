@@ -18,13 +18,11 @@ frozen_eval_entrypoint: .hiagentresearch/eval/run_phase1_eval.py
 evaluation:
   command_template: "python {frozen_eval_entrypoint} --mnist-root mnist --group-id {group_id} --quick"
   parser: canonical_json_stdout
-  success_metrics:
+  targets:
     accuracy:
-      min: 0.866
+      min: 0.985
     latency_ms:
       max: 13.0
-    tests_passed:
-      min: 1
 artifact_contract:
   required:
     - metrics.json

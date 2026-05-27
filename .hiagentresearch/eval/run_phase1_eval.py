@@ -62,8 +62,8 @@ def _metric_thresholds(group_id: str = "model_architecture") -> dict[str, float 
     config = load_config()
     group = config.group_by_id(group_id)
     eval_config = group.evaluation or config.evaluation
-    accuracy = eval_config.success_metrics.get("accuracy")
-    latency = eval_config.success_metrics.get("latency_ms")
+    accuracy = eval_config.targets.get("accuracy")
+    latency = eval_config.targets.get("latency_ms")
     return {
         "accuracy_min": accuracy.min if accuracy else None,
         "latency_ms_max": latency.max if latency else None,
@@ -133,8 +133,8 @@ def main() -> int:
     execution_passed = tests_ok and train_ok and eval_executed
     accuracy = eval_payload.get("accuracy")
     latency_ms = eval_payload.get("latency_ms")
-    improved_baseline = bool(eval_payload.get("passed", False)) if execution_passed else False
-    passed = execution_passed and improved_baseline
+    met_targets = bool(eval_payload.get("passed", False)) if execution_passed else False
+    passed = execution_passed and met_targets
 
     failure_class = "none"
     if not tests_ok or not train_ok:
@@ -144,16 +144,15 @@ def main() -> int:
         failure_class = "code_failure" if "missing checkpoint" in error_text else "eval_failure"
 
     research_outcome = (
-        "improved_baseline"
-        if improved_baseline
-        else ("did_not_improve_baseline" if execution_passed else "execution_blocked")
+        "met_targets"
+        if met_targets
+        else ("below_targets" if execution_passed else "execution_blocked")
     )
     report = {
         "passed": passed,
         "execution_passed": execution_passed,
         "failure_class": failure_class,
         "research_outcome": research_outcome,
-        "improved_baseline": improved_baseline,
         "accuracy": accuracy,
         "latency_ms": latency_ms,
         "tests_passed": tests_passed,

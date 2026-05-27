@@ -19,9 +19,7 @@ def test_registry_view_summary_and_show_json(tmp_path, capsys) -> None:
     registry.record_research_outcome(
         run_id="run_abc",
         outcome={
-            "research_outcome": "improved_baseline",
-            "improved_baseline": True,
-            "metrics_ok": True,
+            "research_outcome": "met_targets",
             "next_action": "continue",
             "reason": "ok",
         },
@@ -42,7 +40,7 @@ def test_registry_view_summary_and_show_json(tmp_path, capsys) -> None:
 
     assert main(["--state-dir", str(tmp_path), "--json", "summary"]) == 0
     summary = json.loads(capsys.readouterr().out)
-    assert summary[0]["research_outcome"] == "improved_baseline"
+    assert summary[0]["research_outcome"] == "met_targets"
 
     assert main(["--state-dir", str(tmp_path), "show", "--run-id", "run_abc", "--json"]) == 0
     detail = json.loads(capsys.readouterr().out)
