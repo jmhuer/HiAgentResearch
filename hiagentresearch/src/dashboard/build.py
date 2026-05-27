@@ -58,6 +58,7 @@ def build_from_registry(
     snapshot = registry.dashboard_snapshot()
     metric_expectations = _metric_expectations(loaded)
     snapshot["metric_expectations"] = metric_expectations
+    snapshot["lineage_topology"] = _lineage_topology(loaded)
     database_path = target_dir / "dashboard.db"
     _write_dashboard_db(
         source_db=registry.db_path,
@@ -114,6 +115,7 @@ def _write_dashboard_files(
         "title": config.dashboard.title,
         "metric_names": metric_names,
         "groups": snapshot.get("summary", []),
+        "lineage_topology": snapshot.get("lineage_topology", {}),
     }
     manifest = {
         "dashboard_schema_version": DASHBOARD_SCHEMA_VERSION,
@@ -322,6 +324,36 @@ def _copy_sqlite_runtime_assets(output_dir: Path, *, require: bool) -> None:
         except OSError:
             if require:
                 raise
+
+
+def _lineage_topology(config: HiAgentResearchConfig) -> dict[str, Any]:
+    group_meta = {
+        group.id: {
+            "mode": group.lineage.mode,
+            "inherit_from": group.lineage.inherit_from,
+        }
+        for group in config.research_groups
+    }
+    children: dict[str, list[str]] = {}
+    for group in config.research_groups:
+        parent = group.lineage.inherit_from
+        if parent:
+            children.setdefault(parent, []).append(group.id)
+    chains: list[list[str]] = []
+    consumed: set[str] = set()
+    for group in config.research_groups:
+        if group.lineage.mode != "baseline" or group.id in consumed:
+            continue
+        chain = [group.id]
+        current = group.id
+        while current in children and len(children[current]) == 1:
+            nxt = children[current][0]
+            chain.append(nxt)
+            current = nxt
+        for group_id in chain:
+            consumed.add(group_id)
+        chains.append(chain)
+    return {"groups": group_meta, "chains": chains}
 
 
 def _metric_expectations(config: HiAgentResearchConfig) -> list[dict[str, Any]]:

@@ -38,6 +38,10 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
         "max": None,
         "source": "global",
     } in snapshot["metric_expectations"]
+    assert snapshot["lineage_topology"]["chains"] == [
+        ["model_architecture", "optimization_strategy", "hyperparameter_optimization"],
+        ["data_augmentation"],
+    ]
 
     conn = sqlite3.connect(result.database_path)
     try:

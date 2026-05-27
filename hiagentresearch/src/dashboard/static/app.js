@@ -17,6 +17,7 @@ async function main() {
   dashboardData.repository = manifest.repository || dashboardData.repository || {};
   dashboardData.summary = dashboardData.summary?.length ? dashboardData.summary : summary.groups;
   dashboardData.metric_names = chartMetricNames(dashboardData, summary);
+  dashboardData.lineage_topology = dashboardData.lineage_topology || summary.lineage_topology || { chains: [], groups: {} };
   renderShell(manifest, summary);
   renderGroups(dashboardData.summary || []);
   renderFilters(dashboardData);
@@ -227,20 +228,18 @@ async function renderEChart(container, values, metricName, expectations) {
   chartInstance = chartInstance && !chartInstance.isDisposed?.() ? chartInstance : echarts.init(canvas, "dark");
   chartInstance.off("click");
 
-  const ordered = [...values].sort((left, right) => {
-    const group = String(left.group_id).localeCompare(String(right.group_id));
-    if (group !== 0) return group;
-    const loopA = Number(left.loop_index || 0);
-    const loopB = Number(right.loop_index || 0);
-    if (loopA !== loopB) return loopA - loopB;
-    return String(left.created_at).localeCompare(String(right.created_at));
+  const positioned = assignTrajectoryPositions(values, dashboardData.lineage_topology);
+  const ordered = [...positioned].sort((left, right) => {
+    const traj = Number(left.trajectory_x) - Number(right.trajectory_x);
+    if (traj !== 0) return traj;
+    return String(left.group_id).localeCompare(String(right.group_id));
   });
-  const loopAxis = loopCategoryAxis(ordered);
-  const categories = loopAxis.labels;
+  const trajectoryAxis = trajectoryCategoryAxis(ordered);
+  const categories = trajectoryAxis.labels;
   const grouped = groupBy(ordered, (point) => point.group_id);
   const targetLines = dedupeExpectationLines(expectations);
   const domain = metricDomain(ordered, targetLines);
-  const series = Object.entries(grouped).map(([groupId, rows], index) => ({
+  const groupSeries = Object.entries(grouped).map(([groupId, rows], index) => ({
     name: groupId,
     type: "line",
     smooth: true,
@@ -250,10 +249,8 @@ async function renderEChart(container, values, metricName, expectations) {
     emphasis: { focus: "series" },
     lineStyle: { width: 3 },
     itemStyle: { borderColor: "#090b12", borderWidth: 1.5 },
-    data: categories.map((category, index) => {
-      const point = loopAxis.indices
-        ? rows.find((row) => Number(row.loop_index) === loopAxis.indices[index])
-        : rows.find((row) => row.run_id === category);
+    data: trajectoryAxis.indices.map((trajectoryX) => {
+      const point = rows.find((row) => Number(row.trajectory_x) === trajectoryX);
       if (!point) return null;
       return {
         value: point.metric_value,
@@ -277,6 +274,8 @@ async function renderEChart(container, values, metricName, expectations) {
           }
         : undefined,
   }));
+  const bridgeSeries = lineageBridgeSeries(ordered, grouped, trajectoryAxis.indices);
+  const series = [...groupSeries, ...bridgeSeries];
 
   chartInstance.setOption(
     {
@@ -313,7 +312,7 @@ async function renderEChart(container, values, metricName, expectations) {
           formatter: (value) => value,
           hideOverlap: true,
         },
-        name: loopAxis.indices ? "Loop" : "Run",
+        name: "Lineage step",
       },
       yAxis: {
         type: "value",
@@ -400,7 +399,7 @@ function pointTooltipHtml(point) {
       : "";
   return `
     <div class="tooltip-title">${escapeHtml(point.group_id)} · ${escapeHtml(point.metric_name)} ${formatMetric(point.metric_value)}</div>
-    <div class="tooltip-muted">${escapeHtml(loopLabel(point))}${lineage} · ${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</div>
+    <div class="tooltip-muted">${escapeHtml(trajectoryLabel(point))}${lineage} · ${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</div>
     <div class="tooltip-body">${escapeHtml(shortText(point.hypothesis || point.reason || "No summary recorded.", 190))}</div>
     ${(point.planned_code_changes || []).slice(0, 2).map((item) => `<div class="tooltip-muted">${escapeHtml(shortText(item, 130))}</div>`).join("")}
   `;
@@ -424,10 +423,39 @@ function fillTemplate(template, values) {
   }, template);
 }
 
-function loopCategoryAxis(points) {
+function assignTrajectoryPositions(points, topology) {
+  const chains = topology?.chains || [];
+  const chainByGroup = new Map();
+  chains.forEach((chain) => chain.forEach((groupId) => chainByGroup.set(groupId, chain)));
+  const loopsByGroup = groupBy(
+    points.filter((point) => point.loop_index != null && point.loop_index !== ""),
+    (point) => point.group_id,
+  );
+
+  return points.map((point) => {
+    const loopIndex = Number(point.loop_index);
+    const chain = chainByGroup.get(point.group_id);
+    if (!chain || !loopIndex) {
+      return { ...point, trajectory_x: loopIndex ? loopIndex - 1 : 0 };
+    }
+    const chainIndex = chain.indexOf(point.group_id);
+    let offset = 0;
+    for (let index = 0; index < chainIndex; index += 1) {
+      const priorLoops = loopsByGroup[chain[index]] || [];
+      const maxLoop = priorLoops.length
+        ? Math.max(...priorLoops.map((row) => Number(row.loop_index) || 0))
+        : 0;
+      offset += maxLoop;
+    }
+    const trajectory_x = offset + loopIndex - 1;
+    return { ...point, trajectory_x, lineage_chain: chain };
+  });
+}
+
+function trajectoryCategoryAxis(points) {
   const indices = uniqueInOrder(
     points
-      .map((point) => point.loop_index)
+      .map((point) => point.trajectory_x)
       .filter((value) => value != null && value !== "")
       .map((value) => Number(value))
       .sort((left, right) => left - right),
@@ -436,6 +464,65 @@ function loopCategoryAxis(points) {
     return { labels: uniqueInOrder(points.map((point) => point.run_id)), indices: null };
   }
   return { labels: indices.map((value) => `L${value}`), indices };
+}
+
+function lineageBridgeSeries(ordered, grouped, trajectoryIndices) {
+  if (!trajectoryIndices?.length) return [];
+  const topology = dashboardData.lineage_topology || { chains: [] };
+  const bridges = [];
+  topology.chains.forEach((chain) => {
+    for (let index = 1; index < chain.length; index += 1) {
+      const parentId = chain[index - 1];
+      const childId = chain[index];
+      const parentRows = (grouped[parentId] || []).sort(
+        (left, right) => Number(left.trajectory_x) - Number(right.trajectory_x),
+      );
+      const childRows = (grouped[childId] || []).sort(
+        (left, right) => Number(left.trajectory_x) - Number(right.trajectory_x),
+      );
+      if (!parentRows.length || !childRows.length) continue;
+      const parentLast = parentRows[parentRows.length - 1];
+      const childFirst = childRows[0];
+      const colorIndex = Object.keys(grouped).indexOf(childId);
+      bridges.push({
+        name: `${parentId} → ${childId}`,
+        type: "line",
+        smooth: false,
+        symbol: "circle",
+        symbolSize: 6,
+        showSymbol: true,
+        silent: true,
+        legendHoverLink: false,
+        lineStyle: {
+          width: 2,
+          type: "dashed",
+          color: SERIES_COLORS[(colorIndex >= 0 ? colorIndex : index) % SERIES_COLORS.length],
+          opacity: 0.85,
+        },
+        itemStyle: { opacity: 0.85 },
+        data: trajectoryIndices.map((trajectoryX) => {
+          if (Number(parentLast.trajectory_x) === trajectoryX) {
+            return { value: parentLast.metric_value, point: parentLast };
+          }
+          if (Number(childFirst.trajectory_x) === trajectoryX) {
+            return { value: childFirst.metric_value, point: childFirst };
+          }
+          return null;
+        }),
+      });
+    }
+  });
+  return bridges;
+}
+
+function trajectoryLabel(point) {
+  const trajectoryX = point.trajectory_x;
+  const loopIndex = point.loop_index;
+  if (trajectoryX != null && trajectoryX !== "") {
+    const local = loopIndex ? ` · loop ${loopIndex}` : "";
+    return `L${trajectoryX}${local}`;
+  }
+  return loopLabel(point);
 }
 
 function sortRunsForDisplay(runs) {
