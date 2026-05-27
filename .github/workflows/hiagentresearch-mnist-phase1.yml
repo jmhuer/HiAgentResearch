@@ -38,7 +38,7 @@ jobs:
           python - <<'PY'
           import subprocess
           import sys
-          from hiagentresearch.src.config import load_config
+          from hiagentresearch.src.core.config import load_config
 
           for dependency_file in load_config().dependency_file_paths():
               subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(dependency_file)], check=True)
@@ -53,7 +53,7 @@ jobs:
           if [[ -n "$input_group" ]]; then
             gid="$input_group"
           else
-            gid="$(python -m hiagentresearch.src.config resolve-group --branch "$branch")"
+            gid="$(python -m hiagentresearch.src.core.config resolve-group --branch "$branch")"
           fi
           echo "group_id=$gid" >> "$GITHUB_OUTPUT"
           commit_msg="$(git log -1 --pretty=%B)"
@@ -72,7 +72,7 @@ jobs:
         run: |
           command="$(python - <<'PY' "${{ steps.group.outputs.group_id }}"
           import sys
-          from hiagentresearch.src.config import load_config
+          from hiagentresearch.src.core.config import load_config
           config = load_config()
           group = config.group_by_id(sys.argv[1])
           print(config.format_eval_command(group))
@@ -98,7 +98,7 @@ jobs:
           from hiagentresearch.src.artifact_schema import normalize_eval
           from hiagentresearch.src.quality import classify_research_outcome
 
-          from hiagentresearch.src.config import load_config
+          from hiagentresearch.src.core.config import load_config
 
           config = load_config()
           group = config.group_by_id("${{ steps.group.outputs.group_id }}")

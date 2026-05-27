@@ -6,9 +6,11 @@ from pathlib import Path
 
 from hiagentresearch.src import config as config_cli
 from hiagentresearch.src import registry_view
+from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
 from hiagentresearch.src.dashboard import cli as dashboard_cli
-from hiagentresearch.src.loop_controller import REPO_ROOT, run_loops, run_loops_all
-from hiagentresearch.src.orchestrator import init_state, resolve_group, run_group, status_report
+from hiagentresearch.src.paths import REPO_ROOT
+from hiagentresearch.src.runtime.loop_controller import run_loops, run_loops_all
+from hiagentresearch.src.runtime.orchestrator import init_state, resolve_group, run_group, status_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     loops_all.add_argument("--quick", action="store_true")
     loops_all.add_argument("--agent-model", default="composer-2.5")
     loops_all.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
+    loops_all.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Run groups within each wave in parallel using git worktrees.",
+    )
 
     resolve = sub.add_parser("resolve-group", help="Resolve group id for a branch.")
     resolve.add_argument("--branch", required=True)
@@ -64,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     if raw_args[:1] == ["dashboard"]:
         return dashboard_cli.main(raw_args[1:])
 
+    ensure_cursor_api_key()
     parser = build_parser()
     args = parser.parse_args(raw_args)
     if args.cmd == "init":
@@ -96,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             quick=args.quick,
             agent_model=args.agent_model,
             stop_on_success=not args.run_exact_loops,
+            parallel=args.parallel,
         )
     if args.cmd == "resolve-group":
         return resolve_group(branch=args.branch)

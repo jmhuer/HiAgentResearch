@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
 
-from hiagentresearch.src.config import load_config
-from hiagentresearch.src.github_actions import GitHubRun
-from hiagentresearch.src.loop_controller import run_loops
-from hiagentresearch.src.registry import Registry
+from hiagentresearch.src.core.config import load_config
+from hiagentresearch.src.github.actions import GitHubRun
+from hiagentresearch.src.runtime.loop_controller import run_loops
+from hiagentresearch.src.registry.store import Registry
 
 
 class FakeGit:
@@ -68,8 +68,8 @@ class FakeGitHub:
 
 
 def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("hiagentresearch.src.loop_controller.REPO_ROOT", tmp_path)
-    monkeypatch.setattr("hiagentresearch.src.loop_controller.init_state", lambda: 0)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.init_state", lambda: 0)
     run_dir = tmp_path / ".hiagentresearch" / "runs" / "run_test"
     run_dir.mkdir(parents=True)
     (run_dir / "experiment_intent.json").write_text(
@@ -127,7 +127,7 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
     git = FakeGit()
     installed = {}
     monkeypatch.setattr(
-        "hiagentresearch.src.loop_controller._install_dependency_files",
+        "hiagentresearch.src.runtime.loop_controller._install_dependency_files",
         lambda config: installed.setdefault("called", True),
     )
     summary = run_loops(

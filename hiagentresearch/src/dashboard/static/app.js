@@ -102,6 +102,15 @@ function renderShell(manifest, summary) {
   text("schema-label", `dashboard v${manifest.dashboard_schema_version || "?"}`);
 }
 
+function groupLineageLabel(groupId) {
+  const meta = (dashboardData.lineage_topology || {}).groups?.[groupId];
+  if (!meta) return "";
+  if (meta.mode === "inherit" && meta.inherit_from) {
+    return `Inherits ${meta.inherit_from}`;
+  }
+  return "Baseline (starts at L0)";
+}
+
 function renderGroups(groups) {
   const container = document.getElementById("group-cards");
   container.innerHTML = groups
@@ -109,6 +118,7 @@ function renderGroups(groups) {
       (group) => `
         <article class="card">
           <h3>${escapeHtml(group.group_id || "unknown")}</h3>
+          <div class="metric-row"><span>Lineage</span><strong>${escapeHtml(groupLineageLabel(group.group_id))}</strong></div>
           <span class="badge ${outcomeClass(group.research_outcome)}">${escapeHtml(group.research_outcome || "unknown")}</span>
           <div class="metric-row"><span>Failure class</span><strong>${escapeHtml(group.failure_class || "unknown")}</strong></div>
           <div class="metric-row"><span>Accuracy</span><strong>${formatMetric(group.accuracy)}</strong></div>

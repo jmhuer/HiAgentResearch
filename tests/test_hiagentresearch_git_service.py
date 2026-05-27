@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from hiagentresearch.src.git_service import GitService, GitServiceError
+from hiagentresearch.src.git.service import GitService, GitServiceError
 
 
 def test_git_service_parses_status_and_staged_files(monkeypatch, tmp_path) -> None:

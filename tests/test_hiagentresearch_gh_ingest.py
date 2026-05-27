@@ -1,6 +1,6 @@
 import json
 
-from hiagentresearch.src import gh_ingest
+import hiagentresearch.src.github.ingest as gh_ingest
 
 
 def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 1}') -> None:

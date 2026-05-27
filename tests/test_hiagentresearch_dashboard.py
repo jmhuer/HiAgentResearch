@@ -1,10 +1,10 @@
 import json
 import sqlite3
 
-from hiagentresearch.src.config import load_config
+from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.dashboard.build import build_from_artifacts, build_from_registry
 from hiagentresearch.src.dashboard.cli import main
-from hiagentresearch.src.registry import Registry
+from hiagentresearch.src.registry.store import Registry
 
 
 def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None:

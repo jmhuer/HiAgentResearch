@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from hiagentresearch.src.config import load_config, resolve_group_id_for_branch
+from hiagentresearch.src.core.config import load_config, resolve_group_id_for_branch
 
 
 def test_load_root_config() -> None:

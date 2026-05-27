@@ -19,7 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from hiagentresearch.src.config import load_config
+from hiagentresearch.src.core.config import load_config
 
 
 def _parse_pytest_counts(stdout: str) -> tuple[int, int]:

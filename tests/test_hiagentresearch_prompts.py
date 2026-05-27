@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from hiagentresearch.src.config import load_config
-from hiagentresearch.src.models import IntentPacket
-from hiagentresearch.src.prompts import build_phase1_prompt
+from hiagentresearch.src.core.config import load_config
+from hiagentresearch.src.core.models import IntentPacket
+from hiagentresearch.src.agents.prompts import build_phase1_prompt
 
 
 def test_prompt_is_config_backed() -> None:

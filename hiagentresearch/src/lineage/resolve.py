@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hiagentresearch.src.config import HiAgentResearchConfig, ResearchGroupConfig
-from hiagentresearch.src.git_service import GitService
+from hiagentresearch.src.core.config import HiAgentResearchConfig, ResearchGroupConfig
+from hiagentresearch.src.git.service import GitService
 
 if TYPE_CHECKING:
-    from hiagentresearch.src.registry import Registry
+    from hiagentresearch.src.registry.store import Registry
 
 
 class LineageError(ValueError):

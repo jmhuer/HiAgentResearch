@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from hiagentresearch.src.quality import classify_research_outcome, metrics_meet_expectations
+from hiagentresearch.src.runtime.quality import classify_research_outcome, metrics_meet_expectations
 
 
 @dataclass

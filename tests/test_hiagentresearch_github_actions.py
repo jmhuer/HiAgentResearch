@@ -1,6 +1,6 @@
 import subprocess
 
-from hiagentresearch.src.github_actions import GitHubActionsService
+from hiagentresearch.src.github.actions import GitHubActionsService
 
 
 def test_github_actions_lists_and_finds_runs(monkeypatch, tmp_path) -> None:

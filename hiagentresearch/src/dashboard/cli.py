@@ -4,9 +4,9 @@ import argparse
 import json
 from pathlib import Path
 
-from hiagentresearch.src.config import DEFAULT_CONFIG_PATH, load_config
+from hiagentresearch.src.core.config import DEFAULT_CONFIG_PATH, load_config
 from hiagentresearch.src.dashboard.build import build_from_artifacts, build_from_registry
-from hiagentresearch.src.orchestrator import DEFAULT_STATE_DIR
+from hiagentresearch.src.runtime.orchestrator import DEFAULT_STATE_DIR
 
 
 def build_parser() -> argparse.ArgumentParser:

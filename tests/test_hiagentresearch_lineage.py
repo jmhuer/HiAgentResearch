@@ -2,10 +2,10 @@ import subprocess
 
 import pytest
 
-from hiagentresearch.src.config import HiAgentResearchConfig, LineageConfig, OrchestrationConfig, ResearchGroupConfig
-from hiagentresearch.src.git_service import GitService
+from hiagentresearch.src.core.config import HiAgentResearchConfig, LineageConfig, OrchestrationConfig, ResearchGroupConfig
+from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.lineage.resolve import LineageError, resolve_branch_bootstrap
-from hiagentresearch.src.registry import Registry
+from hiagentresearch.src.registry.store import Registry
 
 
 def _group(

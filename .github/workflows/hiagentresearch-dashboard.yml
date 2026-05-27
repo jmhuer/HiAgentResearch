@@ -40,7 +40,7 @@ jobs:
         id: dashboard_config
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
-          from hiagentresearch.src.config import load_config
+          from hiagentresearch.src.core.config import load_config
 
           config = load_config()
           print(f"enabled={str(config.dashboard.enabled).lower()}")
@@ -59,7 +59,7 @@ jobs:
           import subprocess
           from pathlib import Path
 
-          from hiagentresearch.src.config import load_config
+          from hiagentresearch.src.core.config import load_config
 
           config = load_config()
           workflow = config.github.workflow_name

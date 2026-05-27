@@ -1,7 +1,7 @@
 import sqlite3
 
-from hiagentresearch.src.models import IntentPacket
-from hiagentresearch.src.registry import SCHEMA_VERSION, Registry
+from hiagentresearch.src.core.models import IntentPacket
+from hiagentresearch.src.registry.store import SCHEMA_VERSION, Registry
 
 
 def test_registry_init_and_intent_packet(tmp_path) -> None:

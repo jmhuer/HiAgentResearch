@@ -11,8 +11,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from hiagentresearch.src.config import HiAgentResearchConfig, load_config
-from hiagentresearch.src.registry import Registry
+from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
+from hiagentresearch.src.registry.store import Registry
 
 
 DASHBOARD_SCHEMA_VERSION = 1

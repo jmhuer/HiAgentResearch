@@ -1,7 +1,7 @@
 import json
 
-from hiagentresearch.src.registry import Registry
-from hiagentresearch.src.registry_view import main
+from hiagentresearch.src.registry.store import Registry
+from hiagentresearch.src.registry.view import main
 
 
 def test_registry_view_summary_and_show_json(tmp_path, capsys) -> None:

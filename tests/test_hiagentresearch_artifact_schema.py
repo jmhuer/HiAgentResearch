@@ -1,4 +1,4 @@
-from hiagentresearch.src.artifact_schema import (
+from hiagentresearch.src.core.artifact_schema import (
     classify_non_json_failure,
     normalize_eval,
     normalize_canonical_json_stdout,

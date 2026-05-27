@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from hiagentresearch.src.config import load_config
-from hiagentresearch.src.models import IntentPacket
-from hiagentresearch.src.orchestrator import (
+from hiagentresearch.src.core.config import load_config
+from hiagentresearch.src.core.models import IntentPacket
+from hiagentresearch.src.runtime.orchestrator import (
     _apply_agent_intent_update,
     _is_generated_path,
     _validate_agent_intent_contract,
