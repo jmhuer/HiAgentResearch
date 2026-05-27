@@ -108,7 +108,7 @@ function groupLineageLabel(groupId) {
   if (meta.mode === "inherit" && meta.inherit_from) {
     return `Inherits ${meta.inherit_from}`;
   }
-  return "Baseline (starts at L0)";
+  return "Baseline · L0 frozen-eval anchor";
 }
 
 function renderGroups(groups) {
@@ -173,12 +173,12 @@ async function renderChart() {
     const groupId = document.getElementById("group-filter").value;
     const metricName = document.getElementById("metric-filter").value;
     const indexes = dashboardIndexes();
-    const values = chartMetricPoints(
-      (dashboardData.metrics || []).filter(
-        (metric) => (groupId === ALL_GROUPS || metric.group_id === groupId) && metric.metric_name === metricName,
-      ),
-      indexes,
+    const filtered = (dashboardData.metrics || []).filter(
+      (metric) => (groupId === ALL_GROUPS || metric.group_id === groupId) && metric.metric_name === metricName,
     );
+    let values = chartMetricPoints(filtered, indexes);
+    values = appendBaselinePoints(values, metricName, groupId);
+    values = assignTrajectoryPositions(values, dashboardData.lineage_topology);
     if (!values.length) {
       if (chartInstance && !chartInstance.isDisposed?.()) {
         chartInstance.dispose();
@@ -376,7 +376,8 @@ async function renderEChart(container, values, metricName, expectations) {
 function chartMetricPoints(metrics, indexes) {
   const enriched = metrics
     .map((metric) => enrichMetricPoint(metric, indexes))
-    .filter((point) => Number.isFinite(point.metric_value));
+    .map((point) => resolveLoopIndex(point, indexes))
+    .filter((point) => Number.isFinite(point.metric_value) && !point.is_baseline_anchor);
   const byGroupLoop = new Map();
   for (const point of enriched) {
     const loopKey = point.loop_index != null ? String(point.loop_index) : point.run_id;
@@ -387,6 +388,57 @@ function chartMetricPoints(metrics, indexes) {
     }
   }
   return [...byGroupLoop.values()];
+}
+
+function resolveLoopIndex(point, indexes) {
+  if (point.loop_index != null && point.loop_index > 0) {
+    return point;
+  }
+  const run = indexes.runs.get(point.run_id) || {};
+  const correlationId = String(run.correlation_id || "").trim();
+  if (correlationId) {
+    const linked = indexes.experiments.get(correlationId);
+    if (linked?.loop_index != null) {
+      return { ...point, loop_index: Number(linked.loop_index) };
+    }
+  }
+  return point;
+}
+
+function appendBaselinePoints(points, metricName, groupFilter) {
+  const topology = dashboardData.lineage_topology || {};
+  const baseline = topology.baseline_snapshot;
+  if (!baseline?.metrics || baseline.metrics[metricName] == null) {
+    return points;
+  }
+  const metricValue = Number(baseline.metrics[metricName]);
+  if (!Number.isFinite(metricValue)) {
+    return points;
+  }
+  const groupIds = groupFilter === ALL_GROUPS ? visibleGroupIds(points, topology) : [groupFilter];
+  const ref = baseline.ref || "main";
+  const anchors = groupIds.map((groupId) => ({
+    run_id: `baseline:${ref}`,
+    group_id: groupId,
+    metric_name: metricName,
+    metric_value: metricValue,
+    loop_index: 0,
+    trajectory_x: 0,
+    is_baseline_anchor: true,
+    outcome: "baseline",
+    hypothesis: `Frozen eval anchor (${ref})`,
+  }));
+  return [...anchors, ...points];
+}
+
+function visibleGroupIds(points, topology) {
+  const ids = new Set(points.map((point) => point.group_id));
+  for (const wave of topology.execution_waves || []) {
+    for (const groupId of wave) {
+      ids.add(groupId);
+    }
+  }
+  return [...ids].sort();
 }
 
 function preferCanonicalRun(candidate, incumbent) {
@@ -445,6 +497,9 @@ function enrichMetricPoint(metric, indexes) {
     hypothesis: experiment.hypothesis || "",
     planned_code_changes: experiment.planned_code_changes || [],
     metric_value: Number(metric.metric_value),
+    trajectory_x:
+      metric.trajectory_x != null && metric.trajectory_x !== "" ? Number(metric.trajectory_x) : undefined,
+    is_baseline_anchor: Boolean(metric.is_baseline_anchor),
   };
 }
 
@@ -495,33 +550,59 @@ function fillTemplate(template, values) {
   }, template);
 }
 
+// Keep aligned with hiagentresearch.src.dashboard.trajectory.assign_trajectory_positions.
 function assignTrajectoryPositions(points, topology) {
-  const chains = topology?.chains || [];
-  const chainByGroup = new Map();
-  chains.forEach((chain) => chain.forEach((groupId) => chainByGroup.set(groupId, chain)));
-  const loopsByGroup = groupBy(
-    points.filter((point) => point.loop_index != null && point.loop_index !== ""),
-    (point) => point.group_id,
-  );
-
-  return points.map((point) => {
-    const loopIndex = Number(point.loop_index);
-    const chain = chainByGroup.get(point.group_id);
-    if (!chain || !loopIndex) {
-      return { ...point, trajectory_x: loopIndex ? loopIndex - 1 : 0 };
-    }
-    const chainIndex = chain.indexOf(point.group_id);
-    let offset = 0;
-    for (let index = 0; index < chainIndex; index += 1) {
-      const priorLoops = loopsByGroup[chain[index]] || [];
-      const maxLoop = priorLoops.length
-        ? Math.max(...priorLoops.map((row) => Number(row.loop_index) || 0))
-        : 0;
-      offset += maxLoop;
-    }
-    const trajectory_x = offset + loopIndex - 1;
-    return { ...point, trajectory_x, lineage_chain: chain };
+  const waves = topology?.execution_waves || [];
+  if (!waves.length) {
+    return points.map((point) => {
+      const loopIndex = normalizedLoopIndex(point);
+      return { ...point, trajectory_x: loopIndex ?? 0 };
+    });
+  }
+  const groupWave = new Map();
+  waves.forEach((wave, waveIndex) => {
+    wave.forEach((groupId) => groupWave.set(groupId, waveIndex));
   });
+  const depths = waveDepths(points, waves);
+  return points.map((point) => {
+    if (point.is_baseline_anchor) {
+      return { ...point, trajectory_x: 0 };
+    }
+    const loopIndex = normalizedLoopIndex(point);
+    if (loopIndex == null) {
+      return { ...point, trajectory_x: 0 };
+    }
+    const waveIndex = groupWave.get(point.group_id) ?? 0;
+    return { ...point, trajectory_x: depths[waveIndex] + loopIndex, lineage_wave: waveIndex };
+  });
+}
+
+function waveDepths(points, waves) {
+  const depths = [];
+  let cumulative = 0;
+  for (const wave of waves) {
+    depths.push(cumulative);
+    let maxLoop = 0;
+    for (const groupId of wave) {
+      for (const point of points) {
+        if (point.is_baseline_anchor || point.group_id !== groupId) continue;
+        const loopIndex = normalizedLoopIndex(point);
+        if (loopIndex != null) {
+          maxLoop = Math.max(maxLoop, loopIndex);
+        }
+      }
+    }
+    cumulative += maxLoop;
+  }
+  return depths;
+}
+
+function normalizedLoopIndex(point) {
+  const loopIndex = Number(point.loop_index);
+  if (!Number.isFinite(loopIndex) || loopIndex <= 0) {
+    return null;
+  }
+  return loopIndex;
 }
 
 function trajectoryCategoryAxis(points) {
@@ -595,6 +676,9 @@ function lineageBridgeSeries(ordered, grouped, trajectoryAxis) {
 }
 
 function trajectoryLabel(point) {
+  if (point.is_baseline_anchor) {
+    return "L0 · baseline";
+  }
   const trajectoryX = point.trajectory_x;
   const loopIndex = point.loop_index;
   if (trajectoryX != null && trajectoryX !== "") {

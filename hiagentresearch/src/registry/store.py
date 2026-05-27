@@ -189,6 +189,41 @@ class Registry:
         finally:
             conn.close()
 
+    def baseline_snapshot(self) -> dict[str, Any] | None:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT value FROM schema_meta WHERE key = 'baseline_snapshot'",
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        try:
+            payload = json.loads(str(row[0]))
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def record_baseline_snapshot(self, *, ref: str, metrics: dict[str, float]) -> None:
+        payload = {
+            "ref": ref,
+            "metrics": {str(name): float(value) for name, value in metrics.items()},
+            "created_at": utc_now_iso(),
+        }
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO schema_meta (key, value)
+                VALUES ('baseline_snapshot', ?)
+                """,
+                (json.dumps(payload, sort_keys=True),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def read_intent_packet(self, group_id: str) -> IntentPacket | None:
         conn = sqlite3.connect(self.db_path)
         try:

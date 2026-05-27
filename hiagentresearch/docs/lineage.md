@@ -10,4 +10,10 @@ Each research group declares how its branch is bootstrapped:
 
 Registry columns on `experiments` record `lineage_mode`, `lineage_parent_group_id`, `lineage_anchor_sha`, and `lineage_anchor_policy` for dashboard tooltips.
 
-The dashboard plots **lineage trajectory**: baseline groups start at **L0** on the x-axis; inherited groups continue the same axis after their parent chain. Dashed bridge segments connect the parent’s last point to the child’s first point (each group keeps its own series color).
+The dashboard plots **lineage trajectory** on a shared research axis:
+
+- **L0** — frozen-eval baseline on `orchestration.baseline_ref` (recorded once in the registry when `loops-all` starts).
+- **L1+** — loop results positioned by `orchestration.execution_waves`. Groups in the same wave with the same `loop_index` share the same x position (parallel wave-1 baselines align).
+- **Inherited groups** — continue after the deepest loop completed in all prior waves (not merely their parent chain).
+
+Dashed bridge segments connect a parent’s last point to a child’s first point (each group keeps its own series color). Threshold `markLine`s remain for configured success metrics.

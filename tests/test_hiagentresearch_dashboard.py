@@ -31,10 +31,12 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
     snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
     assert snapshot["metric_names"] == ["accuracy", "latency_ms"]
     assert snapshot["experiments"][0]["hypothesis_id"] == "h1"
+    config = load_config()
+    accuracy_min = config.evaluation.success_metrics["accuracy"].min
     assert {
         "group_id": "model_architecture",
         "metric_name": "accuracy",
-        "min": 0.985,
+        "min": accuracy_min,
         "max": None,
         "source": "global",
     } in snapshot["metric_expectations"]
@@ -42,6 +44,12 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
         ["model_architecture", "optimization_strategy", "hyperparameter_optimization"],
         ["data_augmentation"],
     ]
+    assert snapshot["lineage_topology"]["execution_waves"] == [
+        ["model_architecture", "data_augmentation"],
+        ["optimization_strategy"],
+        ["hyperparameter_optimization"],
+    ]
+    assert all("trajectory_x" in row for row in snapshot["metrics"])
 
     conn = sqlite3.connect(result.database_path)
     try:
@@ -55,7 +63,7 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
                 WHERE group_id = 'model_architecture' AND metric_name = 'accuracy'
                 """
             ).fetchone()[0]
-            == 0.985
+            == accuracy_min
         )
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'intent_packets'").fetchone() is None
     finally:

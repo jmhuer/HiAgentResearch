@@ -356,6 +356,36 @@ def _manifest_summary(manifest: dict) -> str:
     return text or "experiment update"
 
 
+def _ensure_baseline_snapshot(registry: Registry, config: HiAgentResearchConfig) -> None:
+    if registry.baseline_snapshot():
+        return
+    entrypoint = config.frozen_eval_path(REPO_ROOT)
+    if not entrypoint.exists():
+        return
+    anchor_group = next((group.id for group in config.research_groups), "model_architecture")
+    proc = subprocess.run(
+        [sys.executable, str(entrypoint), "--quick", "--group-id", anchor_group],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode not in {0, 2}:
+        return
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return
+    metrics = {
+        name: float(payload[name])
+        for name in ("accuracy", "latency_ms", "tests_passed", "tests_failed", "duration_sec")
+        if name in payload and payload[name] is not None
+    }
+    if not metrics:
+        return
+    registry.record_baseline_snapshot(ref=config.orchestration.baseline_ref, metrics=metrics)
+
+
 def run_loops_all(
     *,
     loops: int,
@@ -368,6 +398,9 @@ def run_loops_all(
 ) -> int:
     ensure_cursor_api_key()
     loaded_config = config or load_config()
+    registry = Registry(REPO_ROOT / ".hiagentresearch" / "state")
+    registry.init()
+    _ensure_baseline_snapshot(registry, loaded_config)
     summaries: list[LoopSummary] = []
     worktrees = WorktreeManager(worktree_root=loaded_config.orchestration.worktree_root)
     try:

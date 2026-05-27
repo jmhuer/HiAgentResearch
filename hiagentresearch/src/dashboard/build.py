@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
+from hiagentresearch.src.dashboard.trajectory import assign_trajectory_positions, baseline_metric_points
 from hiagentresearch.src.registry.store import Registry
 
 
@@ -58,7 +59,12 @@ def build_from_registry(
     snapshot = registry.dashboard_snapshot()
     metric_expectations = _metric_expectations(loaded)
     snapshot["metric_expectations"] = metric_expectations
-    snapshot["lineage_topology"] = _lineage_topology(loaded)
+    snapshot["lineage_topology"] = _lineage_topology(loaded, registry=registry)
+    snapshot["metrics"] = _enrich_metrics_for_dashboard(
+        snapshot["metrics"],
+        snapshot.get("experiments", []),
+        snapshot["lineage_topology"],
+    )
     database_path = target_dir / "dashboard.db"
     _write_dashboard_db(
         source_db=registry.db_path,
@@ -326,7 +332,45 @@ def _copy_sqlite_runtime_assets(output_dir: Path, *, require: bool) -> None:
                 raise
 
 
-def _lineage_topology(config: HiAgentResearchConfig) -> dict[str, Any]:
+def _enrich_metrics_for_dashboard(
+    metrics: list[dict[str, Any]],
+    experiments: list[dict[str, Any]],
+    topology: dict[str, Any],
+) -> list[dict[str, Any]]:
+    experiments_by_run = {str(row["run_id"]): row for row in experiments}
+    joined: list[dict[str, Any]] = []
+    for row in metrics:
+        experiment = experiments_by_run.get(str(row.get("run_id", "")))
+        loop_index = experiment.get("loop_index") if experiment else row.get("loop_index")
+        joined.append({**row, "loop_index": loop_index})
+    metric_rows = _dedupe_metric_rows(joined)
+    return assign_trajectory_positions(metric_rows, topology)
+
+
+def _dedupe_metric_rows(metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    best: dict[str, dict[str, Any]] = {}
+    for row in metrics:
+        group_id = str(row.get("group_id", ""))
+        loop_index = row.get("loop_index")
+        loop_key = str(loop_index) if loop_index not in (None, "") else str(row.get("run_id", ""))
+        key = f"{group_id}:{loop_key}"
+        existing = best.get(key)
+        if existing is None or _prefer_github_run(row, existing):
+            best[key] = row
+    return list(best.values())
+
+
+def _prefer_github_run(candidate: dict[str, Any], incumbent: dict[str, Any]) -> bool:
+    candidate_github = str(candidate.get("run_id", "")).startswith("gh_")
+    incumbent_github = str(incumbent.get("run_id", "")).startswith("gh_")
+    if candidate_github and not incumbent_github:
+        return True
+    if not candidate_github and incumbent_github:
+        return False
+    return str(candidate.get("run_id", "")) > str(incumbent.get("run_id", ""))
+
+
+def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | None = None) -> dict[str, Any]:
     group_meta = {
         group.id: {
             "mode": group.lineage.mode,
@@ -353,7 +397,13 @@ def _lineage_topology(config: HiAgentResearchConfig) -> dict[str, Any]:
         for group_id in chain:
             consumed.add(group_id)
         chains.append(chain)
-    return {"groups": group_meta, "chains": chains}
+    baseline_snapshot = registry.baseline_snapshot() if registry is not None else None
+    return {
+        "groups": group_meta,
+        "chains": chains,
+        "execution_waves": config.execution_waves(),
+        "baseline_snapshot": baseline_snapshot,
+    }
 
 
 def _metric_expectations(config: HiAgentResearchConfig) -> list[dict[str, Any]]:
