@@ -101,6 +101,51 @@ def test_dashboard_summary_includes_baseline_snapshot(tmp_path) -> None:
     assert all(row["trajectory_x"] == 0 for row in anchors)
 
 
+def test_dashboard_skips_l0_baseline_for_inherit_groups(tmp_path) -> None:
+    state_dir = tmp_path / "state"
+    registry = _seed_registry(state_dir)
+    registry.record_baseline_snapshot(
+        ref="main",
+        metrics={"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
+    )
+    registry.record_run(
+        run_id="gh_opt",
+        group_id="optimization_strategy",
+        branch="research/optimization-strategy",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.88, "latency_ms": 8.0},
+        commit_sha="optsha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_opt",
+        manifest_path=".hiagentresearch/experiments/optimization_strategy/gh_opt.json",
+        manifest={
+            "group_id": "optimization_strategy",
+            "loop_index": 1,
+            "lineage_mode": "inherit",
+            "lineage_parent_group_id": "model_architecture",
+            "lineage_anchor_sha": "parentsha",
+            "lineage_anchor_policy": "best_commit",
+        },
+    )
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+    snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
+    opt_baselines = [
+        row
+        for row in snapshot["metrics"]
+        if row.get("group_id") == "optimization_strategy" and row.get("is_baseline_anchor")
+    ]
+    model_baselines = [
+        row
+        for row in snapshot["metrics"]
+        if row.get("group_id") == "model_architecture" and row.get("is_baseline_anchor")
+    ]
+    assert not opt_baselines
+    assert model_baselines
+
+
 def test_dashboard_topology_includes_inherit_anchors(tmp_path) -> None:
     state_dir = tmp_path / "state"
     registry = _seed_registry(state_dir)

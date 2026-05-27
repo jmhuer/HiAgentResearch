@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -149,6 +150,10 @@ def _write_dashboard_files(
         },
         "cache_bust": _sha256(database_path.read_bytes())[:12],
     }
+    app_js = output_dir / "app.js"
+    if app_js.exists():
+        manifest["static_cache_bust"] = _sha256(app_js.read_bytes())[:12]
+        _rewrite_index_cache_bust(output_dir, manifest["static_cache_bust"])
 
     summary_path = output_dir / "summary.json"
     manifest_path = output_dir / "manifest.json"
@@ -317,6 +322,15 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+def _rewrite_index_cache_bust(output_dir: Path, cache_bust: str) -> None:
+    index = output_dir / "index.html"
+    if not index.exists():
+        return
+    text = index.read_text(encoding="utf-8")
+    text = re.sub(r'src="\./app\.js(?:\?v=[^"]*)?"', f'src="./app.js?v={cache_bust}"', text)
+    index.write_text(text, encoding="utf-8")
+
+
 def _copy_static_assets(output_dir: Path) -> None:
     for asset in resources.files(STATIC_PACKAGE).iterdir():
         if asset.name.startswith("__") or asset.name.endswith(".py"):
@@ -358,12 +372,16 @@ def _enrich_metrics_for_dashboard(
         return positioned
     metric_names = sorted({str(row.get("metric_name", "")) for row in positioned if row.get("metric_name")})
     group_ids = sorted({str(row.get("group_id", "")) for row in positioned if row.get("group_id")})
+    group_meta = topology.get("groups") or {}
+    baseline_group_ids = sorted(
+        group_id for group_id in group_ids if group_meta.get(group_id, {}).get("mode") == "baseline"
+    )
     anchored: list[dict[str, Any]] = []
     for metric_name in metric_names:
         anchored.extend(
             baseline_metric_points(
                 metric_name=metric_name,
-                group_ids=group_ids,
+                group_ids=baseline_group_ids,
                 baseline_snapshot=baseline_snapshot,
             )
         )
@@ -438,6 +456,8 @@ def _inherit_anchors_from_experiments(experiments: list[dict[str, Any]]) -> dict
         group_id = str(row.get("group_id", ""))
         commit_sha = str(row.get("lineage_anchor_sha", "") or "").strip()
         if not group_id or not commit_sha:
+            continue
+        if str(row.get("lineage_mode", "")) != "inherit" and not row.get("lineage_parent_group_id"):
             continue
         loop_index = int(row.get("loop_index") or 999)
         existing = anchors.get(group_id)

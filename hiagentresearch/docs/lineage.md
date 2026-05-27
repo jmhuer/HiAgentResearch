@@ -12,7 +12,7 @@ Registry columns on `experiments` record `lineage_mode`, `lineage_parent_group_i
 
 The dashboard plots **lineage trajectory** on a shared research axis:
 
-- **L0** — frozen-eval baseline on `orchestration.baseline_ref` (recorded in the registry when `loops-all` or `dashboard build` runs). Shown as a diamond marker per group series.
+- **L0** — frozen-eval baseline on `orchestration.baseline_ref` (recorded in the registry when `loops-all` or `dashboard build` runs). Shown only on `baseline`-mode group series, not on inherited children.
 - **L1+** — loop results positioned by `orchestration.execution_waves`. Groups in the same wave with the same `loop_index` share the same x position (parallel wave-1 baselines align).
 - **Inherited groups** — continue after the deepest loop completed in all prior waves. The child series includes a solid connector segment (child color) from the parent run whose `commit_sha` matches the child’s recorded `lineage_anchor_sha` (`best_commit` / `last_commit` bootstrap), not from L0 baseline or the parent’s latest loop by default.
 

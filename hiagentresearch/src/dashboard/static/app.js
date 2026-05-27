@@ -664,6 +664,10 @@ function resolveLoopIndex(point, indexes) {
   return point;
 }
 
+function groupLineageMode(groupId) {
+  return dashboardData.lineage_topology?.groups?.[groupId]?.mode || "baseline";
+}
+
 function appendBaselinePoints(points, metricName, groupFilter) {
   const topology = dashboardData.lineage_topology || {};
   const baseline = topology.baseline_snapshot;
@@ -674,7 +678,12 @@ function appendBaselinePoints(points, metricName, groupFilter) {
   if (!Number.isFinite(metricValue)) {
     return points;
   }
-  const groupIds = groupFilter === ALL_GROUPS ? visibleGroupIds(points, topology) : [groupFilter];
+  const groupIds = (groupFilter === ALL_GROUPS ? visibleGroupIds(points, topology) : [groupFilter]).filter(
+    (groupId) => groupLineageMode(groupId) === "baseline",
+  );
+  if (!groupIds.length) {
+    return points;
+  }
   const ref = baseline.ref || "main";
   const anchors = groupIds.map((groupId) => ({
     run_id: `baseline:${ref}`,
@@ -737,21 +746,25 @@ function chartSeriesData(rows, trajectoryAxis) {
 }
 
 function seriesDataForGroup(groupId, rows, trajectoryAxis, grouped, metricName) {
-  let series = chartSeriesData(rows, trajectoryAxis);
+  const lineageRows =
+    groupLineageMode(groupId) === "inherit" ? rows.filter((row) => !row.is_baseline_anchor) : rows;
+  let series = chartSeriesData(lineageRows, trajectoryAxis);
   if (trajectoryAxis.mode !== "trajectory") {
     return series;
   }
   const topology = dashboardData.lineage_topology || {};
   const parentId = topology.groups?.[groupId]?.inherit_from;
   if (!parentId) {
-    return withTrajectoryAnchor(series, trajectoryAxis, 0, () => resolveBaselineAnchorPoint(groupId, metricName, rows));
+    return withTrajectoryAnchor(series, trajectoryAxis, 0, () =>
+      resolveBaselineAnchorPoint(groupId, metricName, lineageRows),
+    );
   }
   const parentAnchor = resolveInheritAnchorPoint(groupId, parentId, grouped);
   if (!parentAnchor) {
     return series;
   }
   const parentX = Number(parentAnchor.trajectory_x);
-  if (rows.some((row) => Number(row.trajectory_x) === parentX && !row.is_baseline_anchor)) {
+  if (lineageRows.some((row) => Number(row.trajectory_x) === parentX && !row.is_baseline_anchor)) {
     return series;
   }
   return withTrajectoryAnchor(series, trajectoryAxis, parentX, () => ({
