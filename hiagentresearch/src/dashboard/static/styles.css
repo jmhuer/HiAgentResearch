@@ -188,7 +188,7 @@ select {
 }
 
 .grid {
-  grid-template-columns: minmax(280px, 0.9fr) minmax(340px, 1.1fr);
+  grid-template-columns: minmax(260px, 400px) minmax(320px, 1fr);
   align-items: stretch;
   margin-top: 28px;
 }
@@ -200,7 +200,8 @@ select {
 }
 
 .run-list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   margin-top: 16px;
   flex: 1;
@@ -212,6 +213,7 @@ select {
 
 .run-button {
   width: 100%;
+  flex: 0 0 auto;
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 14px;

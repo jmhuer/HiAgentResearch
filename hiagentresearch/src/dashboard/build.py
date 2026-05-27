@@ -346,7 +346,24 @@ def _enrich_metrics_for_dashboard(
         loop_index = experiment.get("loop_index") if experiment else row.get("loop_index")
         joined.append({**row, "loop_index": loop_index})
     metric_rows = _dedupe_metric_rows(joined)
-    return assign_trajectory_positions(metric_rows, topology)
+    positioned = assign_trajectory_positions(metric_rows, topology)
+    baseline_snapshot = topology.get("baseline_snapshot")
+    if not baseline_snapshot:
+        return positioned
+    metric_names = sorted({str(row.get("metric_name", "")) for row in positioned if row.get("metric_name")})
+    group_ids = sorted({str(row.get("group_id", "")) for row in positioned if row.get("group_id")})
+    anchored: list[dict[str, Any]] = []
+    for metric_name in metric_names:
+        anchored.extend(
+            baseline_metric_points(
+                metric_name=metric_name,
+                group_ids=group_ids,
+                baseline_snapshot=baseline_snapshot,
+            )
+        )
+    if not anchored:
+        return positioned
+    return assign_trajectory_positions([*anchored, *positioned], topology)
 
 
 def _dedupe_metric_rows(metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:

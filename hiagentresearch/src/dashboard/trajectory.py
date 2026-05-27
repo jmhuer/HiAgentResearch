@@ -56,6 +56,9 @@ def assign_trajectory_positions(
     depths = wave_depths(points, waves)
     positioned: list[dict[str, Any]] = []
     for point in points:
+        if point.get("is_baseline_anchor"):
+            positioned.append({**point, "trajectory_x": 0})
+            continue
         loop_index = _loop_index(point)
         if loop_index is None or loop_index <= 0:
             positioned.append({**point, "trajectory_x": 0})

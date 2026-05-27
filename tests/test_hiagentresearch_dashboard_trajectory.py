@@ -73,3 +73,22 @@ def test_baseline_anchor_points_use_l0() -> None:
     assert len(anchors) == 2
     assert all(point["trajectory_x"] == 0 for point in anchors)
     assert all(point["is_baseline_anchor"] for point in anchors)
+
+
+def test_assign_trajectory_positions_keeps_baseline_at_l0() -> None:
+    topology = {
+        "execution_waves": [["model_architecture"]],
+        "baseline_snapshot": {"ref": "main", "metrics": {"accuracy": 0.81}},
+    }
+    points = [
+        {
+            "group_id": "model_architecture",
+            "loop_index": 0,
+            "metric_value": 0.81,
+            "is_baseline_anchor": True,
+        },
+        {"group_id": "model_architecture", "loop_index": 1, "metric_value": 0.9},
+    ]
+    positioned = assign_trajectory_positions(points, topology)
+    baseline = next(row for row in positioned if row.get("is_baseline_anchor"))
+    assert baseline["trajectory_x"] == 0
