@@ -38,15 +38,17 @@ log() {
 }
 
 stop_processes() {
-  log "Stopping hiagentresearch / eval processes"
+  log "Stopping hiagentresearch / eval / cursor agent processes"
   pkill -f "hiagentresearch loops-all" 2>/dev/null || true
   pkill -f "hiagentresearch.cli loops" 2>/dev/null || true
   pkill -f "run_phase1_eval.py" 2>/dev/null || true
+  pkill -f "cursor-sdk-bridge" 2>/dev/null || true
   sleep 2
-  if pgrep -af "hiagentresearch|run_phase1_eval" >/dev/null 2>&1; then
+  if pgrep -af "hiagentresearch|run_phase1_eval|cursor-sdk-bridge" >/dev/null 2>&1; then
     log "Force-stopping remaining hiagentresearch processes"
     pkill -9 -f "hiagentresearch" 2>/dev/null || true
     pkill -9 -f "run_phase1_eval" 2>/dev/null || true
+    pkill -9 -f "cursor-sdk-bridge" 2>/dev/null || true
     sleep 1
   fi
 }
@@ -83,7 +85,10 @@ clean_registry() {
   log "Wiping local registry and run artifacts"
   rm -f .hiagentresearch/state/evals.db
   rm -rf .hiagentresearch/runs/*
-  mkdir -p .hiagentresearch/runs .hiagentresearch/state
+  rm -rf .hiagentresearch/experiments/*
+  rm -rf .hiagentresearch/dashboard-preview
+  rm -f .hiagentresearch/*.log
+  mkdir -p .hiagentresearch/runs .hiagentresearch/state .hiagentresearch/experiments
 }
 
 print_status() {
@@ -96,8 +101,8 @@ print_status() {
   echo "  run dirs:    $(find .hiagentresearch/runs -mindepth 1 2>/dev/null | wc -l | tr -d ' ')"
   echo "  wt dirs:     $(ls -A .hiagentresearch/worktrees 2>/dev/null | wc -l | tr -d ' ')"
   echo "  remote research/*: $(git ls-remote --heads origin 'research/*' 2>/dev/null | wc -l | tr -d ' ')"
-  if pgrep -af "hiagentresearch|run_phase1_eval" >/dev/null 2>&1; then
-    echo "  processes:   still running (see pgrep -af hiagentresearch)"
+  if pgrep -af "hiagentresearch|run_phase1_eval|cursor-sdk-bridge" >/dev/null 2>&1; then
+    echo "  processes:   still running (see pgrep -af 'hiagentresearch|cursor-sdk-bridge')"
   else
     echo "  processes:   none"
   fi

@@ -10,8 +10,8 @@ def assign_trajectory_positions(
     """Map metrics onto a shared lineage axis counting accepted agent loops.
 
     L0 is the frozen baseline anchor. For baseline-mode groups, loop *k* is at L*k*.
-    For inherited groups, L(parent_anchor_loop_index + k) where the parent anchor is
-    the inherited parent commit's loop index (not the max loops across a wave).
+    For inherited groups, L(parent_trajectory_step + k) where parent_trajectory_step
+    is the inherited parent point on its axis (0 = L0 frozen baseline, 1+ = loop).
   """
     group_meta: dict[str, Any] = topology.get("groups") or {}
     inherit_anchors: dict[str, Any] = topology.get("inherit_anchors") or {}
