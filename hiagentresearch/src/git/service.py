@@ -9,6 +9,25 @@ class GitServiceError(RuntimeError):
     """Raised when a git operation fails."""
 
 
+def _is_within(path: str, root: str) -> bool:
+    normalized = path.rstrip("/")
+    root_normalized = root.rstrip("/")
+    if root_normalized in ("", "."):
+        return True
+    return normalized == root_normalized or normalized.startswith(f"{root_normalized}/")
+
+
+def _is_under_any(path: str, prefixes: list[str]) -> bool:
+    normalized = path.rstrip("/")
+    for prefix in prefixes:
+        prefix_normalized = prefix.rstrip("/")
+        if not prefix_normalized:
+            continue
+        if normalized == prefix_normalized or normalized.startswith(f"{prefix_normalized}/"):
+            return True
+    return False
+
+
 @dataclass(slots=True)
 class GitCommandResult:
     args: list[str]
@@ -96,11 +115,22 @@ class GitService:
         args.extend(paths)
         self._run(args)
 
-    def has_core_staged_change(self, *, allowed_paths: list[str], supporting_paths: list[str]) -> bool:
-        staged = set(self.changed_files(staged=True))
-        supporting = set(supporting_paths)
-        core_paths = {path for path in allowed_paths if path not in supporting}
-        return bool(staged.intersection(core_paths))
+    def has_staged_workspace_change(
+        self,
+        *,
+        workdir: str,
+        generated_paths: list[str],
+        reference_paths: list[str],
+        hidden_paths: list[str],
+    ) -> bool:
+        excluded = [*generated_paths, *reference_paths, *hidden_paths]
+        for path in self.changed_files(staged=True):
+            if not _is_within(path, workdir):
+                continue
+            if _is_under_any(path, excluded):
+                continue
+            return True
+        return False
 
     def commit(self, *, subject: str, body: str) -> str:
         self._run(["commit", "-m", subject, "-m", body])

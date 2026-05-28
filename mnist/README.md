@@ -14,28 +14,32 @@ of truth for research outcomes:
 
 | Area | Role |
 | --- | --- |
-| `pipeline/` | **Executable code** — training, builds, experiments that will be run |
-| `eval/` | **Verification** — scripts and checks that test whether pipeline output meets targets |
+| `src/` | **Agent-owned workspace** — model, training, and tests the agent may edit/restructure |
+| `.hiagentresearch/eval/` | **Read-only evaluation zone** — frozen scorer/adapter that produces authoritative metrics (outside this workspace) |
+
+The agent owns everything under `mnist/`. Scoring, model loading, and
+preprocessing live in the read-only eval zone; see the generated `AGENTS.md` in
+this folder for the exact evaluation command and targets.
 
 ## Runnable entrypoints
 
 ```bash
-cd mnist
-python -m pip install -r requirements.txt
-python pipeline/train.py --quick --output /tmp/hiagentresearch_mnist_train_metrics.json
-python eval/run_eval.py --quick --metrics /tmp/hiagentresearch_mnist_train_metrics.json
+# from the repository root
+python -m pip install -r mnist/requirements.txt
+python mnist/src/train.py --quick --output /tmp/hiagentresearch_mnist_train_metrics.json
+python .hiagentresearch/eval/score.py --workdir mnist --quick --metrics /tmp/hiagentresearch_mnist_train_metrics.json
 ```
 
-Full training (downloads MNIST to `data/`):
+Full training (downloads MNIST to `mnist/data/`):
 
 ```bash
-python pipeline/train.py --epochs 3
-python eval/run_eval.py --accuracy-min 0.985 --latency-ms-max 13.0
+python mnist/src/train.py --epochs 3
+python .hiagentresearch/eval/score.py --workdir mnist --accuracy-min 0.985 --latency-ms-max 13.0
 ```
 
 Artifacts:
 
-- `pipeline/checkpoints/mnist_cnn_ensemble.pt` — trained weights
+- `mnist/src/checkpoints/mnist_cnn_ensemble.pt` — trained weights
 - train metrics are printed to stdout or written to the explicit `--output` path
 
 ## Goal

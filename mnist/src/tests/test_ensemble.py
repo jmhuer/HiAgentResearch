@@ -3,11 +3,11 @@ import torch.nn as nn
 import sys
 from pathlib import Path
 
-_MNIST_ROOT = Path(__file__).resolve().parents[1]
-if str(_MNIST_ROOT) not in sys.path:
-    sys.path.insert(0, str(_MNIST_ROOT))
+_SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SRC_ROOT))
 
-from pipeline.model import EnsembleMnistCNN
+from model import EnsembleMnistCNN
 
 def test_ensemble_output_shape():
     num_models = 3

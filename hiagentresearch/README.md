@@ -54,11 +54,13 @@ The run command writes visibility artifacts under:
 - `.hiagentresearch/state/evals.db`
 - `.hiagentresearch/experiments/<group_id>/<run_id>.json` on research branches
 
-Project-specific context, editable paths, eval commands, artifact requirements, and quality retry expectations are generated from `config.yaml`.
+The agent-owned workspace (`workdir`), read-only eval zone (derived from `evaluation.entrypoint`),
+eval command, targets, artifact requirements, and quality retry expectations all
+come from `config.yaml`. The workspace `AGENTS.md` is generated from it.
 
-Agent validation commands in `config.yaml` are local feedback tools. The frozen
-eval adapter remains the final authority and should emit canonical JSON for the
-generic parser.
+Agents get fast feedback from their own quick tests in the workspace. The frozen
+eval adapter under `.hiagentresearch/eval/` remains the final authority and emits
+canonical JSON (health flags plus the metric keys named in `evaluation.targets`).
 
 ## Optional dashboard
 

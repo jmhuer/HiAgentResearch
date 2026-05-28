@@ -1,45 +1,44 @@
-# HiAgentControl MNIST — architecture invariants
+# Workspace contract (mnist)
 
-## Pattern 3 (default)
+<!-- Generated from config.yaml by `hiagentresearch render-workspace-docs`. Do not edit by hand. -->
 
-1. **Python** seeds `state/current/plan.json` skeleton.
-2. **Single `/ulw-loop`** with **Sisyphus** enriches `plan.json` using skill **`hac-assess-plan`** (bound in `oh-my-openagent.jsonc`).
-3. **Skill owns the loop** — research, lint, gate, hard exit; no duplicate bash commands in the ulw prompt.
-4. **Review committee (Python)** — `<promise>DONE</promise>` from `run_plan_gate` stdout only.
+This workspace (`mnist/`) is yours. You may add, modify, restructure, and
+delete files anywhere under it: add modules, add tests under `mnist/src/tests/`
+or `mnist/tests/`, add dependencies to the requirements file, and reorganize
+code to support your hypothesis.
 
-### Loop contract
+## How you are evaluated
 
-- **Success signal:** gate stdout contains exact `<promise>DONE</promise>`; agent emits only that tag and stops.
-- **No dynamic agent sequencing** — do not run Hephaestus→Sisyphus pipelines or `team_task_create` chains during pattern 3.
-- **Continuation:** HiAgentControl may kill the OMO session after a stable gate PASS; the agent must not declare done without gate stdout.
+After your cycle, the orchestrator (and GitHub eval node) runs this exact command:
 
-### Delegation
+```bash
+python .hiagentresearch/eval/run_phase1_eval.py --workdir mnist --group-id <group_id> --quick
+```
 
-- **Default:** `explore` / `librarian` with `run_in_background=false`.
-- **Opt-in background:** max 2 concurrent; must `background_output` before next tool.
-- **Forbidden:** Sisyphus-Junior, hephaestus, implementation subagents during plan loop.
+It prints a canonical JSON report to stdout and you are scored on these target
+fields (`accuracy`, `latency_ms`):
 
-### Artifacts
+- `accuracy` >= 0.985
+- `latency_ms` <= 13.0
 
-- **Required:** `state/current/plan.json`
-- **Optional:** `state/current/draft.md` (scratch only)
+The eval reads `passed` / `execution_passed` health flags plus those metric keys
+from the JSON report. You do not need to call the parser yourself.
 
-## Legacy pipeline (`--pattern legacy`)
+## The eval zone is read-only
 
-PI → Atlas → format → gate. See `skills/_legacy/hac-plan-pipeline/`.
+Scoring, model loading, preprocessing, and deployment code live in:
 
-## Task shape in plan.json
+- `.hiagentresearch/eval/`
+- `.hiagentresearch/eval/run_phase1_eval.py`
 
-- **task** — research area title
-- **scope** — TRY:/FILES:/CHANGE:/VERIFY: (≥120 chars)
-- **goal_type** — survey, codebase_recon, experiment, architecture, hygiene, feature, ablation_study
+Read these files to understand exactly how your model is loaded, what
+preprocessing is applied at inference, and how each metric is computed. Never
+edit or run them: the orchestrator runs the eval after your cycle and that result
+is authoritative. Editing the eval zone is rejected as an invalid cycle.
 
-## Must not
+## Feedback loop
 
-- No phantom paths (e.g. `mnist_cnn.py`); model code is `pipeline/model.py`.
-- Do not use Atlas as the pattern-3 primary agent (use Sisyphus).
-- Do not declare loop done without gate printing `<promise>DONE</promise>`.
-
-## Rework
-
-On gate failure, read `state/current/targeted_rework.md` and fix `plan.json`.
+- Write and run your own quick unit/smoke tests for fast feedback before the
+  authoritative eval.
+- Keep your own feedback cheap and CPU-bounded; do not launch long training runs.
+- Treat metric regressions as research evidence, not execution failures.

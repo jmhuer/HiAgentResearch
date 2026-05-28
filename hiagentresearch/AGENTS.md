@@ -8,18 +8,18 @@ This project uses a Cursor-first phase-1 research loop with a thin Python contro
 2. Each run writes planning artifacts under `.hiagentresearch/runs/<run_id>/`:
    - `experiment_intent.json`
    - `experiment_plan.md`
-3. Each run applies at least one bounded code edit to a configured core implementation file.
+3. Each run applies at least one bounded code edit to a workspace source file.
 4. Each committed experiment includes a concise `.hiagentresearch/experiments/<group_id>/<run_id>.json` manifest.
 5. Do not create branch-memory Python files for hypotheses or markers.
 6. Every run must finish with eval artifacts and an auditable trail.
 
 ## Editing boundaries
 
-- Keep code edits inside configured `allowed_paths` and run-local observability artifacts.
-- If an experiment needs a project dependency, add it to the configured project requirements file instead of core runtime dependencies.
-- Prefer minimal changes with explicit hypotheses and rollback plan.
-- Agents may run only configured `agent_tools` commands for quick feedback.
-- Do not run training or metric-producing eval directly. The orchestrator and GitHub eval nodes own `mnist/pipeline/train.py`, `mnist/eval/run_eval.py`, and `.hiagentresearch/eval/run_phase1_eval.py`.
+- The workspace (`workdir`) is yours: edit, add, restructure, and add tests/dependencies freely within it. The generated `AGENTS.md` in the workspace describes the exact eval command and targets.
+- Keep edits inside the workspace plus run-local observability artifacts.
+- The evaluation zone (the directory containing `evaluation.entrypoint`, e.g. `.hiagentresearch/eval/`) is read-only. Read it to understand exactly how you are scored; never edit or run it. The orchestrator and GitHub eval nodes own metric-producing training/eval, and edits to the eval zone are rejected as an invalid cycle.
+- If an experiment needs a project dependency, add it to the workspace requirements file instead of core runtime dependencies.
+- For your own feedback, write and run quick CPU-bounded unit/smoke tests; do not launch long training runs.
 - Do not claim successful research without orchestrator or GitHub evaluation outputs.
 - If a valid experiment does not improve the configured baseline, record the outcome as evidence and continue through the intent packet (`repair`, `pivot`, `reset`, or `continue`) until output quality matches expectations or the group is explicitly blocked.
 - Only revert when the branch state itself is a worse basis for future research; prefer auditable corrective commits over hidden history rewrites.

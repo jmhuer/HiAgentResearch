@@ -33,7 +33,7 @@ def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 
                 "loop_index": 1,
                 "hypothesis_id": "h1",
                 "hypothesis": "Try a clean dashboard-ready experiment.",
-                "target_files": ["mnist/pipeline/model.py"],
+                "target_files": ["mnist/src/model.py"],
                 "planned_code_changes": ["Edit model.py"],
                 "lineage_baseline_snapshot": {
                     "ref": "main",

@@ -20,7 +20,6 @@ def _group(
         branch=f"research/{group_id.replace('_', '-')}",
         objective="test",
         policy_mode="explore",
-        allowed_paths=["src/app.py"],
         lineage=LineageConfig(
             mode=mode,
             inherit_from=inherit_from,
@@ -39,9 +38,7 @@ def test_resolve_baseline_uses_main_sha(monkeypatch, tmp_path) -> None:
     config = HiAgentResearchConfig(
         project_id="demo",
         workdir=".",
-        editable_paths=["src/app.py"],
-        frozen_eval_entrypoint=".hiagentresearch/eval/run.py",
-        evaluation={"command_template": "true", "parser": "canonical_json_stdout"},
+        evaluation={"entrypoint": ".hiagentresearch/eval/run.py", "command_template": "true"},
         artifact_contract={"required": ["metrics.json"]},
         policy_modes={"explore": "Explore."},
         orchestration=OrchestrationConfig(),
@@ -74,9 +71,7 @@ def test_resolve_inherit_best_commit_from_registry(tmp_path) -> None:
     config = HiAgentResearchConfig(
         project_id="demo",
         workdir=".",
-        editable_paths=["src/app.py"],
-        frozen_eval_entrypoint=".hiagentresearch/eval/run.py",
-        evaluation={"command_template": "true", "parser": "canonical_json_stdout"},
+        evaluation={"entrypoint": ".hiagentresearch/eval/run.py", "command_template": "true"},
         artifact_contract={"required": ["metrics.json"]},
         policy_modes={"explore": "Explore."},
         orchestration=OrchestrationConfig(
@@ -130,9 +125,7 @@ def test_best_commit_prefers_highest_github_metric_not_latest(tmp_path) -> None:
     config = HiAgentResearchConfig(
         project_id="demo",
         workdir=".",
-        editable_paths=["src/app.py"],
-        frozen_eval_entrypoint=".hiagentresearch/eval/run.py",
-        evaluation={"command_template": "true", "parser": "canonical_json_stdout"},
+        evaluation={"entrypoint": ".hiagentresearch/eval/run.py", "command_template": "true"},
         artifact_contract={"required": ["metrics.json"]},
         policy_modes={"explore": "Explore."},
         orchestration=OrchestrationConfig(
@@ -197,9 +190,7 @@ def test_best_commit_prefers_parent_l0_when_baseline_is_higher(monkeypatch, tmp_
     config = HiAgentResearchConfig(
         project_id="demo",
         workdir=".",
-        editable_paths=["src/app.py"],
-        frozen_eval_entrypoint=".hiagentresearch/eval/run.py",
-        evaluation={"command_template": "true", "parser": "canonical_json_stdout"},
+        evaluation={"entrypoint": ".hiagentresearch/eval/run.py", "command_template": "true"},
         artifact_contract={"required": ["metrics.json"]},
         policy_modes={"explore": "Explore."},
         orchestration=OrchestrationConfig(baseline_ref="main"),
@@ -261,9 +252,7 @@ def test_hyperparameter_can_inherit_parent_origin_commit_from_model(monkeypatch,
     config = HiAgentResearchConfig(
         project_id="demo",
         workdir=".",
-        editable_paths=["src/app.py"],
-        frozen_eval_entrypoint=".hiagentresearch/eval/run.py",
-        evaluation={"command_template": "true", "parser": "canonical_json_stdout"},
+        evaluation={"entrypoint": ".hiagentresearch/eval/run.py", "command_template": "true"},
         artifact_contract={"required": ["metrics.json"]},
         policy_modes={"explore": "Explore."},
         orchestration=OrchestrationConfig(baseline_ref="main"),
@@ -287,9 +276,7 @@ def test_force_mode_fails_fast(tmp_path) -> None:
     config = HiAgentResearchConfig(
         project_id="demo",
         workdir=".",
-        editable_paths=["src/app.py"],
-        frozen_eval_entrypoint=".hiagentresearch/eval/run.py",
-        evaluation={"command_template": "true", "parser": "canonical_json_stdout"},
+        evaluation={"entrypoint": ".hiagentresearch/eval/run.py", "command_template": "true"},
         artifact_contract={"required": ["metrics.json"]},
         policy_modes={"explore": "Explore."},
         research_groups=[
@@ -298,7 +285,6 @@ def test_force_mode_fails_fast(tmp_path) -> None:
                 branch="research/demo",
                 objective="test",
                 policy_mode="explore",
-                allowed_paths=["src/app.py"],
                 lineage=LineageConfig(mode="force"),
             )
         ],

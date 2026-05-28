@@ -84,24 +84,26 @@ def _train_metrics_path() -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run phase-1 MNIST eval contract.")
-    parser.add_argument("--mnist-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--workdir", default="mnist", help="Agent-owned workspace root (relative to repo).")
     parser.add_argument("--group-id", default="model_architecture")
     parser.add_argument("--quick", action="store_true", help="Use quick train/eval settings for loop feedback.")
     args = parser.parse_args()
 
-    root = args.mnist_root.resolve()
-    repo_root = root.parents[0]
+    repo_root = Path(__file__).resolve().parents[2]
+    workdir = args.workdir
     thresholds = _metric_thresholds(args.group_id)
 
     # Keep the selection narrow and stable for phase-1 reproducibility.
-    selected_tests = ["mnist/pipeline/test_kwta.py"]
+    selected_tests = [f"{workdir}/src/test_kwta.py"]
     start = time.perf_counter()
     test_proc = _run([sys.executable, "-m", "pytest", "-q", *selected_tests], cwd=repo_root)
     with _train_metrics_path() as train_metrics_path:
-        train_cmd = [sys.executable, "mnist/pipeline/train.py", "--output", str(train_metrics_path)]
+        train_cmd = [sys.executable, f"{workdir}/src/train.py", "--output", str(train_metrics_path)]
         eval_cmd = [
             sys.executable,
-            "mnist/eval/run_eval.py",
+            ".hiagentresearch/eval/score.py",
+            "--workdir",
+            workdir,
             "--metrics",
             str(train_metrics_path),
         ]

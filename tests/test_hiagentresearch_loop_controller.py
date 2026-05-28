@@ -41,10 +41,17 @@ class FakeGit:
         self.staged_paths = paths
 
     def changed_files(self, *, staged: bool = False) -> list[str]:
-        return ["mnist/pipeline/model.py"] if staged else []
+        return ["mnist/src/model.py"] if staged else []
 
-    def has_core_staged_change(self, *, allowed_paths: list[str], supporting_paths: list[str]) -> bool:
-        return "mnist/pipeline/model.py" in allowed_paths
+    def has_staged_workspace_change(
+        self,
+        *,
+        workdir: str,
+        generated_paths: list[str],
+        reference_paths: list[str],
+        hidden_paths: list[str],
+    ) -> bool:
+        return workdir == "mnist"
 
     def commit(self, *, subject: str, body: str) -> str:
         self.committed = True
@@ -110,7 +117,7 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
                 "hypothesis_id": "model_architecture-h1",
                 "hypothesis": "Try a bounded model change.",
                 "planned_code_changes": ["Replace one model layer with a smaller equivalent."],
-                "target_files": ["mnist/pipeline/model.py"],
+                "target_files": ["mnist/src/model.py"],
                 "success_criteria": ["accuracy improves"],
                 "rollback_plan": "Revert the model layer.",
             }

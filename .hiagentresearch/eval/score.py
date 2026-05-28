@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
-"""Evaluate trained MNIST model and optionally check configured thresholds."""
+"""Frozen MNIST scorer for hiagentresearch.
+
+This is the authoritative metric producer for the MNIST example. It lives in the
+read-only eval zone (`.hiagentresearch/eval/`): agents may read it to understand
+exactly how their model is loaded, preprocessed, and scored, but never edit or
+run it. The orchestrator and GitHub eval nodes call it after each agent cycle.
+
+It loads the trained ensemble from the agent-owned workspace (`{workdir}/src`),
+runs deterministic inference on the MNIST test set, and prints a canonical JSON
+report (accuracy, latency_ms, passed, ...) to stdout.
+"""
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 import time
@@ -14,11 +25,14 @@ from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
 
-# Import from sibling pipeline package path when run as script.
-_PIPELINE = Path(__file__).resolve().parents[1] / "pipeline"
-if str(_PIPELINE) not in sys.path:
-    sys.path.insert(0, str(_PIPELINE))
-from model import MnistCNN, EnsembleMnistCNN  # noqa: E402
+
+def _load_model_classes(workdir: Path):
+    """Import the workspace model interface from `{workdir}/src`."""
+    src_dir = workdir / "src"
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    model_module = importlib.import_module("model")
+    return model_module.MnistCNN, model_module.EnsembleMnistCNN
 
 
 def _load_json(path: Path) -> dict:
@@ -66,8 +80,8 @@ def _latency_ms(model: torch.nn.Module, loader: DataLoader, device: torch.device
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Evaluate MNIST pipeline outputs.")
-    parser.add_argument("--mnist-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser = argparse.ArgumentParser(description="Evaluate MNIST workspace model outputs.")
+    parser.add_argument("--workdir", type=Path, default=Path("mnist"), help="Agent-owned workspace root.")
     parser.add_argument(
         "--metrics",
         type=Path,
@@ -81,19 +95,20 @@ def main() -> int:
     parser.add_argument("--latency-ms-max", type=float, default=None)
     args = parser.parse_args()
 
-    mnist_root = args.mnist_root.resolve()
+    workdir = args.workdir.resolve()
+    _, EnsembleMnistCNN = _load_model_classes(workdir)
     train_metrics = _load_json(args.metrics) if args.metrics and args.metrics.exists() else {}
 
-    checkpoint_path = args.checkpoint or (mnist_root / train_metrics.get("checkpoint", "pipeline/checkpoints/mnist_cnn_ensemble.pt"))
+    checkpoint_path = args.checkpoint or (workdir / train_metrics.get("checkpoint", "src/checkpoints/mnist_cnn_ensemble.pt"))
     if not Path(checkpoint_path).is_absolute():
-        checkpoint_path = mnist_root / checkpoint_path
+        checkpoint_path = workdir / checkpoint_path
     if not checkpoint_path.exists():
         print(json.dumps({"passed": False, "error": f"missing checkpoint: {checkpoint_path}"}, indent=2))
         return 1
 
     device = torch.device(args.device)
     transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
-    data_dir = mnist_root / "data"
+    data_dir = workdir / "data"
     test_set = datasets.MNIST(str(data_dir), train=False, download=True, transform=transform)
     if args.quick:
         test_set = Subset(test_set, range(1000))
@@ -130,7 +145,7 @@ def main() -> int:
         "latency_ok": lat_ok,
         "thresholds": thresholds,
         "train_metrics": train_metrics,
-        "checkpoint": str(checkpoint_path.relative_to(mnist_root)),
+        "checkpoint": str(checkpoint_path.relative_to(workdir)),
     }
     print(json.dumps(report, indent=2))
     return 0 if passed else 2

@@ -1,28 +1,19 @@
 project_id: mnist
-workdir: .
-editable_paths:
-  - mnist/requirements.txt
-  - mnist/pipeline/model.py
-  - mnist/pipeline/train.py
-  - mnist/pipeline/train_optuna.py
-  - mnist/pipeline/kwta.py
-  - mnist/eval/run_eval.py
+workdir: mnist
 dependency_files:
   - mnist/requirements.txt
-generated_paths:
-  - mnist/data/
-  - mnist/pipeline/checkpoints/
-frozen_paths:
-  - .hiagentresearch/eval/
-frozen_eval_entrypoint: .hiagentresearch/eval/run_phase1_eval.py
 evaluation:
-  command_template: "python {frozen_eval_entrypoint} --mnist-root mnist --group-id {group_id} --quick"
-  parser: canonical_json_stdout
+  entrypoint: .hiagentresearch/eval/run_phase1_eval.py
+  command_template: "python {entrypoint} --workdir {workdir} --group-id {group_id} --quick"
   targets:
     accuracy:
       min: 0.985
     latency_ms:
       max: 13.0
+hidden_paths: []
+generated_paths:
+  - data/
+  - src/checkpoints/
 artifact_contract:
   required:
     - metrics.json
@@ -60,23 +51,13 @@ dashboard:
     - accuracy
     - latency_ms
   output_dir: .hiagentresearch/dashboard
-agent_tools:
-  validation_commands:
-    - name: kwta_unit_tests
-      command: "python -m pytest -q mnist/pipeline/test_kwta.py"
-      description: "Fast code correctness feedback for the model support code."
 agent_contract:
   guidance_files:
     - hiagentresearch/AGENTS.md
     - hiagentresearch/skills/phase1-experiment-cycle/SKILL.md
-  context_paths:
-    - mnist/requirements.txt
-    - mnist/pipeline/model.py
-    - mnist/pipeline/train.py
-  supporting_artifacts: []
   research_output_expectations:
     - "Every cycle starts with concrete evidence and a written plan before code edits."
-    - "Every cycle applies at least one bounded edit to a configured core implementation file."
+    - "Every cycle applies at least one bounded edit to a workspace source file."
     - "Every cycle produces eval artifacts, records whether the experiment improved baseline, and updates tactical intent."
     - "Research branches keep accumulating valid experiments; metric regressions are knowledge, not execution failures."
   retry_policy:
@@ -89,11 +70,6 @@ research_groups:
     policy_mode: explore
     lineage:
       mode: baseline
-    allowed_paths:
-      - mnist/requirements.txt
-      - mnist/pipeline/model.py
-      - mnist/pipeline/train.py
-      - mnist/eval/run_eval.py
   - id: hyperparameter_optimization
     branch: research/hyperparameter-optimization
     objective: Improve training dynamics through hyperparameter exploration.
@@ -103,21 +79,12 @@ research_groups:
       inherit_from: optimization_strategy
       anchor_policy: best_commit
       anchor_metric: accuracy
-    allowed_paths:
-      - mnist/requirements.txt
-      - mnist/pipeline/train.py
-      - mnist/pipeline/train_optuna.py
   - id: data_augmentation
     branch: research/data-augmentation
     objective: Improve robustness and accuracy using targeted augmentation strategy.
     policy_mode: explore
     lineage:
       mode: baseline
-    allowed_paths:
-      - mnist/requirements.txt
-      - mnist/pipeline/train.py
-      - mnist/pipeline/model.py
-      - mnist/eval/run_eval.py
   - id: optimization_strategy
     branch: research/optimization-strategy
     objective: Improve optimization strategy and training efficiency tradeoffs.
@@ -127,8 +94,3 @@ research_groups:
       inherit_from: model_architecture
       anchor_policy: best_commit
       anchor_metric: accuracy
-    allowed_paths:
-      - mnist/requirements.txt
-      - mnist/pipeline/train.py
-      - mnist/pipeline/train_optuna.py
-      - mnist/pipeline/kwta.py

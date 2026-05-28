@@ -45,12 +45,14 @@ Agent validation commands are optional feedback tools. They can run unit tests,
 smoke training, quick evals, or import checks during an agent cycle, and they may
 call editable project eval code. They are not the final authority.
 
-The frozen eval command is the final authority. It lives outside editable project
-paths, runs locally during the control loop, and runs again in GitHub Actions on
-the committed research branch. It should emit canonical JSON to stdout. The
-generic `canonical_json_stdout` parser deterministically extracts metrics and
-execution health from that JSON; project-specific report quirks belong in the
-frozen adapter, not in core orchestration.
+The frozen eval command is the final authority. It lives outside the workspace
+(in the read-only eval zone), runs locally during the control loop, and runs
+again in GitHub Actions on the committed research branch. It emits canonical JSON
+to stdout: a top-level object with `passed` / `execution_passed` flags plus the
+metric keys named in `evaluation.targets`. The core deterministically reads those
+fields from the JSON; project-specific report quirks belong in the frozen
+adapter, not in core orchestration. There is no `parser` field — canonical JSON
+is the single eval contract.
 
 Project metric thresholds live in `config.yaml`. Project eval scripts may emit
 raw metrics, but the frozen adapter is responsible for passing configured

@@ -5,8 +5,14 @@ import json
 import sys
 from pathlib import Path
 
+from collections.abc import Iterable
+
 from hiagentresearch.src.core.config import load_config
-from hiagentresearch.src.core.outcomes import baseline_metrics_complete
+from hiagentresearch.src.core.outcomes import (
+    BASELINE_REQUIRED_METRICS,
+    baseline_metrics_complete,
+    required_baseline_metrics,
+)
 from hiagentresearch.src.registry.store import Registry
 
 
@@ -62,11 +68,13 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
         correlation_id=correlation_id,
     )
     registry.record_research_outcome(run_id=run_id, outcome=outcome)
+    required = required_baseline_metrics(config.evaluation.targets)
     if str(meta.get("node_kind", "")) == "baseline":
         record_baseline_snapshot_from_metrics(
             registry,
             ref=str(meta.get("baseline_ref") or meta.get("branch") or "main"),
             metrics=metrics,
+            required=required,
         )
     manifest_path = artifact_dir / "experiment_manifest.json"
     if manifest_path.exists():
@@ -80,7 +88,7 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
             manifest_path="experiment_manifest.json",
             manifest=manifest,
         )
-        record_baseline_snapshot_from_manifest(registry, manifest)
+        record_baseline_snapshot_from_manifest(registry, manifest, required=required)
     registry.record_artifacts(
         run_id=run_id,
         artifact_paths=[
@@ -103,7 +111,11 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
     return 0
 
 
-def record_baseline_snapshot_from_manifest(registry: Registry, manifest: dict) -> None:
+def record_baseline_snapshot_from_manifest(
+    registry: Registry,
+    manifest: dict,
+    required: Iterable[str] = BASELINE_REQUIRED_METRICS,
+) -> None:
     snapshot = manifest.get("lineage_baseline_snapshot")
     if not isinstance(snapshot, dict):
         return
@@ -116,25 +128,33 @@ def record_baseline_snapshot_from_manifest(registry: Registry, manifest: dict) -
             normalized[str(name)] = float(value)
         except (TypeError, ValueError):
             return
-    if not baseline_metrics_complete(normalized):
+    if not baseline_metrics_complete(normalized, required):
         return
     existing = registry.baseline_snapshot()
-    if existing and baseline_metrics_complete((existing.get("metrics") or {})):
+    if existing and baseline_metrics_complete((existing.get("metrics") or {}), required):
         return
-    record_baseline_snapshot_from_metrics(registry, ref=str(snapshot.get("ref") or "main"), metrics=normalized)
+    record_baseline_snapshot_from_metrics(
+        registry, ref=str(snapshot.get("ref") or "main"), metrics=normalized, required=required
+    )
 
 
-def record_baseline_snapshot_from_metrics(registry: Registry, *, ref: str, metrics: dict) -> None:
+def record_baseline_snapshot_from_metrics(
+    registry: Registry,
+    *,
+    ref: str,
+    metrics: dict,
+    required: Iterable[str] = BASELINE_REQUIRED_METRICS,
+) -> None:
     normalized: dict[str, float] = {}
     for name, value in metrics.items():
         try:
             normalized[str(name)] = float(value)
         except (TypeError, ValueError):
             return
-    if not baseline_metrics_complete(normalized):
+    if not baseline_metrics_complete(normalized, required):
         return
     existing = registry.baseline_snapshot()
-    if existing and baseline_metrics_complete((existing.get("metrics") or {})):
+    if existing and baseline_metrics_complete((existing.get("metrics") or {}), required):
         return
     registry.record_baseline_snapshot(ref=ref, metrics=normalized)
 

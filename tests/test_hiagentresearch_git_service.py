@@ -21,7 +21,15 @@ def test_git_service_parses_status_and_staged_files(monkeypatch, tmp_path) -> No
 
     assert service.changed_files() == ["a.py", "new.py"]
     assert service.changed_files(staged=True) == ["a.py"]
-    assert service.has_core_staged_change(allowed_paths=["a.py"], supporting_paths=[]) is True
+    assert (
+        service.has_staged_workspace_change(
+            workdir=".",
+            generated_paths=[],
+            reference_paths=[],
+            hidden_paths=[],
+        )
+        is True
+    )
 
 
 def test_git_service_raises_on_failed_command(monkeypatch, tmp_path) -> None:

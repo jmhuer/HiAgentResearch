@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import os
 import json
-import re
 import shlex
 import subprocess
 import sys
@@ -49,13 +48,18 @@ def _load_groups(path: Path) -> dict[str, ResearchGroup]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     groups: dict[str, ResearchGroup] = {}
     for raw in payload.get("groups", []):
+        evaluation = raw["evaluation"]
+        command = evaluation["command"] if isinstance(evaluation, dict) else str(evaluation)
         group = ResearchGroup(
             id=raw["id"],
             branch=raw["branch"],
             objective=raw["objective"],
             policy_mode=raw["policy_mode"],
-            allowed_paths=list(raw.get("allowed_paths", [])),
-            evaluation=EvaluationSpec(**raw["evaluation"]),
+            evaluation=EvaluationSpec(command=command),
+            workdir=str(raw.get("workdir", ".")),
+            reference_paths=[],
+            generated_paths=list(raw.get("generated_paths", [])),
+            hidden_paths=list(raw.get("hidden_paths", [])),
         )
         groups[group.id] = group
     return groups
@@ -113,35 +117,55 @@ def _validate_edit_boundary(
     if not cycle_changes:
         return False, "agent cycle produced no changed files", []
 
-    frozen = [path for path in cycle_changes if _is_generated_path(path, group.frozen_paths)]
-    if frozen:
-        return False, f"agent cycle modified frozen paths: {frozen}", cycle_changes
+    touched_reference = [path for path in cycle_changes if _is_under_any(path, group.reference_paths)]
+    if touched_reference:
+        return (
+            False,
+            f"agent cycle modified read-only reference/eval paths: {touched_reference}",
+            cycle_changes,
+        )
+    touched_hidden = [path for path in cycle_changes if _is_under_any(path, group.hidden_paths)]
+    if touched_hidden:
+        return False, f"agent cycle modified hidden paths: {touched_hidden}", cycle_changes
 
     run_prefix = f".hiagentresearch/runs/{run_id}/"
-    allowed = set(group.allowed_paths)
-    outside = [
-        path
-        for path in cycle_changes
-        if path not in allowed
-        and not path.startswith(run_prefix)
-        and not _is_generated_path(path, group.generated_paths)
-    ]
+    workspace_changes: list[str] = []
+    outside: list[str] = []
+    for path in cycle_changes:
+        if path.startswith(run_prefix) or _is_generated_path(path, group.generated_paths):
+            continue
+        if _is_within_workdir(path, group.workdir):
+            workspace_changes.append(path)
+        else:
+            outside.append(path)
     if outside:
-        return False, f"changed files outside configured edit contract: {outside}", cycle_changes
-
-    core_paths = set(_core_allowed_paths(group))
-    if core_paths and not core_paths.intersection(cycle_changes):
-        return False, "agent cycle produced no changed core experiment file", cycle_changes
+        return False, f"changed files outside workspace ({group.workdir}): {outside}", cycle_changes
+    if not workspace_changes:
+        return False, "agent cycle produced no workspace source change", cycle_changes
     return True, "", cycle_changes
 
 
-def _is_generated_path(path: str, generated_paths: list[str]) -> bool:
+def _is_within_workdir(path: str, workdir: str) -> bool:
     normalized = path.rstrip("/")
-    for generated in generated_paths:
-        generated_normalized = generated.rstrip("/")
-        if normalized == generated_normalized or normalized.startswith(f"{generated_normalized}/"):
+    root = workdir.rstrip("/")
+    if root in ("", "."):
+        return True
+    return normalized == root or normalized.startswith(f"{root}/")
+
+
+def _is_under_any(path: str, prefixes: list[str]) -> bool:
+    normalized = path.rstrip("/")
+    for prefix in prefixes:
+        prefix_normalized = prefix.rstrip("/")
+        if not prefix_normalized:
+            continue
+        if normalized == prefix_normalized or normalized.startswith(f"{prefix_normalized}/"):
             return True
     return False
+
+
+def _is_generated_path(path: str, generated_paths: list[str]) -> bool:
+    return _is_under_any(path, generated_paths)
 
 
 def _normalize_python_command(command: str) -> list[str]:
@@ -179,16 +203,11 @@ def _agent_safe_group_payload(group: ResearchGroup) -> dict[str, Any]:
         "branch": group.branch,
         "objective": group.objective,
         "policy_mode": group.policy_mode,
-        "allowed_paths": list(group.allowed_paths),
-        "context_paths": list(group.context_paths),
-        "supporting_artifacts": list(group.supporting_artifacts),
-        "research_output_expectations": list(group.research_output_expectations),
-        "validation_commands": [
-            {"name": tool.name, "command": tool.command, "description": tool.description}
-            for tool in group.validation_commands
-        ],
+        "workdir": group.workdir,
+        "reference_paths": list(group.reference_paths),
         "generated_paths": list(group.generated_paths),
-        "frozen_paths": list(group.frozen_paths),
+        "hidden_paths": list(group.hidden_paths),
+        "research_output_expectations": list(group.research_output_expectations),
         "guidance_files": list(group.guidance_files),
     }
 
@@ -199,11 +218,6 @@ def _execution_blocked_outcome(*, reason: str, next_action: str) -> dict[str, An
         "next_action": next_action,
         "reason": reason,
     }
-
-
-def _core_allowed_paths(group: ResearchGroup) -> list[str]:
-    supporting = set(group.supporting_artifacts)
-    return [path for path in group.allowed_paths if path not in supporting]
 
 
 def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_id: str) -> tuple[bool, str]:
@@ -242,12 +256,20 @@ def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_
     target_files = intent.get("target_files")
     if not isinstance(target_files, list) or not target_files:
         return False, "experiment_intent.json target_files must be a non-empty list"
-    core_paths = set(_core_allowed_paths(group))
-    if core_paths and not core_paths.intersection(set(target_files)):
-        return False, "experiment_intent.json must target at least one core allowed file"
-    outside_allowed = sorted(path for path in target_files if path not in set(group.allowed_paths))
-    if outside_allowed:
-        return False, f"experiment_intent.json target_files outside allowed paths: {outside_allowed}"
+    outside_workspace = sorted(
+        path
+        for path in target_files
+        if not _is_within_workdir(str(path), group.workdir)
+        or _is_under_any(str(path), group.reference_paths)
+        or _is_under_any(str(path), group.generated_paths)
+        or _is_under_any(str(path), group.hidden_paths)
+    )
+    if outside_workspace:
+        return (
+            False,
+            f"experiment_intent.json target_files must be workspace source files under "
+            f"{group.workdir}: {outside_workspace}",
+        )
 
     plan_text = plan_path.read_text(encoding="utf-8")
     for heading in ("## Evidence", "## Planned Edit", "## Risk and Rollback", "## Eval Expectations"):
@@ -257,131 +279,6 @@ def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_
         return False, "experiment_plan.md is too short to qualify as pre-code planning"
 
     return True, ""
-
-
-FORBIDDEN_AGENT_SHELL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (
-        re.compile(
-            r"(?:^|[;&|]\s*)(?:python3?|/usr/bin/python3?)\s+[^\n]*mnist/pipeline/train\.py",
-            re.IGNORECASE,
-        ),
-        "mnist/pipeline/train.py",
-    ),
-    (
-        re.compile(
-            r"(?:^|[;&|]\s*)(?:python3?|/usr/bin/python3?)\s+[^\n]*mnist/eval/run_eval\.py",
-            re.IGNORECASE,
-        ),
-        "mnist/eval/run_eval.py",
-    ),
-    (
-        re.compile(
-            r"(?:^|[;&|]\s*)(?:python3?|/usr/bin/python3?)\s+[^\n]*(?:\.hiagentresearch/eval/)?run_phase1_eval\.py",
-            re.IGNORECASE,
-        ),
-        "run_phase1_eval.py",
-    ),
-)
-
-
-def _shell_command_invokes_forbidden_eval(command: str) -> str:
-    for pattern, label in FORBIDDEN_AGENT_SHELL_PATTERNS:
-        if pattern.search(command):
-            return label
-    return ""
-
-
-def _validate_agent_tool_boundary(*, run_dir: Path) -> tuple[bool, str]:
-    stream_path = run_dir / "agent_stream.jsonl"
-    if not stream_path.exists():
-        return True, ""
-    for line_number, line in enumerate(stream_path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        raw = event.get("raw") if isinstance(event, dict) else None
-        if not isinstance(raw, dict) or raw.get("type") != "tool_call" or raw.get("name") != "shell":
-            continue
-        args = raw.get("args")
-        command = str(args.get("command", "")) if isinstance(args, dict) else ""
-        forbidden = _shell_command_invokes_forbidden_eval(command)
-        if forbidden:
-            return (
-                False,
-                "agent shell command invoked orchestrator-owned training/eval "
-                f"({forbidden}) at agent_stream.jsonl:{line_number}: {command}",
-            )
-    return True, ""
-
-
-def _record_invalid_cycle(
-    *,
-    registry: Registry,
-    run_dir: Path,
-    metadata_path: Path,
-    actions_path: Path,
-    run_id: str,
-    group: ResearchGroup,
-    correlation_id: str,
-    error: str,
-    transition_reason: str,
-    checkout_root: Path,
-) -> None:
-    research_outcome = _execution_blocked_outcome(reason=error, next_action="repair")
-    _write_json(run_dir / "research_outcome.json", research_outcome)
-    _write_json(
-        run_dir / "failure_class.json",
-        {"failure_class": "invalid_cycle", "exit_code": 1, "error": error},
-    )
-    _write_json(
-        metadata_path,
-        _metadata_payload(
-            run_id=run_id,
-            group=group,
-            status="error",
-            failure_class="invalid_cycle",
-            correlation_id=correlation_id,
-            error=error,
-            agent_backend="cursor_sdk",
-        ),
-    )
-    _append_jsonl(actions_path, {"step": transition_reason, "error": error})
-    registry.record_run(
-        run_id=run_id,
-        group_id=group.id,
-        branch=group.branch,
-        status="error",
-        failure_class="invalid_cycle",
-        metrics={},
-        correlation_id=correlation_id,
-    )
-    registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
-    registry.record_transition(
-        TransitionEvent(
-            run_id=run_id,
-            group_id=group.id,
-            from_state="running_agent_cycle",
-            to_state="blocked",
-            reason=transition_reason,
-            actor="orchestrator",
-        )
-    )
-    print(
-        json.dumps(
-            {
-                "ok": False,
-                "run_id": run_id,
-                "status": "error",
-                "failure_class": "invalid_cycle",
-                "error": error,
-                "run_dir": _path_relative_to(run_dir, checkout_root),
-            },
-            indent=2,
-        )
-    )
 
 
 def _apply_agent_intent_update(*, run_dir: Path, prior: IntentPacket) -> IntentPacket:
@@ -416,11 +313,15 @@ def _seed_intent(group: ResearchGroup) -> IntentPacket:
 
 
 def init_state() -> int:
+    from hiagentresearch.src.project.docs import write_workspace_agents
+
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     registry = Registry(STATE_DIR)
     registry.init()
     groups = _load_groups(CONFIG_PATH)
+    if CONFIG_PATH.suffix in {".yaml", ".yml"}:
+        write_workspace_agents(load_config(CONFIG_PATH))
     print(json.dumps({"ok": True, "groups": sorted(groups.keys())}, indent=2))
     return 0
 
@@ -590,23 +491,6 @@ def run_group(
         )
         return 1
 
-    valid_tools, tool_error = _validate_agent_tool_boundary(run_dir=run_dir)
-    _append_jsonl(actions_path, {"step": "agent_tool_boundary_check", "valid": valid_tools})
-    if not valid_tools:
-        _record_invalid_cycle(
-            registry=registry,
-            run_dir=run_dir,
-            metadata_path=metadata_path,
-            actions_path=actions_path,
-            run_id=run_id,
-            group=group,
-            correlation_id=correlation_id,
-            error=tool_error,
-            transition_reason="agent_tool_boundary_failed",
-            checkout_root=checkout_root,
-        )
-        return 1
-
     _append_jsonl(actions_path, {"step": "validate_plan_before_eval"})
     valid_contract, contract_error = _validate_agent_intent_contract(run_dir=run_dir, group=group, run_id=run_id)
     if not valid_contract:
@@ -745,13 +629,11 @@ def run_group(
         "reason": "evaluation did not complete",
     }
     try:
-        eval_config = config.group_by_id(group.id).evaluation or config.evaluation
         artifacts = normalize_eval_node(
-            parser=group.evaluation.parser,
             stdout=proc.stdout,
             stderr=proc.stderr,
             exit_code=proc.returncode,
-            eval_config=eval_config,
+            eval_config=config.evaluation,
         )
         failure_class = artifacts.failure_class
         passed = artifacts.passed

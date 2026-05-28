@@ -19,7 +19,7 @@ __pycache__/
 
 # Project-generated training artifacts
 mnist/data/
-mnist/pipeline/checkpoints/
+mnist/src/checkpoints/
 
 # Local credentials
 credentials/

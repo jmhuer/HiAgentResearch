@@ -175,7 +175,7 @@ def main() -> None:
     accuracy = _accuracy(ensemble_model, test_loader, device)
     latency_ms = _latency_ms(ensemble_model, test_loader, device)
 
-    ckpt_dir = mnist_root / "pipeline" / "checkpoints"
+    ckpt_dir = mnist_root / "src" / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = args.checkpoint or (ckpt_dir / "mnist_cnn_ensemble.pt")
     torch.save({"model_state_dict": ensemble_model.state_dict(), "accuracy": accuracy}, checkpoint_path)

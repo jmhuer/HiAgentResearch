@@ -33,7 +33,7 @@ def test_registry_view_summary_and_show_json(tmp_path, capsys) -> None:
             "loop_index": 1,
             "hypothesis_id": "h1",
             "hypothesis": "Try a model change.",
-            "target_files": ["mnist/pipeline/model.py"],
+            "target_files": ["mnist/src/model.py"],
             "planned_code_changes": ["Edit model.py"],
         },
     )

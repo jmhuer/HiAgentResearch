@@ -20,6 +20,7 @@ from hiagentresearch.src.dashboard.trajectory import (
     parent_anchor_loop_index,
 )
 from hiagentresearch.src.git.service import GitService
+from hiagentresearch.src.core.outcomes import required_baseline_metrics
 from hiagentresearch.src.github.ingest import record_baseline_snapshot_from_manifest
 from hiagentresearch.src.lineage.resolve import LineageError, resolve_branch_bootstrap
 from hiagentresearch.src.paths import REPO_ROOT
@@ -552,16 +553,14 @@ def _inherit_anchors_from_experiments(
 def _metric_targets(config: HiAgentResearchConfig) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for group in config.research_groups:
-        eval_config = group.evaluation or config.evaluation
-        source = "group" if group.evaluation else "global"
-        for metric_name, expectation in sorted(eval_config.targets.items()):
+        for metric_name, expectation in sorted(config.evaluation.targets.items()):
             rows.append(
                 {
                     "group_id": group.id,
                     "metric_name": metric_name,
                     "min": expectation.min,
                     "max": expectation.max,
-                    "source": source,
+                    "source": "global",
                 }
             )
     return rows
@@ -660,7 +659,9 @@ def _ingest_artifact_dir(*, registry: Registry, config: HiAgentResearchConfig, a
             manifest_path="experiment_manifest.json",
             manifest=manifest,
         )
-        record_baseline_snapshot_from_manifest(registry, manifest)
+        record_baseline_snapshot_from_manifest(
+            registry, manifest, required=required_baseline_metrics(config.evaluation.targets)
+        )
     registry.record_artifacts(
         run_id=run_id,
         artifact_paths=[artifact_dir / name for name in config.artifact_contract.required + config.artifact_contract.optional],

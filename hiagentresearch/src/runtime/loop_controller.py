@@ -29,6 +29,7 @@ from hiagentresearch.src.core.outcomes import (
     baseline_metrics_complete,
     normalize_research_outcome_name,
     outcome_met_targets,
+    required_baseline_metrics,
 )
 from hiagentresearch.src.registry.store import Registry
 
@@ -40,7 +41,14 @@ class GitLike(Protocol):
     ) -> None: ...
     def stage_paths(self, paths: list[str]) -> None: ...
     def changed_files(self, *, staged: bool = False) -> list[str]: ...
-    def has_core_staged_change(self, *, allowed_paths: list[str], supporting_paths: list[str]) -> bool: ...
+    def has_staged_workspace_change(
+        self,
+        *,
+        workdir: str,
+        generated_paths: list[str],
+        reference_paths: list[str],
+        hidden_paths: list[str],
+    ) -> bool: ...
     def commit(self, *, subject: str, body: str) -> str: ...
     def push(self, *, remote: str, branch: str) -> None: ...
 
@@ -187,24 +195,28 @@ def run_loops(
             bootstrap=bootstrap,
             checkout_root=git_root,
             baseline_snapshot=registry.baseline_snapshot(),
+            required_metrics=required_baseline_metrics(loaded_config.evaluation.targets),
         )
         registry.record_experiment_manifest(
             run_id=local_run_id,
             manifest_path=manifest_path,
             manifest=manifest,
         )
-        supporting_paths = [artifact.path for artifact in loaded_config.agent_contract.supporting_artifacts]
-        git_service.stage_paths([*list(group_config.allowed_paths), manifest_path])
-        if not git_service.has_core_staged_change(
-            allowed_paths=list(group_config.allowed_paths),
-            supporting_paths=supporting_paths,
+        generated_paths = loaded_config.generated_paths_resolved()
+        reference_paths = loaded_config.all_reference_paths()
+        git_service.stage_paths([loaded_config.workdir, manifest_path])
+        if not git_service.has_staged_workspace_change(
+            workdir=loaded_config.workdir,
+            generated_paths=generated_paths,
+            reference_paths=reference_paths,
+            hidden_paths=list(loaded_config.hidden_paths),
         ):
             return LoopSummary(
                 ok=False,
                 group_id=group_id,
                 branch=target_branch,
                 cycles=cycles,
-                reason="cycle produced no staged core change",
+                reason="cycle produced no staged workspace change",
             )
 
         subject = _commit_subject(loop_index=loop_index, manifest=manifest)
@@ -338,6 +350,7 @@ def _write_experiment_manifest(
     bootstrap: BranchBootstrap,
     checkout_root: Path,
     baseline_snapshot: dict | None = None,
+    required_metrics: tuple[str, ...] = (),
 ) -> tuple[str, dict]:
     run_dir = resolve_runs_dir(checkout_root) / local_run_id
     intent = _read_json(run_dir / "experiment_intent.json")
@@ -365,7 +378,8 @@ def _write_experiment_manifest(
         "lineage_parent_anchor_step": bootstrap.parent_anchor_step,
     }
     baseline_metrics = ((baseline_snapshot or {}).get("metrics") or {})
-    if baseline_metrics_complete(baseline_metrics):
+    required = required_metrics or required_baseline_metrics(None)
+    if baseline_metrics_complete(baseline_metrics, required):
         manifest["lineage_baseline_snapshot"] = {
             "ref": str((baseline_snapshot or {}).get("ref") or "main"),
             "metrics": {str(name): float(value) for name, value in baseline_metrics.items()},
@@ -424,8 +438,9 @@ def _ensure_baseline_snapshot(
     github: GitHubActionsService | None = None,
     git: GitService | None = None,
 ) -> None:
+    required = required_baseline_metrics(config.evaluation.targets)
     existing = registry.baseline_snapshot()
-    if existing and baseline_metrics_complete(existing.get("metrics") or {}):
+    if existing and baseline_metrics_complete(existing.get("metrics") or {}, required):
         return
     anchor_group = next((group.id for group in config.research_groups), "model_architecture")
     ref = config.orchestration.baseline_ref
@@ -468,7 +483,7 @@ def _ensure_baseline_snapshot(
         if failure.get("failure_class") != "none":
             raise RuntimeError(f"baseline eval failed with {failure.get('failure_class')}: {run.database_id}")
         metrics = json.loads((artifact_dir / "metrics.json").read_text(encoding="utf-8"))
-        record_baseline_snapshot_from_metrics(registry, ref=ref, metrics=metrics)
+        record_baseline_snapshot_from_metrics(registry, ref=ref, metrics=metrics, required=required)
     if not registry.baseline_snapshot():
         raise RuntimeError(f"baseline eval did not produce complete baseline metrics: {run.database_id}")
 

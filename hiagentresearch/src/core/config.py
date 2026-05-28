@@ -11,7 +11,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from hiagentresearch.src.core.models import AgentValidationCommand, EvaluationSpec, ResearchGroup
+from hiagentresearch.src.core.models import EvaluationSpec, ResearchGroup
 from hiagentresearch.src.paths import DEFAULT_CONFIG_PATH, REPO_ROOT
 
 
@@ -21,19 +21,9 @@ class MetricExpectation(BaseModel):
 
 
 class EvaluationConfig(BaseModel):
+    entrypoint: str
     command_template: str
-    parser: str
     targets: dict[str, MetricExpectation] = Field(default_factory=dict)
-
-
-class AgentValidationCommandConfig(BaseModel):
-    name: str
-    command: str
-    description: str = ""
-
-
-class AgentToolsConfig(BaseModel):
-    validation_commands: list[AgentValidationCommandConfig] = Field(default_factory=list)
 
 
 class ArtifactContract(BaseModel):
@@ -46,11 +36,6 @@ class ArtifactContract(BaseModel):
         if not value:
             raise ValueError("artifact_contract.required must contain at least one artifact")
         return value
-
-
-class SupportingArtifactConfig(BaseModel):
-    path: str
-    instruction: str = ""
 
 
 class RetryPolicyConfig(BaseModel):
@@ -74,8 +59,6 @@ class DashboardConfig(BaseModel):
 
 class AgentContractConfig(BaseModel):
     guidance_files: list[str] = Field(default_factory=list)
-    context_paths: list[str] = Field(default_factory=list)
-    supporting_artifacts: list[SupportingArtifactConfig] = Field(default_factory=list)
     research_output_expectations: list[str] = Field(default_factory=list)
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
 
@@ -106,19 +89,7 @@ class ResearchGroupConfig(BaseModel):
     branch: str
     objective: str
     policy_mode: str
-    allowed_paths: list[str]
     lineage: LineageConfig = Field(default_factory=LineageConfig)
-    evaluation: EvaluationConfig | None = None
-    context_paths: list[str] | None = None
-    supporting_artifacts: list[SupportingArtifactConfig] | None = None
-    research_output_expectations: list[str] | None = None
-
-    @field_validator("allowed_paths")
-    @classmethod
-    def allowed_paths_must_not_be_empty(cls, value: list[str]) -> list[str]:
-        if not value:
-            raise ValueError("research group allowed_paths must contain at least one path")
-        return value
 
 
 class HiAgentResearchConfig(BaseModel):
@@ -126,11 +97,9 @@ class HiAgentResearchConfig(BaseModel):
 
     project_id: str
     workdir: str
-    editable_paths: list[str]
     dependency_files: list[str] = Field(default_factory=list)
     generated_paths: list[str] = Field(default_factory=list)
-    frozen_paths: list[str] = Field(default_factory=list)
-    frozen_eval_entrypoint: str
+    hidden_paths: list[str] = Field(default_factory=list)
     evaluation: EvaluationConfig
     research_groups: list[ResearchGroupConfig]
     orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
@@ -138,15 +107,7 @@ class HiAgentResearchConfig(BaseModel):
     policy_modes: dict[str, str]
     github: GitHubConfig = Field(default_factory=GitHubConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
-    agent_tools: AgentToolsConfig = Field(default_factory=AgentToolsConfig)
     agent_contract: AgentContractConfig = Field(default_factory=AgentContractConfig)
-
-    @field_validator("editable_paths")
-    @classmethod
-    def editable_paths_must_not_be_empty(cls, value: list[str]) -> list[str]:
-        if not value:
-            raise ValueError("editable_paths must contain at least one path")
-        return value
 
     @model_validator(mode="after")
     def validate_references(self) -> "HiAgentResearchConfig":
@@ -154,25 +115,24 @@ class HiAgentResearchConfig(BaseModel):
         if len(group_ids) != len(set(group_ids)):
             raise ValueError("research group ids must be unique")
 
-        editable = set(self.editable_paths)
-        dependency_outside = sorted(path for path in self.dependency_files if path not in editable)
-        if dependency_outside:
-            raise ValueError(f"dependency_files must be listed in editable_paths: {dependency_outside}")
-        frozen = set(self.all_frozen_paths())
-        frozen_editable = sorted(path for path in editable if _overlaps_any(path, frozen))
-        if frozen_editable:
-            raise ValueError(f"frozen paths must not be listed in editable_paths: {frozen_editable}")
+        workdir = self.workdir.rstrip("/")
+        if workdir not in ("", "."):
+            dependency_outside = sorted(
+                path for path in self.dependency_files if not _is_within(path, workdir)
+            )
+            if dependency_outside:
+                raise ValueError(
+                    f"dependency_files must live inside workdir ({self.workdir}): {dependency_outside}"
+                )
+            entrypoint = self.evaluation.entrypoint.rstrip("/")
+            if _is_within(entrypoint, workdir):
+                raise ValueError(
+                    f"evaluation.entrypoint must live outside workdir ({self.workdir}) so agents cannot own it: "
+                    f"{self.evaluation.entrypoint}"
+                )
         for group in self.research_groups:
             if group.policy_mode not in self.policy_modes:
                 raise ValueError(f"group {group.id} has unknown policy_mode: {group.policy_mode}")
-            outside = sorted(path for path in group.allowed_paths if path not in editable)
-            if outside:
-                raise ValueError(
-                    f"group {group.id} allowed_paths must be listed in editable_paths: {outside}"
-                )
-            frozen_allowed = sorted(path for path in group.allowed_paths if _overlaps_any(path, frozen))
-            if frozen_allowed:
-                raise ValueError(f"group {group.id} allowed_paths include frozen paths: {frozen_allowed}")
             if group.lineage.mode == "inherit" and group.lineage.inherit_from not in group_ids:
                 raise ValueError(
                     f"group {group.id} lineage.inherit_from references unknown group: {group.lineage.inherit_from}"
@@ -210,12 +170,38 @@ class HiAgentResearchConfig(BaseModel):
         path = Path(self.workdir)
         return path if path.is_absolute() else (root / path).resolve()
 
-    def frozen_eval_path(self, root: Path = REPO_ROOT) -> Path:
-        path = Path(self.frozen_eval_entrypoint)
+    def eval_entrypoint_path(self, root: Path = REPO_ROOT) -> Path:
+        path = Path(self.evaluation.entrypoint)
         return path if path.is_absolute() else (root / path).resolve()
 
-    def all_frozen_paths(self) -> list[str]:
-        return [self.frozen_eval_entrypoint, *self.frozen_paths]
+    def all_reference_paths(self) -> list[str]:
+        """Read-only eval zone: entrypoint file plus its parent directory."""
+        entrypoint = self.evaluation.entrypoint.replace("\\", "/").rstrip("/")
+        parent = str(Path(entrypoint).parent).replace("\\", "/")
+        paths: list[str] = []
+        if parent and parent not in (".", ""):
+            paths.append(parent.rstrip("/") + "/")
+        paths.append(entrypoint)
+        seen: list[str] = []
+        for path in paths:
+            if path not in seen:
+                seen.append(path)
+        return seen
+
+    def generated_paths_resolved(self) -> list[str]:
+        workdir = self.workdir.rstrip("/")
+        resolved: list[str] = []
+        for path in self.generated_paths:
+            cleaned = path.lstrip("/")
+            if workdir in ("", "."):
+                resolved.append(cleaned)
+            else:
+                resolved.append(f"{workdir}/{cleaned}")
+        return resolved
+
+    def workspace_agents_path(self) -> str:
+        workdir = self.workdir.rstrip("/")
+        return "AGENTS.md" if workdir in ("", ".") else f"{workdir}/AGENTS.md"
 
     def dependency_file_paths(self, root: Path = REPO_ROOT) -> list[Path]:
         paths: list[Path] = []
@@ -241,48 +227,32 @@ class HiAgentResearchConfig(BaseModel):
         return None
 
     def format_eval_command(self, group: ResearchGroupConfig | None = None) -> str:
-        eval_config = group.evaluation if group and group.evaluation else self.evaluation
         values = {
             "project_id": self.project_id,
             "workdir": self.workdir,
-            "frozen_eval_entrypoint": self.frozen_eval_entrypoint,
+            "entrypoint": self.evaluation.entrypoint,
             "group_id": group.id if group else "",
             "branch": group.branch if group else "",
         }
-        return _safe_format(eval_config.command_template, values)
+        return _safe_format(self.evaluation.command_template, values)
 
     def evaluation_for_group(self, group: ResearchGroupConfig) -> EvaluationSpec:
-        eval_config = group.evaluation if group.evaluation else self.evaluation
-        return EvaluationSpec(
-            command=self.format_eval_command(group),
-            parser=eval_config.parser,
-        )
+        return EvaluationSpec(command=self.format_eval_command(group))
 
     def to_research_group(self, group: ResearchGroupConfig) -> ResearchGroup:
-        supporting = group.supporting_artifacts or self.agent_contract.supporting_artifacts
-        expectations = group.research_output_expectations or self.agent_contract.research_output_expectations
         return ResearchGroup(
             id=group.id,
             branch=group.branch,
             objective=group.objective,
             policy_mode=group.policy_mode,
-            allowed_paths=list(group.allowed_paths),
             evaluation=self.evaluation_for_group(group),
-            context_paths=list(group.context_paths or self.agent_contract.context_paths),
-            supporting_artifacts=[artifact.path for artifact in supporting],
-            supporting_artifact_instructions={artifact.path: artifact.instruction for artifact in supporting},
-            research_output_expectations=list(expectations),
-            validation_commands=[
-                AgentValidationCommand(
-                    name=tool.name,
-                    command=tool.command,
-                    description=tool.description,
-                )
-                for tool in self.agent_tools.validation_commands
-            ],
-            generated_paths=list(self.generated_paths),
-            frozen_paths=list(self.all_frozen_paths()),
+            workdir=self.workdir,
+            reference_paths=self.all_reference_paths(),
+            generated_paths=self.generated_paths_resolved(),
+            hidden_paths=list(self.hidden_paths),
+            research_output_expectations=list(self.agent_contract.research_output_expectations),
             guidance_files=list(self.agent_contract.guidance_files),
+            workspace_agents_path=self.workspace_agents_path(),
         )
 
     def research_groups_by_id(self) -> dict[str, ResearchGroup]:
@@ -297,17 +267,12 @@ def _safe_format(template: str, values: dict[str, str]) -> str:
     return template.format(**used)
 
 
-def _overlaps_any(path: str, candidates: set[str]) -> bool:
+def _is_within(path: str, root: str) -> bool:
     normalized = path.rstrip("/")
-    for candidate in candidates:
-        candidate_normalized = candidate.rstrip("/")
-        if (
-            normalized == candidate_normalized
-            or normalized.startswith(f"{candidate_normalized}/")
-            or candidate_normalized.startswith(f"{normalized}/")
-        ):
-            return True
-    return False
+    root_normalized = root.rstrip("/")
+    if root_normalized in ("", "."):
+        return True
+    return normalized == root_normalized or normalized.startswith(f"{root_normalized}/")
 
 
 def load_config(path: Path | None = None) -> HiAgentResearchConfig:
@@ -350,9 +315,10 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "ok": True,
                     "project_id": config.project_id,
+                    "workdir": config.workdir,
                     "groups": [group.id for group in config.research_groups],
                     "dashboard_enabled": config.dashboard.enabled,
-                    "agent_validation_tools": [tool.name for tool in config.agent_tools.validation_commands],
+                    "eval_entrypoint": config.evaluation.entrypoint,
                     "required_artifacts": config.artifact_contract.required,
                 },
                 indent=2,

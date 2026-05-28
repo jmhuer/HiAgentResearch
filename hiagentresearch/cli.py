@@ -52,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
     resolve = sub.add_parser("resolve-group", help="Resolve group id for a branch.")
     resolve.add_argument("--branch", required=True)
 
+    sub.add_parser(
+        "render-workspace-docs",
+        help="Regenerate the workspace AGENTS.md from config (command + targets).",
+    )
+
     sub.add_parser("config", help="Delegate to config helper commands.")
     sub.add_parser("registry", help="Delegate to registry inspection commands.")
     sub.add_parser("dashboard", help="Delegate to dashboard build commands.")
@@ -108,6 +113,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.cmd == "resolve-group":
         return resolve_group(branch=args.branch)
+    if args.cmd == "render-workspace-docs":
+        from hiagentresearch.src.project.docs import write_workspace_agents
+
+        path = write_workspace_agents()
+        print(json.dumps({"ok": True, "workspace_agents": str(path)}, indent=2))
+        return 0
     parser.print_help()
     return 1
 

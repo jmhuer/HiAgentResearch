@@ -1,83 +1,52 @@
 from hiagentresearch.src.core.artifact_schema import (
     classify_non_json_failure,
     normalize_eval,
-    normalize_canonical_json_stdout,
-    normalize_phase1_eval_json,
-    normalize_mnist_eval,
-    normalize_pytest_eval,
 )
 
+CANONICAL_METRICS = ("accuracy", "latency_ms")
 
-def test_normalize_mnist_eval_passes() -> None:
+
+def test_normalize_eval_passes() -> None:
     stdout = '{"passed": true, "accuracy": 0.991, "latency_ms": 11.2}'
-    result = normalize_mnist_eval(stdout=stdout, exit_code=0)
+    result = normalize_eval(stdout=stdout, stderr="", exit_code=0, metric_names=CANONICAL_METRICS)
     assert result.passed is True
     assert result.failure_class == "none"
     assert result.to_metrics()["accuracy"] == 0.991
+    assert result.to_metrics()["latency_ms"] == 11.2
 
 
-def test_normalize_mnist_eval_eval_failure() -> None:
+def test_normalize_eval_regression_is_clean_execution() -> None:
     stdout = '{"passed": false, "accuracy": 0.982, "latency_ms": 13.9}'
-    result = normalize_mnist_eval(stdout=stdout, exit_code=2)
+    result = normalize_eval(stdout=stdout, stderr="", exit_code=2, metric_names=CANONICAL_METRICS)
     assert result.passed is False
+    # exit_code 2 with all target metrics present means a clean below-targets run.
     assert result.failure_class == "none"
+
+
+def test_normalize_eval_only_extracts_configured_metrics() -> None:
+    stdout = '{"passed": true, "accuracy": 0.99, "latency_ms": 2.0, "f1": 0.7}'
+    result = normalize_eval(stdout=stdout, stderr="", exit_code=0, metric_names=("accuracy",))
+    assert result.to_metrics() == {"accuracy": 0.99}
+
+
+def test_normalize_eval_execution_blocked_marks_code_failure() -> None:
+    stdout = '{"passed": false, "execution_passed": false, "failure_class": "code_failure"}'
+    result = normalize_eval(stdout=stdout, stderr="", exit_code=2, metric_names=CANONICAL_METRICS)
+    assert result.passed is False
+    assert result.failure_class == "code_failure"
+
+
+def test_normalize_eval_keeps_full_payload_in_raw() -> None:
+    stdout = (
+        '{"passed": true, "execution_passed": true, "accuracy": 0.99, '
+        '"latency_ms": 2.0, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
+    )
+    result = normalize_eval(stdout=stdout, stderr="", exit_code=0, metric_names=CANONICAL_METRICS)
+    assert result.passed is True
+    assert result.failure_class == "none"
+    assert result.raw["tests_passed"] == 2
 
 
 def test_classify_non_json_failure_module_not_found() -> None:
     stderr = "ModuleNotFoundError: No module named 'sklearn'"
     assert classify_non_json_failure(stderr=stderr, exit_code=1) == "infra_failure"
-
-
-def test_normalize_pytest_eval_passes() -> None:
-    stdout = "..                                                                       [100%]\n2 passed in 3.08s\n"
-    result = normalize_pytest_eval(stdout=stdout, stderr="", exit_code=0)
-    assert result.passed is True
-    assert result.failure_class == "none"
-    assert result.raw["tests_passed"] == 2
-
-
-def test_normalize_eval_dispatch_pytest() -> None:
-    stdout = ".                                                                        [100%]\n1 passed in 0.02s\n"
-    result = normalize_eval(parser="pytest_exit_code", stdout=stdout, stderr="", exit_code=0)
-    assert result.passed is True
-
-
-def test_normalize_phase1_eval_json() -> None:
-    stdout = (
-        '{"passed": true, "execution_passed": true, "accuracy": 0.99, '
-        '"latency_ms": 2.0, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
-    )
-    result = normalize_phase1_eval_json(stdout=stdout, exit_code=0)
-    assert result.passed is True
-    assert result.failure_class == "none"
-    assert result.to_metrics()["accuracy"] == 0.99
-
-
-def test_normalize_canonical_json_stdout() -> None:
-    stdout = (
-        '{"passed": true, "execution_passed": true, "accuracy": 0.99, '
-        '"latency_ms": 2.0, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
-    )
-    result = normalize_canonical_json_stdout(stdout=stdout, exit_code=0)
-    assert result.passed is True
-    assert result.failure_class == "none"
-    assert result.raw["tests_passed"] == 2
-
-
-def test_normalize_phase1_eval_json_keeps_regression_as_clean_execution() -> None:
-    stdout = (
-        '{"passed": false, "execution_passed": true, "accuracy": 0.89, '
-        '"latency_ms": 1.7, "tests_passed": 2, "tests_failed": 0}'
-    )
-    result = normalize_phase1_eval_json(stdout=stdout, exit_code=0)
-    assert result.passed is False
-    assert result.failure_class == "none"
-
-
-def test_normalize_eval_dispatch_phase1_json() -> None:
-    stdout = (
-        '{"passed": true, "execution_passed": true, "accuracy": 0.99, '
-        '"latency_ms": 2.0, "tests_passed": 2, "tests_failed": 0, "duration_sec": 3.1}'
-    )
-    result = normalize_eval(parser="canonical_json_stdout", stdout=stdout, stderr="", exit_code=0)
-    assert result.passed is True

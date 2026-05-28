@@ -27,14 +27,6 @@ def utc_now_iso() -> str:
 @dataclass(slots=True)
 class EvaluationSpec:
     command: str
-    parser: str
-
-
-@dataclass(slots=True)
-class AgentValidationCommand:
-    name: str
-    command: str
-    description: str = ""
 
 
 @dataclass(slots=True)
@@ -43,16 +35,14 @@ class ResearchGroup:
     branch: str
     objective: str
     policy_mode: PolicyMode | str
-    allowed_paths: list[str]
     evaluation: EvaluationSpec
-    context_paths: list[str] = field(default_factory=list)
-    supporting_artifacts: list[str] = field(default_factory=list)
-    supporting_artifact_instructions: dict[str, str] = field(default_factory=dict)
-    research_output_expectations: list[str] = field(default_factory=list)
-    validation_commands: list[AgentValidationCommand] = field(default_factory=list)
+    workdir: str = "."
+    reference_paths: list[str] = field(default_factory=list)
     generated_paths: list[str] = field(default_factory=list)
-    frozen_paths: list[str] = field(default_factory=list)
+    hidden_paths: list[str] = field(default_factory=list)
+    research_output_expectations: list[str] = field(default_factory=list)
     guidance_files: list[str] = field(default_factory=list)
+    workspace_agents_path: str = ""
 
 
 @dataclass(slots=True)

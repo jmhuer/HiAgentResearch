@@ -81,7 +81,7 @@ def test_registry_records_research_outcome_and_experiment(tmp_path) -> None:
             "loop_index": 1,
             "hypothesis_id": "h1",
             "hypothesis": "Try a model change.",
-            "target_files": ["mnist/pipeline/model.py"],
+            "target_files": ["mnist/src/model.py"],
             "planned_code_changes": ["Edit model.py"],
         },
     )
@@ -93,7 +93,7 @@ def test_registry_records_research_outcome_and_experiment(tmp_path) -> None:
     assert outcome is not None
     assert outcome["research_outcome"] == "met_targets"
     assert experiment is not None
-    assert experiment["target_files"] == ["mnist/pipeline/model.py"]
+    assert experiment["target_files"] == ["mnist/src/model.py"]
     assert summary[0]["research_outcome"] == "met_targets"
     assert summary[0]["accuracy"] == 0.99
 

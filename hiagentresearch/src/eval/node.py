@@ -21,7 +21,6 @@ class EvalNodeArtifacts:
 
 def normalize_eval_node(
     *,
-    parser: str,
     stdout: str,
     stderr: str,
     exit_code: int,
@@ -29,7 +28,10 @@ def normalize_eval_node(
 ) -> EvalNodeArtifacts:
     from hiagentresearch.src.runtime.quality import classify_research_outcome
 
-    normalized = normalize_eval(parser=parser, stdout=stdout, stderr=stderr, exit_code=exit_code)
+    metric_names = list(eval_config.targets)
+    normalized = normalize_eval(
+        stdout=stdout, stderr=stderr, exit_code=exit_code, metric_names=metric_names
+    )
     metrics = normalized.to_metrics()
     if normalized.raw.get("duration_sec") is not None:
         metrics["duration_sec"] = float(normalized.raw["duration_sec"])

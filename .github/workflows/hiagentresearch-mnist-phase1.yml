@@ -116,18 +116,14 @@ jobs:
           from hiagentresearch.src.eval.node import normalize_eval_node, write_eval_node_artifacts
 
           config = load_config()
-          group = config.group_by_id("${{ steps.group.outputs.group_id }}")
-          parser = (group.evaluation.parser if group.evaluation else config.evaluation.parser)
           stdout = Path("stdout.txt").read_text(encoding="utf-8")
           stderr = Path("stderr.txt").read_text(encoding="utf-8")
           exit_code = int("${{ steps.eval.outputs.exit_code }}")
-          eval_config = group.evaluation or config.evaluation
           artifacts = normalize_eval_node(
-              parser=parser,
               stdout=stdout,
               stderr=stderr,
               exit_code=exit_code,
-              eval_config=eval_config,
+              eval_config=config.evaluation,
           )
           write_eval_node_artifacts(output_dir=Path("."), artifacts=artifacts)
           Path("run_meta.json").write_text(
@@ -141,7 +137,6 @@ jobs:
                       "correlation_id": "${{ steps.group.outputs.correlation_id }}",
                       "node_kind": "${{ github.event.inputs.node_kind || 'experiment' }}",
                       "baseline_ref": "${{ github.ref_name }}",
-                      "parser": parser,
                   },
                   indent=2,
               ),

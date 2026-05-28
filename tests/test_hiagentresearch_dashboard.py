@@ -342,7 +342,7 @@ def _manifest() -> dict:
         "loop_index": 1,
         "hypothesis_id": "h1",
         "hypothesis": "Try a dashboard-ready model change.",
-        "target_files": ["mnist/pipeline/model.py"],
+        "target_files": ["mnist/src/model.py"],
         "planned_code_changes": ["Edit model.py"],
         "lineage_baseline_snapshot": {
             "ref": "main",

@@ -20,16 +20,16 @@ def test_prompt_is_config_backed() -> None:
 
     prompt = build_phase1_prompt(group=group, intent_packet=packet, run_id="run_abc")
 
-    assert "mnist/pipeline/model.py" in prompt
-    assert "mnist/pipeline/research_hypotheses.py" not in prompt
+    assert "workspace is `mnist/`" in prompt
     assert "Do not create branch-memory source files" in prompt
-    assert "configured core experiment files" in prompt.lower()
-    assert "Agent tools allowed" in prompt
-    assert "kwta_unit_tests" in prompt
+    assert "read-only evaluation zone" in prompt.lower()
+    assert ".hiagentresearch/eval/" in prompt
+    assert "mnist/AGENTS.md" in prompt
     assert "hiagentresearch/AGENTS.md" in prompt
     assert "hiagentresearch/skills/phase1-experiment-cycle/SKILL.md" in prompt
     assert group.evaluation.command not in prompt
     assert "orchestrator and GitHub eval nodes" in prompt
-    assert "core MNIST" not in prompt
-    assert "registry invariants" not in prompt
     assert "Research north star" in prompt
+    # No MNIST-internal source paths are hardcoded into the prompt anymore.
+    assert "mnist/src/model.py" not in prompt
+    assert "mnist/pipeline" not in prompt
