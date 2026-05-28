@@ -26,37 +26,82 @@ def best_trajectory_anchor(
     registry: Registry,
     git: GitService,
 ) -> TrajectoryAnchor | None:
-    """Pick the best metric on the parent's trajectory, including L0 baseline."""
+    """Pick the best metric on the parent trajectory (origin + loops)."""
     candidates: list[TrajectoryAnchor] = []
-
-    snapshot = registry.baseline_snapshot()
-    metrics = (snapshot or {}).get("metrics") or {}
-    if anchor_metric in metrics and metrics[anchor_metric] is not None:
-        candidates.append(
-            TrajectoryAnchor(
-                ref=git.resolve_ref(baseline_ref),
-                trajectory_step=0,
-                metric_value=float(metrics[anchor_metric]),
-            )
+    origin = origin_trajectory_anchor(
+        parent_group_id=parent_group_id,
+        anchor_metric=anchor_metric,
+        baseline_ref=baseline_ref,
+        registry=registry,
+        git=git,
+    )
+    if origin is not None:
+        candidates.append(origin)
+    candidates.extend(
+        loop_trajectory_anchors(
+            parent_group_id=parent_group_id,
+            anchor_metric=anchor_metric,
+            registry=registry,
         )
-
-    row = registry.best_github_run(parent_group_id, anchor_metric)
-    if row and row.get("commit_sha"):
-        run_metrics = registry.metrics_for_run(str(row["run_id"]))
-        score = run_metrics.get(anchor_metric)
-        if score is not None:
-            step = parent_trajectory_step_for_run(registry, parent_group_id, str(row["run_id"]))
-            candidates.append(
-                TrajectoryAnchor(
-                    ref=str(row["commit_sha"]),
-                    trajectory_step=step,
-                    metric_value=float(score),
-                )
-            )
-
+    )
     if not candidates:
         return None
     return max(candidates, key=lambda item: _rank(item.metric_value, anchor_metric))
+
+
+def origin_trajectory_anchor(
+    *,
+    parent_group_id: str,
+    anchor_metric: str,
+    baseline_ref: str,
+    registry: Registry,
+    git: GitService,
+) -> TrajectoryAnchor | None:
+    """Resolve the parent origin point (L0 for baseline groups, inherited anchor for inherit groups)."""
+    origin = registry.earliest_experiment(parent_group_id)
+    if origin:
+        inherited_group_id = str(origin.get("lineage_parent_group_id") or "").strip()
+        inherited_sha = str(origin.get("lineage_anchor_sha") or "").strip()
+        if inherited_group_id and inherited_sha:
+            metric_value = registry.metric_for_group_commit(inherited_group_id, inherited_sha, anchor_metric)
+            if metric_value is not None:
+                return TrajectoryAnchor(
+                    ref=inherited_sha,
+                    trajectory_step=int(origin.get("lineage_parent_anchor_step") or 0),
+                    metric_value=float(metric_value),
+                )
+    snapshot = registry.baseline_snapshot()
+    metrics = (snapshot or {}).get("metrics") or {}
+    if anchor_metric in metrics and metrics[anchor_metric] is not None:
+        return TrajectoryAnchor(
+            ref=git.resolve_ref(baseline_ref),
+            trajectory_step=0,
+            metric_value=float(metrics[anchor_metric]),
+        )
+    return None
+
+
+def loop_trajectory_anchors(
+    *,
+    parent_group_id: str,
+    anchor_metric: str,
+    registry: Registry,
+) -> list[TrajectoryAnchor]:
+    """Resolve parent loop points (L1..Lk) from successful GitHub runs."""
+    anchors: list[TrajectoryAnchor] = []
+    for row in registry.github_runs_with_metric(parent_group_id, anchor_metric):
+        commit_sha = str(row.get("commit_sha", "")).strip()
+        metric_value = row.get("metric_value")
+        if not commit_sha or metric_value is None:
+            continue
+        anchors.append(
+            TrajectoryAnchor(
+                ref=commit_sha,
+                trajectory_step=parent_trajectory_step_for_run(registry, parent_group_id, str(row["run_id"])),
+                metric_value=float(metric_value),
+            )
+        )
+    return anchors
 
 
 def parent_trajectory_step_for_run(registry: Registry, parent_group_id: str, run_id: str) -> int:

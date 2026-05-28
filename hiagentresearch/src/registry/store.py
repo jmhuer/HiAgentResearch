@@ -512,6 +512,81 @@ class Registry:
         finally:
             conn.close()
 
+    def github_runs_with_metric(self, group_id: str, metric_name: str) -> list[dict[str, Any]]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                SELECT r.*, m.metric_value
+                FROM runs r
+                JOIN metrics m ON r.run_id = m.run_id
+                WHERE r.group_id = ?
+                  AND r.failure_class = 'none'
+                  AND m.metric_name = ?
+                  AND r.run_id LIKE 'gh_%'
+                  AND r.commit_sha != ''
+                ORDER BY r.created_at ASC
+                """,
+                (group_id, metric_name),
+            ).fetchall()
+            return [_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def earliest_experiment(self, group_id: str) -> dict[str, Any] | None:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM experiments
+                WHERE group_id = ?
+                ORDER BY COALESCE(loop_index, 999999) ASC, created_at ASC
+                LIMIT 1
+                """,
+                (group_id,),
+            ).fetchone()
+            if not row:
+                return None
+            payload = _row_to_dict(row)
+            payload["target_files"] = json.loads(str(payload.pop("target_files_json")))
+            payload["planned_code_changes"] = json.loads(str(payload.pop("planned_code_changes_json")))
+            return payload
+        finally:
+            conn.close()
+
+    def metric_for_group_commit(self, group_id: str, commit_sha: str, metric_name: str) -> float | None:
+        normalized_sha = str(commit_sha).strip().lower()
+        if not normalized_sha:
+            return None
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT m.metric_value
+                FROM runs r
+                JOIN metrics m ON m.run_id = r.run_id
+                WHERE r.group_id = ?
+                  AND m.metric_name = ?
+                  AND LOWER(r.commit_sha) != ''
+                  AND (
+                        LOWER(r.commit_sha) = ?
+                        OR LOWER(r.commit_sha) LIKE (? || '%')
+                        OR ? LIKE (LOWER(r.commit_sha) || '%')
+                  )
+                ORDER BY r.created_at DESC
+                LIMIT 1
+                """,
+                (group_id, metric_name, normalized_sha, normalized_sha, normalized_sha),
+            ).fetchone()
+            if not row:
+                return None
+            return float(row[0])
+        finally:
+            conn.close()
+
     def latest_run(self, group_id: str | None = None) -> dict[str, Any] | None:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row

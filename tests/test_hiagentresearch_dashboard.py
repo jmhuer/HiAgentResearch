@@ -206,6 +206,55 @@ def test_dashboard_topology_includes_inherit_anchors(tmp_path) -> None:
     assert anchor["parent_anchor_loop_index"] == 0
 
 
+def test_dashboard_resolves_hyperparameter_anchor_from_optimization_origin(tmp_path, monkeypatch) -> None:
+    def fake_run(args, **kwargs):
+        if args[1:] == ["rev-parse", "main"]:
+            return subprocess.CompletedProcess(args, 0, "mainsha\n", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    state_dir = tmp_path / "state"
+    registry = _seed_registry(state_dir)
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.80, "latency_ms": 50.0, "duration_sec": 1.0})
+    registry.record_run(
+        run_id="gh_model_2",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.95, "latency_ms": 10.0},
+        commit_sha="parentsha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_opt_1",
+        manifest_path=".hiagentresearch/experiments/optimization_strategy/gh_opt_1.json",
+        manifest={
+            "group_id": "optimization_strategy",
+            "loop_index": 1,
+            "lineage_mode": "inherit",
+            "lineage_parent_group_id": "model_architecture",
+            "lineage_anchor_sha": "parentsha",
+            "lineage_parent_anchor_step": 2,
+            "lineage_anchor_policy": "best_commit",
+        },
+    )
+    registry.record_run(
+        run_id="gh_opt_1",
+        group_id="optimization_strategy",
+        branch="research/optimization-strategy",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.91, "latency_ms": 9.8},
+        commit_sha="optloop1sha",
+    )
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+    topology = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))["lineage_topology"]
+    anchor = topology["inherit_anchors"]["hyperparameter_optimization"]
+    assert anchor["commit_sha"] == "parentsha"
+    assert anchor["parent_trajectory_step"] == 2
+
+
 def test_dashboard_build_from_artifacts(tmp_path) -> None:
     artifact_dir = tmp_path / "artifacts" / "hiagentresearch-123"
     artifact_dir.mkdir(parents=True)
