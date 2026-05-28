@@ -3,7 +3,12 @@ from pathlib import Path
 
 from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.github.actions import GitHubRun
-from hiagentresearch.src.runtime.loop_controller import _extract_last_json_object, _run_group_capture, run_loops
+from hiagentresearch.src.runtime.loop_controller import (
+    _extract_last_json_object,
+    _preserve_parallel_failure_artifacts,
+    _run_group_capture,
+    run_loops,
+)
 from hiagentresearch.src.registry.store import Registry
 
 
@@ -188,3 +193,30 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
     assert "HiAgentResearch-Run-ID: run_test" in git.body
     assert "Experiment-Manifest: .hiagentresearch/experiments/model_architecture/run_test.json" in git.body
     assert ingested["args"][0] == "gh_123"
+
+
+def test_preserve_parallel_failure_artifacts_copies_worktree_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    worktree_root = tmp_path / ".hiagentresearch" / "worktrees"
+    run_dir = worktree_root / "model_architecture" / ".hiagentresearch" / "runs" / "run_failed"
+    run_dir.mkdir(parents=True)
+    (run_dir / "agent_stream.jsonl").write_text('{"type":"run_started"}\n', encoding="utf-8")
+    (run_dir / "agent_backend_record.json").write_text(
+        json.dumps({"raw_result": {"sdk_run_id": "sdk_run_123"}}),
+        encoding="utf-8",
+    )
+
+    class FakeWorktrees:
+        def path_for(self, group_id: str) -> Path:
+            return worktree_root / group_id
+
+    preserved = _preserve_parallel_failure_artifacts(["model_architecture"], FakeWorktrees())
+
+    assert preserved == [".hiagentresearch/failed-runs/model_architecture/run_failed"]
+    copied = tmp_path / preserved[0]
+    assert (copied / "agent_stream.jsonl").read_text(encoding="utf-8") == '{"type":"run_started"}\n'
+    assert json.loads((copied / "agent_backend_record.json").read_text(encoding="utf-8"))["raw_result"][
+        "sdk_run_id"
+    ] == "sdk_run_123"
+    assert (copied / "worktree_status.txt").exists()
+    assert (copied / "worktree_diff.patch").exists()

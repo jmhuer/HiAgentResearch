@@ -372,8 +372,14 @@ def run_group(
     except AgentBackendError as exc:
         failure_class = exc.failure_class
         cursor_run_status = ""
+        sdk_run_id = ""
+        agent_id = ""
+        stream_error = ""
         if exc.record is not None:
             cursor_run_status = str(exc.record.raw_result.get("cursor_run_status") or exc.record.status)
+            sdk_run_id = str(exc.record.raw_result.get("sdk_run_id") or exc.record.raw_result.get("id") or "")
+            agent_id = str(exc.record.raw_result.get("agent_id") or "")
+            stream_error = str(exc.record.raw_result.get("stream_error") or "")
         research_outcome = _execution_blocked_outcome(reason=str(exc), next_action="continue")
         _write_json(run_dir / "research_outcome.json", research_outcome)
         _write_json(
@@ -383,6 +389,9 @@ def run_group(
                 "exit_code": 1,
                 "error": str(exc),
                 "cursor_run_status": cursor_run_status,
+                "sdk_run_id": sdk_run_id,
+                "agent_id": agent_id,
+                "stream_error": stream_error,
             },
         )
         _write_json(
@@ -425,7 +434,11 @@ def run_group(
                     "run_id": run_id,
                     "status": "error",
                     "failure_class": failure_class,
+                    "error": str(exc),
                     "cursor_run_status": cursor_run_status,
+                    "sdk_run_id": sdk_run_id,
+                    "agent_id": agent_id,
+                    "stream_error": stream_error,
                     "run_dir": _path_relative_to(run_dir, checkout_root),
                 },
                 indent=2,

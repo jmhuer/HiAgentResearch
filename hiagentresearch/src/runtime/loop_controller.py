@@ -7,6 +7,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -94,6 +95,7 @@ class LoopSummary:
 RunGroupCallable = Callable[..., int]
 IngestCallable = Callable[[str, str, str, Path], int]
 EXPERIMENT_MANIFEST_ROOT = Path(".hiagentresearch") / "experiments"
+FAILED_RUNS_ROOT = Path(".hiagentresearch") / "failed-runs"
 
 
 def run_loops(
@@ -587,8 +589,55 @@ def _run_wave_parallel(
             first_failure = returncode or 1
             print(f"[{group_id}] failed with exit {returncode}", flush=True)
     if first_failure:
+        preserved = _preserve_parallel_failure_artifacts(wave, worktrees)
+        if preserved:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "reason": "preserved failed parallel run artifacts",
+                        "artifacts": preserved,
+                    },
+                    indent=2,
+                ),
+                flush=True,
+            )
         return first_failure
     return 0
+
+
+def _preserve_parallel_failure_artifacts(wave: list[str], worktrees: WorktreeManager) -> list[str]:
+    preserved: list[str] = []
+    root = REPO_ROOT / FAILED_RUNS_ROOT
+    for group_id in wave:
+        worktree_path = worktrees.path_for(group_id)
+        runs_root = worktree_path / ".hiagentresearch" / "runs"
+        if not runs_root.exists():
+            continue
+        for run_dir in sorted(path for path in runs_root.iterdir() if path.is_dir()):
+            target = root / group_id / run_dir.name
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(run_dir, target)
+            _write_worktree_snapshot(worktree_path=worktree_path, target=target)
+            preserved.append(str(target.relative_to(REPO_ROOT)))
+    return preserved
+
+
+def _write_worktree_snapshot(*, worktree_path: Path, target: Path) -> None:
+    for filename, args in {
+        "worktree_status.txt": ["status", "--short"],
+        "worktree_diff.patch": ["diff", "--"],
+    }.items():
+        proc = subprocess.run(
+            ["git", "-C", str(worktree_path), *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        content = proc.stdout if proc.returncode == 0 else proc.stderr
+        (target / filename).write_text(content, encoding="utf-8")
 
 
 def _stream_process_output(
