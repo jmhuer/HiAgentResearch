@@ -19,6 +19,9 @@ from hiagentresearch.src.dashboard.trajectory import (
     baseline_metric_points,
     parent_anchor_loop_index,
 )
+from hiagentresearch.src.git.service import GitService
+from hiagentresearch.src.lineage.resolve import LineageError, resolve_branch_bootstrap
+from hiagentresearch.src.paths import REPO_ROOT
 from hiagentresearch.src.registry.store import Registry
 from hiagentresearch.src.runtime.loop_controller import _ensure_baseline_snapshot, _install_dependency_files
 
@@ -70,7 +73,9 @@ def build_from_registry(
     metric_targets = _metric_targets(loaded)
     snapshot["metric_targets"] = metric_targets
     topology = _lineage_topology(loaded, registry=registry)
-    topology["inherit_anchors"] = _inherit_anchors_from_experiments(
+    topology["inherit_anchors"] = _inherit_anchors_combined(
+        loaded,
+        registry,
         snapshot.get("experiments", []),
         snapshot.get("runs", []),
     )
@@ -193,13 +198,19 @@ def _write_dashboard_db(
         _create_dashboard_schema(destination)
         for table in ("runs", "metrics", "research_outcomes", "experiments", "artifacts"):
             rows = source.execute(f"SELECT * FROM {table}").fetchall()
-            columns = [info[1] for info in source.execute(f"PRAGMA table_info({table})").fetchall()]
-            if not rows:
+            source_columns = [info[1] for info in source.execute(f"PRAGMA table_info({table})").fetchall()]
+            dest_columns = [
+                info[1] for info in destination.execute(f"PRAGMA table_info({table})").fetchall()
+            ]
+            columns = [name for name in source_columns if name in dest_columns]
+            if not rows or not columns:
                 continue
+            indexes = [source_columns.index(name) for name in columns]
+            trimmed_rows = [tuple(row[index] for index in indexes) for row in rows]
             placeholders = ", ".join("?" for _ in columns)
             destination.executemany(
                 f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
-                rows,
+                trimmed_rows,
             )
         destination.executemany(
             """
@@ -272,6 +283,7 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
             lineage_parent_group_id TEXT,
             lineage_anchor_sha TEXT,
             lineage_anchor_policy TEXT,
+            lineage_parent_anchor_step INTEGER,
             created_at TEXT NOT NULL
         );
         CREATE TABLE artifacts (
@@ -321,7 +333,8 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
             SELECT r.run_id, r.group_id, r.branch, r.commit_sha, r.workflow_run_id,
                    r.correlation_id, r.created_at, m.metric_name, m.metric_value,
                    e.loop_index, e.lineage_mode, e.lineage_parent_group_id,
-                   e.lineage_anchor_sha, e.lineage_anchor_policy
+                   e.lineage_anchor_sha, e.lineage_anchor_policy,
+                   e.lineage_parent_anchor_step
             FROM runs r
             JOIN metrics m ON r.run_id = m.run_id
             LEFT JOIN experiments e ON r.run_id = e.run_id;
@@ -455,6 +468,41 @@ def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | Non
         "baseline_snapshot": baseline_snapshot,
         "inherit_anchors": {},
     }
+
+
+def _inherit_anchors_combined(
+    config: HiAgentResearchConfig,
+    registry: Registry,
+    experiments: list[dict[str, Any]],
+    runs: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    anchors = _inherit_anchors_from_experiments(experiments, runs)
+    git = GitService(REPO_ROOT)
+    for group in config.research_groups:
+        if group.lineage.mode != "inherit":
+            continue
+        try:
+            bootstrap = resolve_branch_bootstrap(
+                group,
+                config,
+                registry=registry,
+                git=git,
+            )
+        except LineageError:
+            continue
+        if group.id in anchors:
+            continue
+        resolved_step = bootstrap.parent_anchor_step
+        if resolved_step is None:
+            resolved_step = 0
+        anchors[group.id] = {
+            "parent_group_id": bootstrap.parent_group_id,
+            "commit_sha": bootstrap.start_ref,
+            "anchor_policy": bootstrap.anchor_policy,
+            "parent_trajectory_step": resolved_step,
+            "parent_anchor_loop_index": resolved_step,
+        }
+    return anchors
 
 
 def _inherit_anchors_from_experiments(

@@ -35,3 +35,8 @@ def resolve_runs_dir(checkout_root: Path | None = None) -> Path:
 
 def resolve_config_path() -> Path:
     return Path(os.environ.get("HIAGENTRESEARCH_CONFIG", str(DEFAULT_CONFIG_PATH))).resolve()
+
+
+def is_linked_git_worktree(path: Path) -> bool:
+    """True when path is a linked git worktree (not the primary repo checkout)."""
+    return (path / ".git").is_file()

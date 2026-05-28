@@ -779,6 +779,12 @@ function resolveInheritAnchorPoint(groupId, parentId, grouped) {
   const anchorMeta = dashboardData.lineage_topology?.inherit_anchors?.[groupId] || {};
   const parentStep = anchorMeta.parent_trajectory_step ?? anchorMeta.parent_anchor_loop_index;
   if (parentStep != null && parentStep !== "") {
+    if (Number(parentStep) === 0) {
+      const baselinePoint = (grouped[parentId] || []).find((row) => row.is_baseline_anchor);
+      if (baselinePoint) {
+        return baselinePoint;
+      }
+    }
     const atStep = (grouped[parentId] || []).find((row) => Number(row.trajectory_x) === Number(parentStep));
     if (atStep) {
       return atStep;
@@ -803,6 +809,13 @@ function resolveInheritAnchorPoint(groupId, parentId, grouped) {
     const matched = parentRows.find((row) => shaMatches(row.commit_sha, resolved.commit_sha));
     if (matched) {
       return matched;
+    }
+  }
+  const resolvedStep = resolved?.parent_trajectory_step ?? resolved?.parent_anchor_loop_index;
+  if (Number(resolvedStep) === 0) {
+    const baselinePoint = (grouped[parentId] || []).find((row) => row.is_baseline_anchor);
+    if (baselinePoint) {
+      return baselinePoint;
     }
   }
   return parentRows[parentRows.length - 1];

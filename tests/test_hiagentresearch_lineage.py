@@ -152,6 +152,24 @@ def test_best_commit_prefers_highest_github_metric_not_latest(tmp_path) -> None:
     assert bootstrap.start_ref == "bestsha"
 
 
+def test_record_experiment_manifest_persists_parent_anchor_step(tmp_path) -> None:
+    registry = Registry(tmp_path / "state")
+    registry.init()
+    registry.record_experiment_manifest(
+        run_id="run_child",
+        manifest_path=".hiagentresearch/experiments/optimization_strategy/run_child.json",
+        manifest={
+            "group_id": "optimization_strategy",
+            "loop_index": 1,
+            "lineage_parent_anchor_step": 0,
+            "lineage_anchor_sha": "mainsha",
+        },
+    )
+    experiment = registry.experiment_for_run("run_child")
+    assert experiment is not None
+    assert experiment["lineage_parent_anchor_step"] == 0
+
+
 def test_best_commit_prefers_parent_l0_when_baseline_is_higher(monkeypatch, tmp_path) -> None:
     def fake_run(args, **kwargs):
         if args[1:] == ["rev-parse", "main"]:

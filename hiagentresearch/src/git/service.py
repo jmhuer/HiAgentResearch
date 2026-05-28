@@ -90,7 +90,11 @@ class GitService:
     def stage_paths(self, paths: list[str]) -> None:
         if not paths:
             raise GitServiceError("no paths provided to stage")
-        self._run(["add", *paths])
+        args = ["add"]
+        if any(path.startswith(".hiagentresearch/experiments/") for path in paths):
+            args.append("-f")
+        args.extend(paths)
+        self._run(args)
 
     def has_core_staged_change(self, *, allowed_paths: list[str], supporting_paths: list[str]) -> bool:
         staged = set(self.changed_files(staged=True))

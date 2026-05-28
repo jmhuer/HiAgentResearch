@@ -20,7 +20,7 @@ from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.git.worktree import WorktreeManager
 from hiagentresearch.src.lineage.resolve import BranchBootstrap, resolve_branch_bootstrap
 from hiagentresearch.src.github.actions import GitHubActionsService, load_run_meta
-from hiagentresearch.src.paths import REPO_ROOT, resolve_execution_root, resolve_runs_dir
+from hiagentresearch.src.paths import REPO_ROOT, is_linked_git_worktree, resolve_execution_root, resolve_runs_dir
 from hiagentresearch.src.runtime.orchestrator import init_state, run_group
 from hiagentresearch.src.core.outcomes import (
     baseline_metrics_complete,
@@ -116,8 +116,8 @@ def run_loops(
     git_service = git or GitService(git_root)
     github_service = github or GitHubActionsService(REPO_ROOT)
 
-    _install_dependency_files(loaded_config)
-    with contextlib.redirect_stdout(io.StringIO()):
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        _install_dependency_files(loaded_config)
         init_state()
     registry = Registry(REPO_ROOT / ".hiagentresearch" / "state")
     registry.init()
@@ -127,11 +127,12 @@ def run_loops(
         registry=registry,
         git=git_service,
     )
-    git_service.checkout_or_create(
-        target_branch,
-        start_ref=bootstrap.start_ref,
-        sync_to_ref=bootstrap.mode == "inherit",
-    )
+    if not is_linked_git_worktree(git_root):
+        git_service.checkout_or_create(
+            target_branch,
+            start_ref=bootstrap.start_ref,
+            sync_to_ref=bootstrap.mode == "inherit",
+        )
 
     cycles: list[CycleResult] = []
     for loop_index in range(1, loops + 1):
@@ -153,13 +154,25 @@ def run_loops(
                 cycles=cycles,
                 reason="local cycle did not return a run_id",
             )
-        if local_failure in {"invalid_cycle", "infra_failure"}:
+        if local.get("error") == "could not parse run_group output":
             return LoopSummary(
                 ok=False,
                 group_id=group_id,
                 branch=target_branch,
                 cycles=cycles,
-                reason=f"local cycle blocked with {local_failure}",
+                reason="could not parse run_group output",
+            )
+        if local_failure in {"invalid_cycle", "infra_failure"}:
+            detail = str(local.get("error", "")).strip()
+            reason = f"local cycle blocked with {local_failure}"
+            if detail:
+                reason = f"{reason}: {detail}"
+            return LoopSummary(
+                ok=False,
+                group_id=group_id,
+                branch=target_branch,
+                cycles=cycles,
+                reason=reason,
             )
 
         manifest_path, manifest = _write_experiment_manifest(
@@ -260,15 +273,40 @@ def run_loops(
     return LoopSummary(ok=ok, group_id=group_id, branch=target_branch, cycles=cycles, reason=reason)
 
 
+def _extract_last_json_object(text: str) -> dict | None:
+    decoder = json.JSONDecoder()
+    idx = len(text)
+    while idx > 0:
+        idx = text.rfind("{", 0, idx)
+        if idx < 0:
+            return None
+        try:
+            obj, _end = decoder.raw_decode(text, idx)
+        except json.JSONDecodeError:
+            idx -= 1
+            continue
+        if isinstance(obj, dict):
+            return obj
+        idx -= 1
+    return None
+
+
 def _run_group_capture(run_group_func: RunGroupCallable, **kwargs) -> dict:
     stdout = io.StringIO()
     with contextlib.redirect_stdout(stdout):
         exit_code = run_group_func(**kwargs)
     text = stdout.getvalue().strip()
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        payload = {"ok": False, "error": "could not parse run_group output", "raw_stdout": text}
+    payload = _extract_last_json_object(text)
+    if payload is None:
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = {
+                "ok": False,
+                "error": "could not parse run_group output",
+                "failure_class": "invalid_cycle",
+                "raw_stdout": text[-4000:],
+            }
     payload["exit_code"] = exit_code
     return payload
 
@@ -418,6 +456,8 @@ def run_loops_all(
     _ensure_baseline_snapshot(registry, loaded_config)
     summaries: list[LoopSummary] = []
     worktrees = WorktreeManager(worktree_root=loaded_config.orchestration.worktree_root)
+    if parallel:
+        GitService(REPO_ROOT).checkout("main")
     try:
         for wave in loaded_config.execution_waves():
             if parallel and len(wave) > 1:

@@ -167,6 +167,7 @@ class Registry:
             ("lineage_parent_group_id", "ALTER TABLE experiments ADD COLUMN lineage_parent_group_id TEXT"),
             ("lineage_anchor_sha", "ALTER TABLE experiments ADD COLUMN lineage_anchor_sha TEXT"),
             ("lineage_anchor_policy", "ALTER TABLE experiments ADD COLUMN lineage_anchor_policy TEXT"),
+            ("lineage_parent_anchor_step", "ALTER TABLE experiments ADD COLUMN lineage_parent_anchor_step INTEGER"),
         ):
             if column not in experiment_columns:
                 conn.execute(ddl)
@@ -358,9 +359,10 @@ class Registry:
                     lineage_parent_group_id,
                     lineage_anchor_sha,
                     lineage_anchor_policy,
+                    lineage_parent_anchor_step,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -376,6 +378,7 @@ class Registry:
                     _optional_str(manifest.get("lineage_parent_group_id")),
                     _optional_str(manifest.get("lineage_anchor_sha")),
                     _optional_str(manifest.get("lineage_anchor_policy")),
+                    _as_int_or_none(manifest.get("lineage_parent_anchor_step")),
                     now,
                 ),
             )

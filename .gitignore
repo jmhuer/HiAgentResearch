@@ -9,7 +9,11 @@ __pycache__/
 .hiagentresearch/dashboard/
 .hiagentresearch/dashboard-preview/
 .hiagentresearch/worktrees/
-.hiagentresearch/experiments/
+# Ignore experiment workspace scratch; per-run manifests (*.json) are committed on research branches.
+.hiagentresearch/experiments/**
+!.hiagentresearch/experiments/
+!.hiagentresearch/experiments/**/
+!.hiagentresearch/experiments/**/*.json
 .hiagentresearch/*.log
 
 # Project-generated training artifacts

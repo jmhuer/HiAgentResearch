@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import subprocess
 
 from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.core.outcomes import baseline_metrics_from_eval_payload
@@ -95,7 +96,7 @@ def test_dashboard_summary_includes_baseline_snapshot(tmp_path) -> None:
     baseline = snapshot["lineage_topology"]["baseline_snapshot"]
     assert baseline["metrics"]["accuracy"] == 0.81
     assert summary["lineage_topology"]["baseline_snapshot"]["metrics"]["accuracy"] == 0.81
-    assert summary["lineage_topology"]["inherit_anchors"] == {}
+    assert "optimization_strategy" in summary["lineage_topology"]["inherit_anchors"]
     anchors = [row for row in snapshot["metrics"] if row.get("is_baseline_anchor")]
     assert anchors
     assert all(row["trajectory_x"] == 0 for row in anchors)
@@ -144,6 +145,33 @@ def test_dashboard_skips_l0_baseline_for_inherit_groups(tmp_path) -> None:
     ]
     assert not opt_baselines
     assert model_baselines
+
+
+def test_dashboard_inherit_anchor_uses_resolved_best_commit(tmp_path, monkeypatch) -> None:
+    def fake_run(args, **kwargs):
+        if args[1:] == ["rev-parse", "main"]:
+            return subprocess.CompletedProcess(args, 0, "mainsha\n", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    state_dir = tmp_path / "state"
+    registry = _seed_registry(state_dir)
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.949, "latency_ms": 6.0})
+    registry.record_run(
+        run_id="gh_loop1",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.914, "latency_ms": 8.0},
+        commit_sha="loop1sha",
+    )
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+    topology = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))["lineage_topology"]
+    anchor = topology["inherit_anchors"]["optimization_strategy"]
+    assert anchor["commit_sha"] == "mainsha"
+    assert anchor["parent_trajectory_step"] == 0
 
 
 def test_dashboard_topology_includes_inherit_anchors(tmp_path) -> None:

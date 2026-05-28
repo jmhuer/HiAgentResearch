@@ -3,7 +3,7 @@ from pathlib import Path
 
 from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.github.actions import GitHubRun
-from hiagentresearch.src.runtime.loop_controller import run_loops
+from hiagentresearch.src.runtime.loop_controller import _extract_last_json_object, _run_group_capture, run_loops
 from hiagentresearch.src.registry.store import Registry
 
 
@@ -71,6 +71,23 @@ class FakeGitHub:
 
     def artifact_payload_dir(self, download_dir: Path) -> Path:
         return self.artifact_dir
+
+
+def test_extract_last_json_object_ignores_leading_noise() -> None:
+    text = "Requirement already satisfied: torch\n{\"ok\": true, \"run_id\": \"r1\"}\n"
+    payload = _extract_last_json_object(text)
+    assert payload == {"ok": True, "run_id": "r1"}
+
+
+def test_run_group_capture_parses_json_after_pip_noise() -> None:
+    def fake_run_group(**kwargs):
+        print("pip install noise line")
+        print(json.dumps({"ok": True, "run_id": "run_x", "failure_class": "none"}))
+        return 0
+
+    payload = _run_group_capture(fake_run_group, group_id="model_architecture")
+    assert payload["run_id"] == "run_x"
+    assert payload["failure_class"] == "none"
 
 
 def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> None:
