@@ -1,7 +1,15 @@
+import json
+import sys
+import types
+from pathlib import Path
+
 from hiagentresearch.src.agents.agent_backends import (
     failure_class_for_cursor_agent_error,
     failure_class_for_cursor_run_status,
+    run_cursor_agent_cycle,
 )
+from hiagentresearch.src.core.config import load_config
+from hiagentresearch.src.core.models import IntentPacket
 
 
 def test_failure_class_for_cursor_run_status() -> None:
@@ -13,3 +21,96 @@ def test_failure_class_for_cursor_run_status() -> None:
 
 def test_failure_class_for_cursor_agent_error() -> None:
     assert failure_class_for_cursor_agent_error() == "infra_failure"
+
+
+def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CURSOR_API_KEY", "cursor_test")
+    fake_module = types.ModuleType("cursor_sdk")
+
+    class FakeCursorAgentError(Exception):
+        pass
+
+    class FakeLocalAgentOptions:
+        def __init__(self, *, cwd: str) -> None:
+            self.cwd = cwd
+
+    class FakeRun:
+        id = "sdk_run_123"
+
+        def messages(self):
+            block = types.SimpleNamespace(type="text", text="streamed assistant text")
+            message = types.SimpleNamespace(content=[block])
+            yield types.SimpleNamespace(type="assistant", message=message)
+
+        def wait(self):
+            return types.SimpleNamespace(
+                id="result_123",
+                agent_id="agent_123",
+                status="finished",
+                result="done",
+                duration_ms=12,
+                created_at="now",
+                git=None,
+            )
+
+    class FakeAgent:
+        agent_id = "agent_123"
+
+        @classmethod
+        def create(cls, **kwargs):
+            cls.kwargs = kwargs
+            return cls()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def send(self, prompt):
+            self.prompt = prompt
+            return FakeRun()
+
+    fake_module.Agent = FakeAgent
+    fake_module.CursorAgentError = FakeCursorAgentError
+    fake_module.LocalAgentOptions = FakeLocalAgentOptions
+    monkeypatch.setitem(sys.modules, "cursor_sdk", fake_module)
+
+    config = load_config(Path("config.yaml"))
+    group = config.research_groups_by_id()["model_architecture"]
+    packet = IntentPacket(
+        group_id=group.id,
+        active_hypothesis_id="h1",
+        hypothesis_text="test hypothesis",
+        attempt_count=0,
+        last_failure_class="none",
+        next_action="continue",
+        rollback_anchor_sha="",
+    )
+    run_dir = tmp_path / "run_test"
+    run_dir.mkdir()
+
+    record = run_cursor_agent_cycle(
+        workdir=tmp_path,
+        run_dir=run_dir,
+        group=group,
+        intent_packet=packet,
+        run_id="run_test",
+        model="composer-2.5",
+    )
+
+    assert record.success is True
+    assert FakeAgent.kwargs["model"] == "composer-2.5"
+    assert "hiagentresearch/AGENTS.md" in (run_dir / "agent_prompt.txt").read_text(encoding="utf-8")
+    assert "hiagentresearch/skills/phase1-experiment-cycle/SKILL.md" in (
+        run_dir / "agent_prompt.txt"
+    ).read_text(encoding="utf-8")
+    assert "streamed assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
+    stream_events = [
+        json.loads(line) for line in (run_dir / "agent_stream.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert stream_events[0]["type"] == "agent_created"
+    assert stream_events[1]["sdk_run_id"] == "sdk_run_123"
+    backend_record = json.loads((run_dir / "agent_backend_record.json").read_text(encoding="utf-8"))
+    assert backend_record["raw_result"]["agent_id"] == "agent_123"
+    assert backend_record["raw_result"]["sdk_run_id"] == "sdk_run_123"

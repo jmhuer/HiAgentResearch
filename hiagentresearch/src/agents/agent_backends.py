@@ -73,7 +73,7 @@ def run_cursor_agent_cycle(
             failure_class="infra_failure",
         )
     try:
-        from cursor_sdk import Agent, AgentOptions, CursorAgentError, LocalAgentOptions
+        from cursor_sdk import Agent, CursorAgentError, LocalAgentOptions
     except ModuleNotFoundError as exc:
         raise AgentBackendError(
             "cursor-sdk is not installed. Install the project dependencies before running real agent loops.",
@@ -86,15 +86,51 @@ def run_cursor_agent_cycle(
         run_id=run_id,
         lineage_bootstrap=lineage_bootstrap,
     )
+    (run_dir / "agent_prompt.txt").write_text(prompt, encoding="utf-8")
+    stream_path = run_dir / "agent_stream.jsonl"
+    messages_path = run_dir / "agent_messages.txt"
+    stream_error = ""
+    result: Any
+    agent: Any = None
+    sdk_run: Any = None
     try:
-        result = Agent.prompt(
-            prompt,
-            AgentOptions(
-                api_key=api_key,
-                model=model,
-                local=LocalAgentOptions(cwd=str(workdir)),
-            ),
-        )
+        with Agent.create(
+            api_key=api_key,
+            model=model,
+            local=LocalAgentOptions(cwd=str(workdir)),
+        ) as agent:
+            _append_stream_event(
+                stream_path,
+                {
+                    "type": "agent_created",
+                    "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
+                    "model": model,
+                    "cwd": str(workdir),
+                },
+            )
+            sdk_run = agent.send(prompt)
+            _append_stream_event(
+                stream_path,
+                {
+                    "type": "run_started",
+                    "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
+                    "sdk_run_id": getattr(sdk_run, "id", ""),
+                },
+            )
+            try:
+                for message in sdk_run.messages():
+                    payload = _sdk_message_payload(message)
+                    _append_stream_event(stream_path, payload)
+                    text = _message_text(message)
+                    if text:
+                        with messages_path.open("a", encoding="utf-8") as handle:
+                            handle.write(text)
+                            if not text.endswith("\n"):
+                                handle.write("\n")
+            except Exception as exc:  # pragma: no cover - defensive; wait() still gives terminal status.
+                stream_error = f"{type(exc).__name__}: {exc}"
+                _append_stream_event(stream_path, {"type": "stream_error", "error": stream_error})
+            result = sdk_run.wait()
     except CursorAgentError as exc:
         record = _record_from_cursor_error(exc)
         _write_record(run_dir=run_dir, record=record, prompt=prompt)
@@ -113,7 +149,13 @@ def run_cursor_agent_cycle(
         status=status,
         failure_class=failure_class,
         summary=str(result.result)[:2000],
-        raw_result=_run_result_payload(result, cursor_run_status=status),
+        raw_result=_run_result_payload(
+            result,
+            cursor_run_status=status,
+            agent=agent,
+            sdk_run=sdk_run,
+            stream_error=stream_error,
+        ),
         timestamp=utc_now_iso(),
     )
     _write_record(run_dir=run_dir, record=record, prompt=prompt)
@@ -151,20 +193,89 @@ def _cursor_error_payload(exc: Any) -> dict[str, Any]:
     }
 
 
-def _run_result_payload(result: Any, *, cursor_run_status: str) -> dict[str, Any]:
+def _run_result_payload(
+    result: Any,
+    *,
+    cursor_run_status: str,
+    agent: Any | None = None,
+    sdk_run: Any | None = None,
+    stream_error: str = "",
+) -> dict[str, Any]:
     return {
         "id": getattr(result, "id", ""),
-        "agent_id": getattr(result, "agent_id", ""),
+        "agent_id": getattr(result, "agent_id", "") or _agent_id(agent),
+        "sdk_run_id": getattr(sdk_run, "id", "") if sdk_run is not None else "",
         "status": cursor_run_status,
         "cursor_run_status": cursor_run_status,
         "result": str(getattr(result, "result", "")),
         "duration_ms": int(getattr(result, "duration_ms", 0) or 0),
         "created_at": getattr(result, "created_at", None),
         "git": _serialize_git(getattr(result, "git", None)),
+        "stream_error": stream_error,
         "request_id": None,
         "is_retryable": False,
         "retry_after": None,
     }
+
+
+def _agent_id(agent: Any | None) -> str:
+    if agent is None:
+        return ""
+    return str(getattr(agent, "agent_id", "") or getattr(agent, "id", ""))
+
+
+def _append_stream_event(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(_jsonable(payload), sort_keys=True) + "\n")
+
+
+def _sdk_message_payload(message: Any) -> dict[str, Any]:
+    return {
+        "type": "sdk_message",
+        "message_type": str(getattr(message, "type", "")),
+        "text": _message_text(message),
+        "raw": _jsonable(message),
+    }
+
+
+def _message_text(message: Any) -> str:
+    texts: list[str] = []
+    sdk_message = getattr(message, "message", None)
+    content = getattr(sdk_message, "content", None)
+    if isinstance(content, list):
+        for block in content:
+            if getattr(block, "type", "") == "text":
+                texts.append(str(getattr(block, "text", "")))
+            elif isinstance(block, dict) and block.get("type") == "text":
+                texts.append(str(block.get("text", "")))
+    direct = getattr(message, "text", "")
+    if direct:
+        texts.append(str(direct))
+    return "".join(texts)
+
+
+def _jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value):
+        return _jsonable(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(item) for item in value]
+    if hasattr(value, "model_dump"):
+        try:
+            return _jsonable(value.model_dump())
+        except Exception:
+            pass
+    payload: dict[str, Any] = {}
+    for key in ("type", "id", "status", "created_at", "message"):
+        if hasattr(value, key):
+            payload[key] = _jsonable(getattr(value, key))
+    return payload or str(value)
 
 
 def _serialize_git(git: Any) -> dict[str, Any] | None:

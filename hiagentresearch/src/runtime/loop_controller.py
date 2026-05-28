@@ -5,10 +5,12 @@ import contextlib
 import io
 import json
 import os
+import queue
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
@@ -319,6 +321,8 @@ def _install_dependency_files(config: HiAgentResearchConfig) -> None:
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-r", str(dependency_file)],
             cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
             check=True,
         )
 
@@ -518,6 +522,8 @@ def _run_wave_parallel(
     registry.init()
     git_main = GitService(REPO_ROOT)
     processes: list[tuple[str, subprocess.Popen[str]]] = []
+    output_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+    reader_threads: list[threading.Thread] = []
     for group_id in wave:
         group_config = config.group_by_id(group_id)
         bootstrap = resolve_branch_bootstrap(
@@ -559,12 +565,44 @@ def _run_wave_parallel(
             text=True,
         )
         processes.append((group_id, proc))
+        thread = threading.Thread(target=_stream_process_output, args=(group_id, proc, output_queue), daemon=True)
+        thread.start()
+        reader_threads.append(thread)
+
+    completed_streams = 0
+    while completed_streams < len(processes):
+        group_id, line = output_queue.get()
+        if line is None:
+            completed_streams += 1
+            continue
+        print(f"[{group_id}] {line}", flush=True)
+
+    for thread in reader_threads:
+        thread.join(timeout=1)
+
+    first_failure = 0
     for group_id, proc in processes:
-        output, _ = proc.communicate()
-        if proc.returncode != 0:
-            print(output or f"{group_id} failed with exit {proc.returncode}")
-            return proc.returncode or 1
+        returncode = proc.wait()
+        if returncode != 0 and first_failure == 0:
+            first_failure = returncode or 1
+            print(f"[{group_id}] failed with exit {returncode}", flush=True)
+    if first_failure:
+        return first_failure
     return 0
+
+
+def _stream_process_output(
+    group_id: str,
+    proc: subprocess.Popen[str],
+    output_queue: queue.Queue[tuple[str, str | None]],
+) -> None:
+    assert proc.stdout is not None
+    try:
+        for line in proc.stdout:
+            output_queue.put((group_id, line.rstrip("\n")))
+    finally:
+        proc.stdout.close()
+        output_queue.put((group_id, None))
 
 
 def build_parser() -> argparse.ArgumentParser:

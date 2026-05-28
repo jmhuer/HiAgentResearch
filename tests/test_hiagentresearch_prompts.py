@@ -26,6 +26,10 @@ def test_prompt_is_config_backed() -> None:
     assert "configured core experiment files" in prompt.lower()
     assert "Optional validation commands" in prompt
     assert "kwta_unit_tests" in prompt
+    assert "hiagentresearch/AGENTS.md" in prompt
+    assert "hiagentresearch/skills/phase1-experiment-cycle/SKILL.md" in prompt
+    assert "quick/CPU bounded" in prompt
+    assert "long GPU training" in prompt
     assert "GitHub final eval remains authoritative" in prompt
     assert "core MNIST" not in prompt
     assert "registry invariants" not in prompt

@@ -29,6 +29,11 @@ def test_load_root_config() -> None:
     assert "mnist/pipeline/research_hypotheses.py" not in config.editable_paths
     group = config.research_groups_by_id()["model_architecture"]
     assert group.validation_commands[0].command.startswith("python -m pytest")
+    quick_train = group.validation_commands[1]
+    assert quick_train.name == "quick_train_eval"
+    assert "CUDA_VISIBLE_DEVICES=" in quick_train.command
+    assert "--device cpu" in quick_train.command
+    assert "timeout 180s" in quick_train.command
 
 
 def test_group_resolution_from_branch() -> None:
