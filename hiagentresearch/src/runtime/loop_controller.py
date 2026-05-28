@@ -317,6 +317,7 @@ def _write_experiment_manifest(
         "lineage_parent_group_id": bootstrap.parent_group_id,
         "lineage_anchor_sha": bootstrap.start_ref,
         "lineage_anchor_policy": bootstrap.anchor_policy,
+        "lineage_parent_anchor_step": bootstrap.parent_anchor_step,
     }
     path = EXPERIMENT_MANIFEST_ROOT / group_id / f"{local_run_id}.json"
     absolute_path = checkout_root / path

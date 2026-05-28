@@ -32,6 +32,7 @@ def test_inherited_group_offsets_by_parent_anchor_loop_index() -> None:
         "inherit_anchors": {
             "optimization_strategy": {
                 "parent_group_id": "model_architecture",
+                "parent_trajectory_step": 2,
                 "parent_anchor_loop_index": 2,
                 "commit_sha": "parentsha",
             }

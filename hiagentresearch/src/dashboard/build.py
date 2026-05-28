@@ -474,17 +474,23 @@ def _inherit_anchors_from_experiments(
         existing = anchors.get(group_id)
         if existing is not None and int(existing.get("bootstrap_loop_index") or 999) <= loop_index:
             continue
+        recorded_step = row.get("lineage_parent_anchor_step")
+        if recorded_step is not None and recorded_step != "":
+            parent_step = int(recorded_step)
+        else:
+            parent_step = parent_anchor_loop_index(
+                parent_group_id=parent_group_id,
+                commit_sha=commit_sha,
+                experiments=experiments,
+                runs=runs,
+            )
         anchors[group_id] = {
             "bootstrap_loop_index": loop_index,
             "parent_group_id": parent_group_id,
             "commit_sha": commit_sha,
             "anchor_policy": row.get("lineage_anchor_policy"),
-            "parent_anchor_loop_index": parent_anchor_loop_index(
-                parent_group_id=parent_group_id,
-                commit_sha=commit_sha,
-                experiments=experiments,
-                runs=runs,
-            ),
+            "parent_trajectory_step": parent_step,
+            "parent_anchor_loop_index": parent_step,
         }
     return {
         group_id: {key: value for key, value in payload.items() if key != "bootstrap_loop_index"}

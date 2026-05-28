@@ -776,6 +776,14 @@ function seriesDataForGroup(groupId, rows, trajectoryAxis, grouped, metricName) 
 }
 
 function resolveInheritAnchorPoint(groupId, parentId, grouped) {
+  const anchorMeta = dashboardData.lineage_topology?.inherit_anchors?.[groupId] || {};
+  const parentStep = anchorMeta.parent_trajectory_step ?? anchorMeta.parent_anchor_loop_index;
+  if (parentStep != null && parentStep !== "") {
+    const atStep = (grouped[parentId] || []).find((row) => Number(row.trajectory_x) === Number(parentStep));
+    if (atStep) {
+      return atStep;
+    }
+  }
   const parentRows = (grouped[parentId] || [])
     .filter((point) => !point.is_baseline_anchor)
     .sort((left, right) => Number(left.trajectory_x) - Number(right.trajectory_x));
@@ -1012,7 +1020,7 @@ function assignTrajectoryPositions(points, topology) {
     const mode = groupMeta[point.group_id]?.mode || "baseline";
     if (mode === "inherit") {
       const anchor = inheritAnchors[point.group_id] || {};
-      const parentLoops = Number(anchor.parent_anchor_loop_index || 0);
+      const parentLoops = Number(anchor.parent_trajectory_step ?? anchor.parent_anchor_loop_index ?? 0);
       return { ...point, trajectory_x: parentLoops + loopIndex };
     }
     return { ...point, trajectory_x: loopIndex };

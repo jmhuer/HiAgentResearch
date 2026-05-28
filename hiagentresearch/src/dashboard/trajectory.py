@@ -28,7 +28,9 @@ def assign_trajectory_positions(
         mode = str(group_meta.get(group_id, {}).get("mode") or "baseline")
         if mode == "inherit":
             anchor = inherit_anchors.get(group_id) or {}
-            parent_loops = int(anchor.get("parent_anchor_loop_index") or 0)
+            parent_loops = int(
+                anchor.get("parent_trajectory_step") or anchor.get("parent_anchor_loop_index") or 0
+            )
             trajectory_x = parent_loops + loop_index
         else:
             trajectory_x = loop_index

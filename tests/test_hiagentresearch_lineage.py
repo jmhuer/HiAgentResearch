@@ -152,6 +152,54 @@ def test_best_commit_prefers_highest_github_metric_not_latest(tmp_path) -> None:
     assert bootstrap.start_ref == "bestsha"
 
 
+def test_best_commit_prefers_parent_l0_when_baseline_is_higher(monkeypatch, tmp_path) -> None:
+    def fake_run(args, **kwargs):
+        if args[1:] == ["rev-parse", "main"]:
+            return subprocess.CompletedProcess(args, 0, "mainsha\n", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    registry = Registry(tmp_path / "state")
+    registry.init()
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.949, "latency_ms": 6.0})
+    registry.record_run(
+        run_id="gh_loop1",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="completed",
+        failure_class="none",
+        metrics={"accuracy": 0.935, "latency_ms": 6.1},
+        commit_sha="loop1sha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_loop1",
+        manifest_path=".hiagentresearch/experiments/model_architecture/gh_loop1.json",
+        manifest={"group_id": "model_architecture", "loop_index": 1},
+    )
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        editable_paths=["src/app.py"],
+        frozen_eval_entrypoint=".hiagentresearch/eval/run.py",
+        evaluation={"command_template": "true", "parser": "canonical_json_stdout"},
+        artifact_contract={"required": ["metrics.json"]},
+        policy_modes={"explore": "Explore."},
+        orchestration=OrchestrationConfig(baseline_ref="main"),
+        research_groups=[
+            _group("model_architecture"),
+            _group("optimization_strategy", mode="inherit", inherit_from="model_architecture"),
+        ],
+    )
+    bootstrap = resolve_branch_bootstrap(
+        config.group_by_id("optimization_strategy"),
+        config,
+        registry=registry,
+        git=GitService(tmp_path),
+    )
+    assert bootstrap.start_ref == "mainsha"
+    assert bootstrap.parent_anchor_step == 0
+
+
 def test_force_mode_fails_fast(tmp_path) -> None:
     config = HiAgentResearchConfig(
         project_id="demo",
