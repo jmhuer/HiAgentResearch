@@ -7,7 +7,6 @@ from typing import Any
 
 from hiagentresearch.src.core.artifact_schema import normalize_eval
 from hiagentresearch.src.core.config import EvaluationConfig
-from hiagentresearch.src.runtime.quality import classify_research_outcome
 
 
 @dataclass(frozen=True)
@@ -28,6 +27,8 @@ def normalize_eval_node(
     exit_code: int,
     eval_config: EvaluationConfig,
 ) -> EvalNodeArtifacts:
+    from hiagentresearch.src.runtime.quality import classify_research_outcome
+
     normalized = normalize_eval(parser=parser, stdout=stdout, stderr=stderr, exit_code=exit_code)
     metrics = normalized.to_metrics()
     if normalized.raw.get("duration_sec") is not None:
