@@ -6,8 +6,20 @@ on:
       - "research/**"
   workflow_dispatch:
     inputs:
+      node_kind:
+        description: "Eval node kind"
+        required: false
+        default: "experiment"
+        type: choice
+        options:
+          - experiment
+          - baseline
       group_id:
         description: "Research group id override"
+        required: false
+        type: string
+      correlation_id:
+        description: "Correlation id override"
         required: false
         type: string
 
@@ -56,10 +68,14 @@ jobs:
             gid="$(python -m hiagentresearch.src.core resolve-group --branch "$branch")"
           fi
           echo "group_id=$gid" >> "$GITHUB_OUTPUT"
+          input_correlation="${{ github.event.inputs.correlation_id }}"
           commit_msg="$(git log -1 --pretty=%B)"
-          correlation_id="$(python - <<'PY' "$commit_msg" "${{ github.sha }}"
+          correlation_id="$(python - <<'PY' "$commit_msg" "${{ github.sha }}" "$input_correlation"
           import re, sys
-          msg, sha = sys.argv[1], sys.argv[2]
+          msg, sha, override = sys.argv[1], sys.argv[2], sys.argv[3]
+          if override:
+              print(override)
+              raise SystemExit(0)
           match = re.search(r"HiAgentResearch-Run-ID:\s*(\S+)", msg)
           print(match.group(1) if match else sha)
           PY
@@ -95,10 +111,9 @@ jobs:
           import json
           import shutil
           from pathlib import Path
-          from hiagentresearch.src.core.artifact_schema import normalize_eval
-          from hiagentresearch.src.runtime.quality import classify_research_outcome
 
           from hiagentresearch.src.core.config import load_config
+          from hiagentresearch.src.eval.node import normalize_eval_node, write_eval_node_artifacts
 
           config = load_config()
           group = config.group_by_id("${{ steps.group.outputs.group_id }}")
@@ -106,31 +121,15 @@ jobs:
           stdout = Path("stdout.txt").read_text(encoding="utf-8")
           stderr = Path("stderr.txt").read_text(encoding="utf-8")
           exit_code = int("${{ steps.eval.outputs.exit_code }}")
-          normalized = normalize_eval(
+          eval_config = group.evaluation or config.evaluation
+          artifacts = normalize_eval_node(
               parser=parser,
               stdout=stdout,
               stderr=stderr,
               exit_code=exit_code,
+              eval_config=eval_config,
           )
-          metrics = normalized.to_metrics()
-          if normalized.raw.get("duration_sec") is not None:
-              metrics["duration_sec"] = float(normalized.raw["duration_sec"])
-          eval_config = group.evaluation or config.evaluation
-          failure_class = normalized.failure_class
-          outcome = classify_research_outcome(
-              execution_failure_class=failure_class,
-              eval_passed=normalized.passed,
-              metrics=metrics,
-              targets=eval_config.targets,
-          )
-          research_outcome = outcome.to_dict()
-          normalized.raw["research_outcome"] = research_outcome["research_outcome"]
-          Path("metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-          Path("failure_class.json").write_text(
-              json.dumps({"failure_class": failure_class, "exit_code": exit_code}, indent=2),
-              encoding="utf-8",
-          )
-          Path("research_outcome.json").write_text(json.dumps(research_outcome, indent=2), encoding="utf-8")
+          write_eval_node_artifacts(output_dir=Path("."), artifacts=artifacts)
           Path("run_meta.json").write_text(
               json.dumps(
                   {
@@ -140,6 +139,8 @@ jobs:
                       "group_id": "${{ steps.group.outputs.group_id }}",
                       "run_id": "gh_${{ github.run_id }}",
                       "correlation_id": "${{ steps.group.outputs.correlation_id }}",
+                      "node_kind": "${{ github.event.inputs.node_kind || 'experiment' }}",
+                      "baseline_ref": "${{ github.ref_name }}",
                       "parser": parser,
                   },
                   indent=2,

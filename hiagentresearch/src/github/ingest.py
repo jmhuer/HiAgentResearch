@@ -62,6 +62,12 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
         correlation_id=correlation_id,
     )
     registry.record_research_outcome(run_id=run_id, outcome=outcome)
+    if str(meta.get("node_kind", "")) == "baseline":
+        record_baseline_snapshot_from_metrics(
+            registry,
+            ref=str(meta.get("baseline_ref") or meta.get("branch") or "main"),
+            metrics=metrics,
+        )
     manifest_path = artifact_dir / "experiment_manifest.json"
     if manifest_path.exists():
         try:
@@ -74,7 +80,7 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
             manifest_path="experiment_manifest.json",
             manifest=manifest,
         )
-        _record_baseline_snapshot_from_manifest(registry, manifest)
+        record_baseline_snapshot_from_manifest(registry, manifest)
     registry.record_artifacts(
         run_id=run_id,
         artifact_paths=[
@@ -97,7 +103,7 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
     return 0
 
 
-def _record_baseline_snapshot_from_manifest(registry: Registry, manifest: dict) -> None:
+def record_baseline_snapshot_from_manifest(registry: Registry, manifest: dict) -> None:
     snapshot = manifest.get("lineage_baseline_snapshot")
     if not isinstance(snapshot, dict):
         return
@@ -115,10 +121,22 @@ def _record_baseline_snapshot_from_manifest(registry: Registry, manifest: dict) 
     existing = registry.baseline_snapshot()
     if existing and baseline_metrics_complete((existing.get("metrics") or {})):
         return
-    registry.record_baseline_snapshot(
-        ref=str(snapshot.get("ref") or "main"),
-        metrics=normalized,
-    )
+    record_baseline_snapshot_from_metrics(registry, ref=str(snapshot.get("ref") or "main"), metrics=normalized)
+
+
+def record_baseline_snapshot_from_metrics(registry: Registry, *, ref: str, metrics: dict) -> None:
+    normalized: dict[str, float] = {}
+    for name, value in metrics.items():
+        try:
+            normalized[str(name)] = float(value)
+        except (TypeError, ValueError):
+            return
+    if not baseline_metrics_complete(normalized):
+        return
+    existing = registry.baseline_snapshot()
+    if existing and baseline_metrics_complete((existing.get("metrics") or {})):
+        return
+    registry.record_baseline_snapshot(ref=ref, metrics=normalized)
 
 
 def _validate_artifact_contract(artifact_dir: Path, required: list[str]) -> str:

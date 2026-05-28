@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
-from hiagentresearch.src.github.ingest import ingest
+from hiagentresearch.src.github.ingest import ingest, record_baseline_snapshot_from_metrics
 from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
 from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.git.worktree import WorktreeManager
@@ -27,7 +27,6 @@ from hiagentresearch.src.paths import REPO_ROOT, is_linked_git_worktree, resolve
 from hiagentresearch.src.runtime.orchestrator import init_state, run_group
 from hiagentresearch.src.core.outcomes import (
     baseline_metrics_complete,
-    baseline_metrics_from_eval_payload,
     normalize_research_outcome_name,
     outcome_met_targets,
 )
@@ -418,39 +417,60 @@ def _manifest_summary(manifest: dict) -> str:
     return text or "experiment update"
 
 
-def _ensure_baseline_snapshot(registry: Registry, config: HiAgentResearchConfig) -> None:
+def _ensure_baseline_snapshot(
+    registry: Registry,
+    config: HiAgentResearchConfig,
+    *,
+    github: GitHubActionsService | None = None,
+    git: GitService | None = None,
+) -> None:
     existing = registry.baseline_snapshot()
     if existing and baseline_metrics_complete(existing.get("metrics") or {}):
         return
-    entrypoint = config.frozen_eval_path(REPO_ROOT)
-    if not entrypoint.exists():
-        print(f"warning: baseline eval entrypoint missing: {entrypoint}", file=sys.stderr)
-        return
     anchor_group = next((group.id for group in config.research_groups), "model_architecture")
-    proc = subprocess.run(
-        [sys.executable, str(entrypoint), "--quick", "--group-id", anchor_group],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+    ref = config.orchestration.baseline_ref
+    git_service = git or GitService(REPO_ROOT)
+    github_service = github or GitHubActionsService(REPO_ROOT)
+    head_sha = git_service.resolve_ref(ref)
+    known_run_ids = {
+        run.database_id
+        for run in github_service.list_runs(branch=ref)
+        if run.name == config.github.workflow_name
+    }
+    correlation_id = f"baseline_{head_sha[:12]}"
+    github_service.dispatch_workflow(
+        workflow_name=config.github.workflow_name,
+        ref=ref,
+        inputs={
+            "node_kind": "baseline",
+            "group_id": anchor_group,
+            "correlation_id": correlation_id,
+        },
     )
-    if proc.returncode not in {0, 2}:
-        print(
-            "warning: baseline quick eval failed "
-            f"(exit={proc.returncode}): {proc.stderr[-400:] if proc.stderr else proc.stdout[-400:]}",
-            file=sys.stderr,
+    run = github_service.find_new_run_for_head(
+        branch=ref,
+        head_sha=head_sha,
+        workflow_name=config.github.workflow_name,
+        known_run_ids=known_run_ids,
+        attempts=config.github.run_lookup_attempts,
+        sleep_sec=config.github.run_lookup_sleep_sec,
+    )
+    if not github_service.watch_run(run.database_id):
+        raise RuntimeError(f"baseline eval GitHub Actions run failed: {run.database_id}")
+    with tempfile.TemporaryDirectory(prefix="hiagentresearch-baseline-") as tmp:
+        download_dir = github_service.download_artifacts(
+            run_id=run.database_id,
+            target_dir=Path(tmp),
+            clean=True,
         )
-        return
-    try:
-        payload = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        print("warning: baseline quick eval did not return JSON", file=sys.stderr)
-        return
-    metrics = baseline_metrics_from_eval_payload(payload)
-    if not baseline_metrics_complete(metrics):
-        print(f"warning: baseline quick eval missing required metrics: {metrics}", file=sys.stderr)
-        return
-    registry.record_baseline_snapshot(ref=config.orchestration.baseline_ref, metrics=metrics)
+        artifact_dir = github_service.artifact_payload_dir(download_dir)
+        failure = json.loads((artifact_dir / "failure_class.json").read_text(encoding="utf-8"))
+        if failure.get("failure_class") != "none":
+            raise RuntimeError(f"baseline eval failed with {failure.get('failure_class')}: {run.database_id}")
+        metrics = json.loads((artifact_dir / "metrics.json").read_text(encoding="utf-8"))
+        record_baseline_snapshot_from_metrics(registry, ref=ref, metrics=metrics)
+    if not registry.baseline_snapshot():
+        raise RuntimeError(f"baseline eval did not produce complete baseline metrics: {run.database_id}")
 
 
 def run_loops_all(

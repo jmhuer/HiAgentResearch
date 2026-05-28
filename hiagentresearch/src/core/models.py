@@ -52,6 +52,7 @@ class ResearchGroup:
     validation_commands: list[AgentValidationCommand] = field(default_factory=list)
     generated_paths: list[str] = field(default_factory=list)
     frozen_paths: list[str] = field(default_factory=list)
+    guidance_files: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

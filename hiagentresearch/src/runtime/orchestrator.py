@@ -7,7 +7,6 @@ import shlex
 import subprocess
 import sys
 import uuid
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +15,6 @@ from hiagentresearch.src.lineage.resolve import BranchBootstrap
 from hiagentresearch.src.core.artifact_schema import (
     ArtifactParseError,
     classify_non_json_failure,
-    normalize_eval,
 )
 from hiagentresearch.src.core.config import load_config, resolve_group_id_for_branch
 from hiagentresearch.src.core.models import (
@@ -26,7 +24,7 @@ from hiagentresearch.src.core.models import (
     TransitionEvent,
     utc_now_iso,
 )
-from hiagentresearch.src.runtime.quality import classify_research_outcome
+from hiagentresearch.src.eval.node import normalize_eval_node, write_eval_node_artifacts, write_parse_failure_artifacts
 from hiagentresearch.src.registry.store import Registry
 
 
@@ -164,7 +162,7 @@ def _metadata_payload(
     payload: dict[str, Any] = {
         "run_id": run_id,
         "correlation_id": correlation_id,
-        "group": asdict(group),
+        "group": _agent_safe_group_payload(group),
         "group_id": group.id,
         "branch": group.branch,
         "status": status,
@@ -172,6 +170,26 @@ def _metadata_payload(
     }
     payload.update(extra)
     return payload
+
+
+def _agent_safe_group_payload(group: ResearchGroup) -> dict[str, Any]:
+    return {
+        "id": group.id,
+        "branch": group.branch,
+        "objective": group.objective,
+        "policy_mode": group.policy_mode,
+        "allowed_paths": list(group.allowed_paths),
+        "context_paths": list(group.context_paths),
+        "supporting_artifacts": list(group.supporting_artifacts),
+        "research_output_expectations": list(group.research_output_expectations),
+        "validation_commands": [
+            {"name": tool.name, "command": tool.command, "description": tool.description}
+            for tool in group.validation_commands
+        ],
+        "generated_paths": list(group.generated_paths),
+        "frozen_paths": list(group.frozen_paths),
+        "guidance_files": list(group.guidance_files),
+    }
 
 
 def _execution_blocked_outcome(*, reason: str, next_action: str) -> dict[str, Any]:
@@ -238,6 +256,107 @@ def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_
         return False, "experiment_plan.md is too short to qualify as pre-code planning"
 
     return True, ""
+
+
+FORBIDDEN_AGENT_SHELL_FRAGMENTS = (
+    "mnist/pipeline/train.py",
+    "mnist/eval/run_eval.py",
+    ".hiagentresearch/eval/run_phase1_eval.py",
+    "run_phase1_eval.py",
+)
+
+
+def _validate_agent_tool_boundary(*, run_dir: Path) -> tuple[bool, str]:
+    stream_path = run_dir / "agent_stream.jsonl"
+    if not stream_path.exists():
+        return True, ""
+    for line_number, line in enumerate(stream_path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        raw = event.get("raw") if isinstance(event, dict) else None
+        if not isinstance(raw, dict) or raw.get("type") != "tool_call" or raw.get("name") != "shell":
+            continue
+        args = raw.get("args")
+        command = str(args.get("command", "")) if isinstance(args, dict) else ""
+        for fragment in FORBIDDEN_AGENT_SHELL_FRAGMENTS:
+            if fragment in command:
+                return (
+                    False,
+                    "agent shell command invoked orchestrator-owned training/eval "
+                    f"({fragment}) at agent_stream.jsonl:{line_number}: {command}",
+                )
+    return True, ""
+
+
+def _record_invalid_cycle(
+    *,
+    registry: Registry,
+    run_dir: Path,
+    metadata_path: Path,
+    actions_path: Path,
+    run_id: str,
+    group: ResearchGroup,
+    correlation_id: str,
+    error: str,
+    transition_reason: str,
+    checkout_root: Path,
+) -> None:
+    research_outcome = _execution_blocked_outcome(reason=error, next_action="repair")
+    _write_json(run_dir / "research_outcome.json", research_outcome)
+    _write_json(
+        run_dir / "failure_class.json",
+        {"failure_class": "invalid_cycle", "exit_code": 1, "error": error},
+    )
+    _write_json(
+        metadata_path,
+        _metadata_payload(
+            run_id=run_id,
+            group=group,
+            status="error",
+            failure_class="invalid_cycle",
+            correlation_id=correlation_id,
+            error=error,
+            agent_backend="cursor_sdk",
+        ),
+    )
+    _append_jsonl(actions_path, {"step": transition_reason, "error": error})
+    registry.record_run(
+        run_id=run_id,
+        group_id=group.id,
+        branch=group.branch,
+        status="error",
+        failure_class="invalid_cycle",
+        metrics={},
+        correlation_id=correlation_id,
+    )
+    registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
+    registry.record_transition(
+        TransitionEvent(
+            run_id=run_id,
+            group_id=group.id,
+            from_state="running_agent_cycle",
+            to_state="blocked",
+            reason=transition_reason,
+            actor="orchestrator",
+        )
+    )
+    print(
+        json.dumps(
+            {
+                "ok": False,
+                "run_id": run_id,
+                "status": "error",
+                "failure_class": "invalid_cycle",
+                "error": error,
+                "run_dir": _path_relative_to(run_dir, checkout_root),
+            },
+            indent=2,
+        )
+    )
 
 
 def _apply_agent_intent_update(*, run_dir: Path, prior: IntentPacket) -> IntentPacket:
@@ -446,6 +565,23 @@ def run_group(
         )
         return 1
 
+    valid_tools, tool_error = _validate_agent_tool_boundary(run_dir=run_dir)
+    _append_jsonl(actions_path, {"step": "agent_tool_boundary_check", "valid": valid_tools})
+    if not valid_tools:
+        _record_invalid_cycle(
+            registry=registry,
+            run_dir=run_dir,
+            metadata_path=metadata_path,
+            actions_path=actions_path,
+            run_id=run_id,
+            group=group,
+            correlation_id=correlation_id,
+            error=tool_error,
+            transition_reason="agent_tool_boundary_failed",
+            checkout_root=checkout_root,
+        )
+        return 1
+
     _append_jsonl(actions_path, {"step": "validate_plan_before_eval"})
     valid_contract, contract_error = _validate_agent_intent_contract(run_dir=run_dir, group=group, run_id=run_id)
     if not valid_contract:
@@ -584,47 +720,29 @@ def run_group(
         "reason": "evaluation did not complete",
     }
     try:
-        normalized = normalize_eval(
+        eval_config = config.group_by_id(group.id).evaluation or config.evaluation
+        artifacts = normalize_eval_node(
             parser=group.evaluation.parser,
             stdout=proc.stdout,
             stderr=proc.stderr,
             exit_code=proc.returncode,
+            eval_config=eval_config,
         )
-        failure_class = normalized.failure_class
-        passed = normalized.passed
-        metrics = normalized.to_metrics()
-        if normalized.raw.get("duration_sec") is not None:
-            metrics["duration_sec"] = float(normalized.raw["duration_sec"])
-        parsed = normalized.raw
-        eval_config = config.group_by_id(group.id).evaluation or config.evaluation
-        outcome = classify_research_outcome(
-            execution_failure_class=failure_class,
-            eval_passed=passed,
-            metrics=metrics,
-            targets=eval_config.targets,
-        )
-        research_outcome = outcome.to_dict()
-        parsed["research_outcome"] = research_outcome["research_outcome"]
-        _write_json(run_dir / "metrics.json", metrics)
-        _write_json(
-            run_dir / "failure_class.json",
-            {"failure_class": failure_class, "exit_code": proc.returncode},
-        )
-        _write_json(run_dir / "research_outcome.json", research_outcome)
+        failure_class = artifacts.failure_class
+        passed = artifacts.passed
+        metrics = artifacts.metrics
+        parsed = artifacts.parsed
+        research_outcome = artifacts.research_outcome
+        write_eval_node_artifacts(output_dir=run_dir, artifacts=artifacts)
         registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
-        _write_json(run_dir / "parsed_eval.json", parsed)
     except ArtifactParseError as exc:
         failure_class = classify_non_json_failure(proc.stderr, proc.returncode)
-        research_outcome = {
-            "research_outcome": "execution_blocked",
-            "next_action": "repair" if failure_class == "code_failure" else "continue",
-            "reason": str(exc),
-        }
-        _write_json(
-            run_dir / "failure_class.json",
-            {"failure_class": failure_class, "exit_code": proc.returncode, "error": str(exc)},
+        research_outcome = write_parse_failure_artifacts(
+            output_dir=run_dir,
+            failure_class=failure_class,
+            exit_code=proc.returncode,
+            error=str(exc),
         )
-        _write_json(run_dir / "research_outcome.json", research_outcome)
         registry.record_research_outcome(run_id=run_id, outcome=research_outcome)
         _append_jsonl(actions_path, {"step": "parse_failure", "error": str(exc)})
 

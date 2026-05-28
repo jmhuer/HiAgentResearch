@@ -65,9 +65,6 @@ agent_tools:
     - name: kwta_unit_tests
       command: "python -m pytest -q mnist/pipeline/test_kwta.py"
       description: "Fast code correctness feedback for the model support code."
-    - name: quick_train_eval
-      command: "timeout 180s env CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python mnist/pipeline/train.py --quick --device cpu --output /tmp/hiagentresearch_mnist_train_metrics.json && timeout 60s env CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python mnist/eval/run_eval.py --quick --device cpu --metrics /tmp/hiagentresearch_mnist_train_metrics.json"
-      description: "Optional CPU-only quick feedback with bounded runtime; GitHub still runs the frozen final eval."
 agent_contract:
   guidance_files:
     - hiagentresearch/AGENTS.md

@@ -282,6 +282,7 @@ class HiAgentResearchConfig(BaseModel):
             ],
             generated_paths=list(self.generated_paths),
             frozen_paths=list(self.all_frozen_paths()),
+            guidance_files=list(self.agent_contract.guidance_files),
         )
 
     def research_groups_by_id(self) -> dict[str, ResearchGroup]:

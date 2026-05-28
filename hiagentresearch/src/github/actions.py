@@ -18,6 +18,7 @@ class GitHubRun:
     head_sha: str
     name: str
     status: str
+    created_at: str = ""
 
 
 class GitHubActionsService:
@@ -50,7 +51,7 @@ class GitHubActionsService:
                 "--limit",
                 str(limit),
                 "--json",
-                "databaseId,headSha,name,status",
+                "databaseId,headSha,name,status,createdAt",
             ]
         )
         payload = json.loads(result)
@@ -62,9 +63,39 @@ class GitHubActionsService:
                 head_sha=str(item.get("headSha", "")),
                 name=str(item.get("name", "")),
                 status=str(item.get("status", "")),
+                created_at=str(item.get("createdAt", "")),
             )
             for item in payload
         ]
+
+    def dispatch_workflow(self, *, workflow_name: str, ref: str, inputs: dict[str, str]) -> None:
+        args = ["workflow", "run", workflow_name, "--ref", ref]
+        for key, value in inputs.items():
+            args.extend(["-f", f"{key}={value}"])
+        self._run(args)
+
+    def find_new_run_for_head(
+        self,
+        *,
+        branch: str,
+        head_sha: str,
+        workflow_name: str,
+        known_run_ids: set[str],
+        attempts: int,
+        sleep_sec: float,
+    ) -> GitHubRun:
+        for _ in range(attempts):
+            candidates = [
+                run
+                for run in self.list_runs(branch=branch)
+                if run.head_sha == head_sha
+                and run.name == workflow_name
+                and run.database_id not in known_run_ids
+            ]
+            if candidates:
+                return candidates[0]
+            time.sleep(sleep_sec)
+        raise GitHubActionsError(f"no new GitHub Actions run found for {head_sha} on {branch}")
 
     def watch_run(self, run_id: str) -> bool:
         proc = subprocess.run(

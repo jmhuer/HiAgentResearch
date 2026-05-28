@@ -15,7 +15,7 @@ def build_phase1_prompt(
     run_intent_json = f".hiagentresearch/runs/{run_id}/experiment_intent.json"
     core_paths = _core_allowed_paths(group)
 
-    guidance_text = _bullets(["hiagentresearch/AGENTS.md", "hiagentresearch/skills/phase1-experiment-cycle/SKILL.md"])
+    guidance_text = _bullets(group.guidance_files)
     context_text = _bullets(group.context_paths)
     core_paths_text = _bullets(core_paths)
     generated_paths_text = _bullets(group.generated_paths)
@@ -69,7 +69,7 @@ def build_phase1_prompt(
         f"{supporting_text}\n\n"
         "Configured generated paths (may be created while testing, never commit as source changes):\n"
         f"{generated_paths_text}\n\n"
-        "Optional validation commands for your own feedback (not final authority):\n"
+        "Agent tools allowed for your own feedback (not final authority):\n"
         f"{validation_commands_text}\n\n"
         "Research output expectations:\n"
         f"{expectations_text}\n\n"
@@ -78,8 +78,9 @@ def build_phase1_prompt(
         "- Do not edit frozen eval entrypoints or runtime config.\n"
         "- Do not delete previous research entries.\n"
         "- Keep edits minimal, reversible, and syntactically valid.\n"
-        "- You may run configured validation commands for feedback; keep them quick/CPU bounded and do not launch long GPU training.\n"
-        "- GitHub final eval remains authoritative.\n"
+        "- You may run only the listed agent tools for feedback, exactly as written.\n"
+        "- Do not run training or full eval commands yourself; never invoke mnist/pipeline/train.py, mnist/eval/run_eval.py, or .hiagentresearch/eval/run_phase1_eval.py.\n"
+        "- The orchestrator and GitHub eval nodes are responsible for metric-producing training/eval.\n"
         "- If you add or change project dependencies, install the configured requirements file before validation.\n"
         "- If previous output did not improve the configured baseline, treat that as evidence and continue or pivot using the intent packet.\n"
         "- Only revert when the current branch state is a worse basis for future research.\n"

@@ -5,6 +5,7 @@ __pycache__/
 
 # Runtime state and observability outputs
 .hiagentresearch/runs/
+.hiagentresearch/failed-runs/
 .hiagentresearch/state/evals.db
 .hiagentresearch/dashboard/
 .hiagentresearch/dashboard-preview/

@@ -31,6 +31,8 @@ Produce a real, hypothesis-driven experiment with planning artifacts before code
 - Do not create branch-memory Python files for hypotheses or markers.
 - Add project experiment dependencies to the configured requirements file when needed.
 - Keep edits small, reversible, and syntax-safe.
+- Run only configured `agent_tools` commands for feedback; do not run training or full eval commands directly.
+- Metric-producing training/eval is owned by the orchestrator and GitHub eval nodes.
 - Treat metric regressions as research evidence, not execution failures.
 - Keep retrying through repair, pivot, reset, or continue decisions until configured output expectations are met or the group is explicitly blocked.
 - Only choose revert when the current branch state is worse for future research than an auditable rollback.

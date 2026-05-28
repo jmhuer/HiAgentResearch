@@ -37,3 +37,35 @@ def test_github_actions_watch_returns_false_on_failed_workflow(monkeypatch, tmp_
     service = GitHubActionsService(tmp_path)
 
     assert service.watch_run("123") is False
+
+
+def test_github_actions_dispatches_workflow_with_inputs(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    service = GitHubActionsService(tmp_path)
+
+    service.dispatch_workflow(
+        workflow_name="hiagentresearch-research-eval",
+        ref="main",
+        inputs={"node_kind": "baseline", "group_id": "model_architecture"},
+    )
+
+    assert calls == [
+        [
+            "gh",
+            "workflow",
+            "run",
+            "hiagentresearch-research-eval",
+            "--ref",
+            "main",
+            "-f",
+            "node_kind=baseline",
+            "-f",
+            "group_id=model_architecture",
+        ]
+    ]

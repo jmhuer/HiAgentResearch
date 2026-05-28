@@ -4,6 +4,7 @@ from pathlib import Path
 from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.github.actions import GitHubRun
 from hiagentresearch.src.runtime.loop_controller import (
+    _ensure_baseline_snapshot,
     _extract_last_json_object,
     _preserve_parallel_failure_artifacts,
     _run_group_capture,
@@ -220,3 +221,68 @@ def test_preserve_parallel_failure_artifacts_copies_worktree_runs(monkeypatch, t
     ] == "sdk_run_123"
     assert (copied / "worktree_status.txt").exists()
     assert (copied / "worktree_diff.patch").exists()
+
+
+def test_ensure_baseline_snapshot_uses_github_eval_node(tmp_path) -> None:
+    registry = Registry(tmp_path / ".hiagentresearch" / "state")
+    registry.init()
+
+    class FakeGit:
+        def resolve_ref(self, ref: str) -> str:
+            assert ref == "main"
+            return "abcdef1234567890"
+
+    class FakeGitHub:
+        def __init__(self) -> None:
+            self.dispatched = {}
+
+        def list_runs(self, *, branch: str, limit: int = 20):
+            assert branch == "main"
+            return [GitHubRun(database_id="old", head_sha="abcdef1234567890", name="hiagentresearch-research-eval", status="completed")]
+
+        def dispatch_workflow(self, *, workflow_name: str, ref: str, inputs: dict[str, str]) -> None:
+            self.dispatched = {"workflow_name": workflow_name, "ref": ref, "inputs": inputs}
+
+        def find_new_run_for_head(self, **kwargs):
+            assert kwargs["known_run_ids"] == {"old"}
+            return GitHubRun(
+                database_id="123",
+                head_sha=kwargs["head_sha"],
+                name=kwargs["workflow_name"],
+                status="completed",
+            )
+
+        def watch_run(self, run_id: str) -> bool:
+            assert run_id == "123"
+            return True
+
+        def download_artifacts(self, *, run_id: str, target_dir: Path, clean: bool = True) -> Path:
+            artifact_dir = target_dir / "hiagentresearch-123"
+            artifact_dir.mkdir(parents=True)
+            (artifact_dir / "metrics.json").write_text(
+                json.dumps({"accuracy": 0.9, "latency_ms": 5.0}),
+                encoding="utf-8",
+            )
+            (artifact_dir / "failure_class.json").write_text(
+                json.dumps({"failure_class": "none"}),
+                encoding="utf-8",
+            )
+            return target_dir
+
+        def artifact_payload_dir(self, download_dir: Path) -> Path:
+            return download_dir / "hiagentresearch-123"
+
+    fake_github = FakeGitHub()
+
+    _ensure_baseline_snapshot(
+        registry,
+        load_config(Path("config.yaml")),
+        github=fake_github,
+        git=FakeGit(),
+    )
+
+    snapshot = registry.baseline_snapshot()
+    assert snapshot["ref"] == "main"
+    assert snapshot["metrics"]["accuracy"] == 0.9
+    assert fake_github.dispatched["inputs"]["node_kind"] == "baseline"
+    assert fake_github.dispatched["inputs"]["correlation_id"] == "baseline_abcdef123456"

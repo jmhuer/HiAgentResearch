@@ -4,8 +4,10 @@ from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.core.models import IntentPacket
 from hiagentresearch.src.runtime.orchestrator import (
     _apply_agent_intent_update,
+    _metadata_payload,
     _is_generated_path,
     _validate_agent_intent_contract,
+    _validate_agent_tool_boundary,
 )
 
 
@@ -87,3 +89,55 @@ def test_generated_paths_match_files_and_directories() -> None:
     assert _is_generated_path("mnist/data/", generated) is True
     assert _is_generated_path("mnist/data/MNIST/raw/file", generated) is True
     assert _is_generated_path("mnist/pipeline/model.py", generated) is False
+
+
+def test_agent_tool_boundary_rejects_full_training_commands(tmp_path) -> None:
+    run_dir = tmp_path / "run_abc"
+    run_dir.mkdir()
+    (run_dir / "agent_stream.jsonl").write_text(
+        """
+{"raw":{"type":"tool_call","name":"shell","args":{"command":"python mnist/pipeline/train.py --quick"}}}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    valid, error = _validate_agent_tool_boundary(run_dir=run_dir)
+
+    assert valid is False
+    assert "orchestrator-owned training/eval" in error
+    assert "mnist/pipeline/train.py" in error
+
+
+def test_agent_tool_boundary_allows_unit_test_tools(tmp_path) -> None:
+    run_dir = tmp_path / "run_abc"
+    run_dir.mkdir()
+    (run_dir / "agent_stream.jsonl").write_text(
+        """
+{"raw":{"type":"tool_call","name":"shell","args":{"command":"python -m pytest -q mnist/pipeline/test_kwta.py"}}}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    valid, error = _validate_agent_tool_boundary(run_dir=run_dir)
+
+    assert valid is True
+    assert error == ""
+
+
+def test_metadata_payload_redacts_eval_command() -> None:
+    config = load_config(Path("config.yaml"))
+    group = config.research_groups_by_id()["model_architecture"]
+
+    payload = _metadata_payload(
+        run_id="run_abc",
+        group=group,
+        status="finished",
+        failure_class="none",
+        correlation_id="run_abc",
+    )
+
+    assert "evaluation" not in payload["group"]
+    assert "command" not in payload["group"]
+    assert payload["group"]["validation_commands"][0]["name"] == "kwta_unit_tests"

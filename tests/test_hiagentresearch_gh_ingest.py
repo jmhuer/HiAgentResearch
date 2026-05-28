@@ -82,3 +82,21 @@ def test_ingest_rejects_malformed_metrics(tmp_path, monkeypatch) -> None:
     _write_required_artifacts(artifact_dir, metrics="{not json")
 
     assert gh_ingest.ingest("gh_1", "model_architecture", "research/model-architecture", artifact_dir) == 1
+
+
+def test_ingest_records_baseline_node_metrics(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(gh_ingest, "STATE_DIR", tmp_path / "state")
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    _write_required_artifacts(artifact_dir, metrics='{"accuracy": 0.82, "latency_ms": 12.0}')
+    meta_path = artifact_dir / "run_meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta.update({"node_kind": "baseline", "baseline_ref": "main"})
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    assert gh_ingest.ingest("gh_1", "model_architecture", "main", artifact_dir) == 0
+
+    registry = gh_ingest.Registry(tmp_path / "state")
+    registry.init()
+    assert registry.baseline_snapshot()["ref"] == "main"
+    assert registry.baseline_snapshot()["metrics"]["accuracy"] == 0.82

@@ -18,7 +18,9 @@ This project uses a Cursor-first phase-1 research loop with a thin Python contro
 - Keep code edits inside configured `allowed_paths` and run-local observability artifacts.
 - If an experiment needs a project dependency, add it to the configured project requirements file instead of core runtime dependencies.
 - Prefer minimal changes with explicit hypotheses and rollback plan.
-- Do not claim successful research without evaluation outputs.
+- Agents may run only configured `agent_tools` commands for quick feedback.
+- Do not run training or metric-producing eval directly. The orchestrator and GitHub eval nodes own `mnist/pipeline/train.py`, `mnist/eval/run_eval.py`, and `.hiagentresearch/eval/run_phase1_eval.py`.
+- Do not claim successful research without orchestrator or GitHub evaluation outputs.
 - If a valid experiment does not improve the configured baseline, record the outcome as evidence and continue through the intent packet (`repair`, `pivot`, `reset`, or `continue`) until output quality matches expectations or the group is explicitly blocked.
 - Only revert when the branch state itself is a worse basis for future research; prefer auditable corrective commits over hidden history rewrites.
 - Fix boundary problems canonically through config, eval adapters, registry invariants, or operator commands; do not add ad-hoc guardrails that weaken the architecture.
