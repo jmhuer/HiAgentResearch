@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -258,12 +259,36 @@ def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_
     return True, ""
 
 
-FORBIDDEN_AGENT_SHELL_FRAGMENTS = (
-    "mnist/pipeline/train.py",
-    "mnist/eval/run_eval.py",
-    ".hiagentresearch/eval/run_phase1_eval.py",
-    "run_phase1_eval.py",
+FORBIDDEN_AGENT_SHELL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"(?:^|[;&|]\s*)(?:python3?|/usr/bin/python3?)\s+[^\n]*mnist/pipeline/train\.py",
+            re.IGNORECASE,
+        ),
+        "mnist/pipeline/train.py",
+    ),
+    (
+        re.compile(
+            r"(?:^|[;&|]\s*)(?:python3?|/usr/bin/python3?)\s+[^\n]*mnist/eval/run_eval\.py",
+            re.IGNORECASE,
+        ),
+        "mnist/eval/run_eval.py",
+    ),
+    (
+        re.compile(
+            r"(?:^|[;&|]\s*)(?:python3?|/usr/bin/python3?)\s+[^\n]*(?:\.hiagentresearch/eval/)?run_phase1_eval\.py",
+            re.IGNORECASE,
+        ),
+        "run_phase1_eval.py",
+    ),
 )
+
+
+def _shell_command_invokes_forbidden_eval(command: str) -> str:
+    for pattern, label in FORBIDDEN_AGENT_SHELL_PATTERNS:
+        if pattern.search(command):
+            return label
+    return ""
 
 
 def _validate_agent_tool_boundary(*, run_dir: Path) -> tuple[bool, str]:
@@ -282,13 +307,13 @@ def _validate_agent_tool_boundary(*, run_dir: Path) -> tuple[bool, str]:
             continue
         args = raw.get("args")
         command = str(args.get("command", "")) if isinstance(args, dict) else ""
-        for fragment in FORBIDDEN_AGENT_SHELL_FRAGMENTS:
-            if fragment in command:
-                return (
-                    False,
-                    "agent shell command invoked orchestrator-owned training/eval "
-                    f"({fragment}) at agent_stream.jsonl:{line_number}: {command}",
-                )
+        forbidden = _shell_command_invokes_forbidden_eval(command)
+        if forbidden:
+            return (
+                False,
+                "agent shell command invoked orchestrator-owned training/eval "
+                f"({forbidden}) at agent_stream.jsonl:{line_number}: {command}",
+            )
     return True, ""
 
 

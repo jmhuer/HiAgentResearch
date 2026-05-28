@@ -109,6 +109,23 @@ def test_agent_tool_boundary_rejects_full_training_commands(tmp_path) -> None:
     assert "mnist/pipeline/train.py" in error
 
 
+def test_agent_tool_boundary_allows_git_inspection_of_core_paths(tmp_path) -> None:
+    run_dir = tmp_path / "run_abc"
+    run_dir.mkdir()
+    (run_dir / "agent_stream.jsonl").write_text(
+        """
+{"raw":{"type":"tool_call","name":"shell","args":{"command":"cd /wt && git log --oneline -5 && git diff main -- mnist/pipeline/train.py 2>/dev/null | head -80"}}}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    valid, error = _validate_agent_tool_boundary(run_dir=run_dir)
+
+    assert valid is True
+    assert error == ""
+
+
 def test_agent_tool_boundary_allows_unit_test_tools(tmp_path) -> None:
     run_dir = tmp_path / "run_abc"
     run_dir.mkdir()
