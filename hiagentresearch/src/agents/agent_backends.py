@@ -242,7 +242,12 @@ def _sdk_message_payload(message: Any) -> dict[str, Any]:
 def _message_text(message: Any) -> str:
     texts: list[str] = []
     sdk_message = getattr(message, "message", None)
-    content = getattr(sdk_message, "content", None)
+    if isinstance(message, dict):
+        direct = message.get("text", "")
+        if direct:
+            texts.append(str(direct))
+        sdk_message = message.get("message", sdk_message)
+    content = sdk_message.get("content") if isinstance(sdk_message, dict) else getattr(sdk_message, "content", None)
     if isinstance(content, list):
         for block in content:
             if getattr(block, "type", "") == "text":

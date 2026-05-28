@@ -41,6 +41,10 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
             block = types.SimpleNamespace(type="text", text="streamed assistant text")
             message = types.SimpleNamespace(content=[block])
             yield types.SimpleNamespace(type="assistant", message=message)
+            yield {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "dict assistant text"}]},
+            }
 
         def wait(self):
             return types.SimpleNamespace(
@@ -106,6 +110,7 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
         run_dir / "agent_prompt.txt"
     ).read_text(encoding="utf-8")
     assert "streamed assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
+    assert "dict assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
     stream_events = [
         json.loads(line) for line in (run_dir / "agent_stream.jsonl").read_text(encoding="utf-8").splitlines()
     ]
