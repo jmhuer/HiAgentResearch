@@ -183,6 +183,7 @@ def run_loops(
             local_result=local,
             bootstrap=bootstrap,
             checkout_root=git_root,
+            baseline_snapshot=registry.baseline_snapshot(),
         )
         registry.record_experiment_manifest(
             run_id=local_run_id,
@@ -331,6 +332,7 @@ def _write_experiment_manifest(
     local_result: dict,
     bootstrap: BranchBootstrap,
     checkout_root: Path,
+    baseline_snapshot: dict | None = None,
 ) -> tuple[str, dict]:
     run_dir = resolve_runs_dir(checkout_root) / local_run_id
     intent = _read_json(run_dir / "experiment_intent.json")
@@ -357,6 +359,12 @@ def _write_experiment_manifest(
         "lineage_anchor_policy": bootstrap.anchor_policy,
         "lineage_parent_anchor_step": bootstrap.parent_anchor_step,
     }
+    baseline_metrics = ((baseline_snapshot or {}).get("metrics") or {})
+    if baseline_metrics_complete(baseline_metrics):
+        manifest["lineage_baseline_snapshot"] = {
+            "ref": str((baseline_snapshot or {}).get("ref") or "main"),
+            "metrics": {str(name): float(value) for name, value in baseline_metrics.items()},
+        }
     path = EXPERIMENT_MANIFEST_ROOT / group_id / f"{local_run_id}.json"
     absolute_path = checkout_root / path
     absolute_path.parent.mkdir(parents=True, exist_ok=True)

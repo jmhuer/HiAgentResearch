@@ -35,6 +35,10 @@ def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 
                 "hypothesis": "Try a clean dashboard-ready experiment.",
                 "target_files": ["mnist/pipeline/model.py"],
                 "planned_code_changes": ["Edit model.py"],
+                "lineage_baseline_snapshot": {
+                    "ref": "main",
+                    "metrics": {"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
+                },
             }
         ),
         encoding="utf-8",
@@ -61,6 +65,7 @@ def test_ingest_records_artifacts_and_is_idempotent(tmp_path, monkeypatch) -> No
     assert registry.metrics_for_run("gh_1") == {"tests_passed": 1.0}
     assert registry.outcome_for_run("gh_1")["research_outcome"] == "met_targets"
     assert registry.experiment_for_run("gh_1")["hypothesis_id"] == "h1"
+    assert registry.baseline_snapshot()["metrics"]["accuracy"] == 0.81
     assert {artifact["artifact_path"] for artifact in registry.artifacts_for_run("gh_1")} >= {
         "metrics.json",
         "failure_class.json",

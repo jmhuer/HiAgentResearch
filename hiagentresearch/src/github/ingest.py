@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from hiagentresearch.src.core.config import load_config
+from hiagentresearch.src.core.outcomes import baseline_metrics_complete
 from hiagentresearch.src.registry.store import Registry
 
 
@@ -73,6 +74,7 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
             manifest_path="experiment_manifest.json",
             manifest=manifest,
         )
+        _record_baseline_snapshot_from_manifest(registry, manifest)
     registry.record_artifacts(
         run_id=run_id,
         artifact_paths=[
@@ -93,6 +95,30 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
         )
     )
     return 0
+
+
+def _record_baseline_snapshot_from_manifest(registry: Registry, manifest: dict) -> None:
+    snapshot = manifest.get("lineage_baseline_snapshot")
+    if not isinstance(snapshot, dict):
+        return
+    metrics = snapshot.get("metrics")
+    if not isinstance(metrics, dict):
+        return
+    normalized: dict[str, float] = {}
+    for name, value in metrics.items():
+        try:
+            normalized[str(name)] = float(value)
+        except (TypeError, ValueError):
+            return
+    if not baseline_metrics_complete(normalized):
+        return
+    existing = registry.baseline_snapshot()
+    if existing and baseline_metrics_complete((existing.get("metrics") or {})):
+        return
+    registry.record_baseline_snapshot(
+        ref=str(snapshot.get("ref") or "main"),
+        metrics=normalized,
+    )
 
 
 def _validate_artifact_contract(artifact_dir: Path, required: list[str]) -> str:

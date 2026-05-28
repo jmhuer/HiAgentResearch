@@ -151,6 +151,9 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
         "hiagentresearch.src.runtime.loop_controller._install_dependency_files",
         lambda config: installed.setdefault("called", True),
     )
+    registry = Registry(tmp_path / ".hiagentresearch" / "state")
+    registry.init()
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.93, "latency_ms": 5.0, "duration_sec": 1.0})
     summary = run_loops(
         group_id="model_architecture",
         branch="research/model-architecture",
@@ -173,9 +176,13 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
     ).exists()
     assert ".hiagentresearch/experiments/model_architecture/run_test.json" in git.staged_paths
     assert git.subject == "Phase 1, loop 1: Replace one model layer with a smaller equivalent"
-    registry = Registry(tmp_path / ".hiagentresearch" / "state")
-    registry.init()
     assert registry.experiment_for_run("run_test")["hypothesis_id"] == "model_architecture-h1"
+    manifest = json.loads(
+        (
+            tmp_path / ".hiagentresearch" / "experiments" / "model_architecture" / "run_test.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert manifest["lineage_baseline_snapshot"]["metrics"]["accuracy"] == 0.93
     assert git.committed is True
     assert git.pushed is True
     assert "HiAgentResearch-Run-ID: run_test" in git.body

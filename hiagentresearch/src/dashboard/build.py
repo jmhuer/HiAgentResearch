@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
+from hiagentresearch.src.core.outcomes import baseline_metrics_complete
 from hiagentresearch.src.dashboard.trajectory import (
     assign_trajectory_positions,
     baseline_metric_points,
@@ -66,9 +67,11 @@ def build_from_registry(
 
     registry = Registry(state_dir.resolve())
     registry.init()
-    if source_label.startswith("github_artifacts") or os.environ.get("CI"):
+    should_compute_baseline = not source_label.startswith("github_artifacts")
+    if should_compute_baseline and (source_label.startswith("github_artifacts") or os.environ.get("CI")):
         _install_dependency_files(loaded)
-    _ensure_baseline_snapshot(registry, loaded)
+    if should_compute_baseline:
+        _ensure_baseline_snapshot(registry, loaded)
     snapshot = registry.dashboard_snapshot()
     metric_targets = _metric_targets(loaded)
     snapshot["metric_targets"] = metric_targets
@@ -657,6 +660,7 @@ def _ingest_artifact_dir(*, registry: Registry, config: HiAgentResearchConfig, a
             manifest_path="experiment_manifest.json",
             manifest=manifest,
         )
+        _record_baseline_snapshot_from_manifest(registry, manifest)
     registry.record_artifacts(
         run_id=run_id,
         artifact_paths=[artifact_dir / name for name in config.artifact_contract.required + config.artifact_contract.optional],
@@ -670,3 +674,27 @@ def _sha256(payload: bytes) -> str:
     import hashlib
 
     return hashlib.sha256(payload).hexdigest()
+
+
+def _record_baseline_snapshot_from_manifest(registry: Registry, manifest: dict[str, Any]) -> None:
+    snapshot = manifest.get("lineage_baseline_snapshot")
+    if not isinstance(snapshot, dict):
+        return
+    metrics = snapshot.get("metrics")
+    if not isinstance(metrics, dict):
+        return
+    normalized: dict[str, float] = {}
+    for name, value in metrics.items():
+        try:
+            normalized[str(name)] = float(value)
+        except (TypeError, ValueError):
+            return
+    if not baseline_metrics_complete(normalized):
+        return
+    existing = registry.baseline_snapshot()
+    if existing and baseline_metrics_complete((existing.get("metrics") or {})):
+        return
+    registry.record_baseline_snapshot(
+        ref=str(snapshot.get("ref") or "main"),
+        metrics=normalized,
+    )

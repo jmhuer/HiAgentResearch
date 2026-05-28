@@ -219,6 +219,7 @@ def test_dashboard_build_from_artifacts(tmp_path) -> None:
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     assert snapshot["runs"][0]["run_id"] == "gh_123"
     assert snapshot["experiments"][0]["hypothesis_id"] == "h1"
+    assert snapshot["lineage_topology"]["baseline_snapshot"]["metrics"]["accuracy"] == 0.81
     assert summary["metric_targets"]
 
 
@@ -294,4 +295,8 @@ def _manifest() -> dict:
         "hypothesis": "Try a dashboard-ready model change.",
         "target_files": ["mnist/pipeline/model.py"],
         "planned_code_changes": ["Edit model.py"],
+        "lineage_baseline_snapshot": {
+            "ref": "main",
+            "metrics": {"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
+        },
     }
