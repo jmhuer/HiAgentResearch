@@ -257,6 +257,27 @@ def _message_text(message: Any) -> str:
     direct = getattr(message, "text", "")
     if direct:
         texts.append(str(direct))
+    if texts:
+        return "".join(texts)
+    return _message_text_from_jsonable(_jsonable(message))
+
+
+def _message_text_from_jsonable(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    direct = payload.get("text")
+    if direct:
+        return str(direct)
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if not isinstance(content, list):
+        return ""
+    texts: list[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            texts.append(str(block.get("text", "")))
     return "".join(texts)
 
 

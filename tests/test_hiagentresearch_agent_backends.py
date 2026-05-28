@@ -34,6 +34,10 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
         def __init__(self, *, cwd: str) -> None:
             self.cwd = cwd
 
+    class FakeDumpMessage:
+        def model_dump(self):
+            return {"type": "assistant", "message": {"content": [{"type": "text", "text": "dump text"}]}}
+
     class FakeRun:
         id = "sdk_run_123"
 
@@ -45,6 +49,7 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
                 "type": "assistant",
                 "message": {"content": [{"type": "text", "text": "dict assistant text"}]},
             }
+            yield FakeDumpMessage()
 
         def wait(self):
             return types.SimpleNamespace(
@@ -111,6 +116,7 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
     ).read_text(encoding="utf-8")
     assert "streamed assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
     assert "dict assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
+    assert "dump text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
     stream_events = [
         json.loads(line) for line in (run_dir / "agent_stream.jsonl").read_text(encoding="utf-8").splitlines()
     ]
