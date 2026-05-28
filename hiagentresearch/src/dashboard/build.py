@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
-from hiagentresearch.src.dashboard.trajectory import assign_trajectory_positions, baseline_metric_points
+from hiagentresearch.src.dashboard.trajectory import (
+    assign_trajectory_positions,
+    baseline_metric_points,
+    parent_anchor_loop_index,
+)
 from hiagentresearch.src.registry.store import Registry
 from hiagentresearch.src.runtime.loop_controller import _ensure_baseline_snapshot, _install_dependency_files
 
@@ -66,7 +70,10 @@ def build_from_registry(
     metric_targets = _metric_targets(loaded)
     snapshot["metric_targets"] = metric_targets
     topology = _lineage_topology(loaded, registry=registry)
-    topology["inherit_anchors"] = _inherit_anchors_from_experiments(snapshot.get("experiments", []))
+    topology["inherit_anchors"] = _inherit_anchors_from_experiments(
+        snapshot.get("experiments", []),
+        snapshot.get("runs", []),
+    )
     snapshot["lineage_topology"] = topology
     snapshot["metrics"] = _enrich_metrics_for_dashboard(
         snapshot["metrics"],
@@ -450,27 +457,37 @@ def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | Non
     }
 
 
-def _inherit_anchors_from_experiments(experiments: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _inherit_anchors_from_experiments(
+    experiments: list[dict[str, Any]],
+    runs: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
     anchors: dict[str, dict[str, Any]] = {}
     for row in experiments:
         group_id = str(row.get("group_id", ""))
         commit_sha = str(row.get("lineage_anchor_sha", "") or "").strip()
+        parent_group_id = str(row.get("lineage_parent_group_id", "") or "").strip()
         if not group_id or not commit_sha:
             continue
-        if str(row.get("lineage_mode", "")) != "inherit" and not row.get("lineage_parent_group_id"):
+        if str(row.get("lineage_mode", "")) != "inherit" and not parent_group_id:
             continue
         loop_index = int(row.get("loop_index") or 999)
         existing = anchors.get(group_id)
-        if existing is not None and int(existing.get("loop_index") or 999) <= loop_index:
+        if existing is not None and int(existing.get("bootstrap_loop_index") or 999) <= loop_index:
             continue
         anchors[group_id] = {
-            "loop_index": loop_index,
-            "parent_group_id": row.get("lineage_parent_group_id"),
+            "bootstrap_loop_index": loop_index,
+            "parent_group_id": parent_group_id,
             "commit_sha": commit_sha,
             "anchor_policy": row.get("lineage_anchor_policy"),
+            "parent_anchor_loop_index": parent_anchor_loop_index(
+                parent_group_id=parent_group_id,
+                commit_sha=commit_sha,
+                experiments=experiments,
+                runs=runs,
+            ),
         }
     return {
-        group_id: {key: value for key, value in payload.items() if key != "loop_index"}
+        group_id: {key: value for key, value in payload.items() if key != "bootstrap_loop_index"}
         for group_id, payload in anchors.items()
     }
 

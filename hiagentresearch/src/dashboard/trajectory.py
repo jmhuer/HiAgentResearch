@@ -3,75 +3,36 @@ from __future__ import annotations
 from typing import Any
 
 
-def group_wave_index(execution_waves: list[list[str]]) -> dict[str, int]:
-    mapping: dict[str, int] = {}
-    for wave_index, wave in enumerate(execution_waves):
-        for group_id in wave:
-            mapping[group_id] = wave_index
-    return mapping
-
-
-def wave_depths(
-    points: list[dict[str, Any]],
-    execution_waves: list[list[str]],
-) -> list[int]:
-    """Cumulative loop depth before each orchestration wave."""
-    depths: list[int] = []
-    cumulative = 0
-    for wave in execution_waves:
-        depths.append(cumulative)
-        max_loop = 0
-        for group_id in wave:
-            for point in points:
-                if point.get("group_id") != group_id:
-                    continue
-                loop_index = _loop_index(point)
-                if loop_index is not None:
-                    max_loop = max(max_loop, loop_index)
-        cumulative += max_loop
-    return depths
-
-
 def assign_trajectory_positions(
     points: list[dict[str, Any]],
     topology: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Map loop work onto a shared lineage axis.
+    """Map metrics onto a shared lineage axis counting accepted agent loops.
 
-    L0 is reserved for the frozen baseline anchor. Loop *k* in execution wave *w*
-    is placed at L(depth[w] + k), where depth advances by the deepest loop reached
-    in each prior wave (parallel groups in the same wave share depth).
-    """
-    waves: list[list[str]] = list(topology.get("execution_waves") or [])
-    if not waves:
-        return [
-            {
-                **point,
-                "trajectory_x": _loop_index(point) or 0,
-            }
-            for point in points
-        ]
-
-    group_wave = group_wave_index(waves)
-    depths = wave_depths(points, waves)
+    L0 is the frozen baseline anchor. For baseline-mode groups, loop *k* is at L*k*.
+    For inherited groups, L(parent_anchor_loop_index + k) where the parent anchor is
+    the inherited parent commit's loop index (not the max loops across a wave).
+  """
+    group_meta: dict[str, Any] = topology.get("groups") or {}
+    inherit_anchors: dict[str, Any] = topology.get("inherit_anchors") or {}
     positioned: list[dict[str, Any]] = []
     for point in points:
         if point.get("is_baseline_anchor"):
             positioned.append({**point, "trajectory_x": 0})
             continue
         loop_index = _loop_index(point)
-        if loop_index is None or loop_index <= 0:
+        if loop_index is None:
             positioned.append({**point, "trajectory_x": 0})
             continue
-        wave_index = group_wave.get(str(point.get("group_id", "")), 0)
-        trajectory_x = depths[wave_index] + loop_index
-        positioned.append(
-            {
-                **point,
-                "trajectory_x": trajectory_x,
-                "lineage_wave": wave_index,
-            }
-        )
+        group_id = str(point.get("group_id", ""))
+        mode = str(group_meta.get(group_id, {}).get("mode") or "baseline")
+        if mode == "inherit":
+            anchor = inherit_anchors.get(group_id) or {}
+            parent_loops = int(anchor.get("parent_anchor_loop_index") or 0)
+            trajectory_x = parent_loops + loop_index
+        else:
+            trajectory_x = loop_index
+        positioned.append({**point, "trajectory_x": trajectory_x})
     return positioned
 
 
@@ -106,6 +67,35 @@ def baseline_metric_points(
         }
         for group_id in group_ids
     ]
+
+
+def parent_anchor_loop_index(
+    *,
+    parent_group_id: str,
+    commit_sha: str,
+    experiments: list[dict[str, Any]],
+    runs: list[dict[str, Any]],
+) -> int:
+    target = commit_sha.strip().lower()
+    if not target or not parent_group_id:
+        return 0
+    runs_by_id = {str(row["run_id"]): row for row in runs}
+    matched = 0
+    for experiment in experiments:
+        if str(experiment.get("group_id", "")) != parent_group_id:
+            continue
+        run_id = str(experiment.get("run_id", ""))
+        run_sha = str(runs_by_id.get(run_id, {}).get("commit_sha", "") or "").strip().lower()
+        if not run_sha or not _sha_matches(run_sha, target):
+            continue
+        loop_index = _loop_index(experiment)
+        if loop_index is not None:
+            matched = max(matched, loop_index)
+    return matched
+
+
+def _sha_matches(left: str, right: str) -> bool:
+    return left == right or left.startswith(right) or right.startswith(left)
 
 
 def _loop_index(point: dict[str, Any]) -> int | None:

@@ -173,7 +173,9 @@ def test_dashboard_topology_includes_inherit_anchors(tmp_path) -> None:
     output_dir = tmp_path / "dashboard"
     build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
     topology = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))["lineage_topology"]
-    assert topology["inherit_anchors"]["optimization_strategy"]["commit_sha"] == "parentsha"
+    anchor = topology["inherit_anchors"]["optimization_strategy"]
+    assert anchor["commit_sha"] == "parentsha"
+    assert anchor["parent_anchor_loop_index"] == 0
 
 
 def test_dashboard_build_from_artifacts(tmp_path) -> None:

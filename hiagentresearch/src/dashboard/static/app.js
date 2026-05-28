@@ -999,18 +999,8 @@ function fillTemplate(template, values) {
 
 // Keep aligned with hiagentresearch.src.dashboard.trajectory.assign_trajectory_positions.
 function assignTrajectoryPositions(points, topology) {
-  const waves = topology?.execution_waves || [];
-  if (!waves.length) {
-    return points.map((point) => {
-      const loopIndex = normalizedLoopIndex(point);
-      return { ...point, trajectory_x: loopIndex ?? 0 };
-    });
-  }
-  const groupWave = new Map();
-  waves.forEach((wave, waveIndex) => {
-    wave.forEach((groupId) => groupWave.set(groupId, waveIndex));
-  });
-  const depths = waveDepths(points, waves);
+  const groupMeta = topology?.groups || {};
+  const inheritAnchors = topology?.inherit_anchors || {};
   return points.map((point) => {
     if (point.is_baseline_anchor) {
       return { ...point, trajectory_x: 0 };
@@ -1019,29 +1009,14 @@ function assignTrajectoryPositions(points, topology) {
     if (loopIndex == null) {
       return { ...point, trajectory_x: 0 };
     }
-    const waveIndex = groupWave.get(point.group_id) ?? 0;
-    return { ...point, trajectory_x: depths[waveIndex] + loopIndex, lineage_wave: waveIndex };
-  });
-}
-
-function waveDepths(points, waves) {
-  const depths = [];
-  let cumulative = 0;
-  for (const wave of waves) {
-    depths.push(cumulative);
-    let maxLoop = 0;
-    for (const groupId of wave) {
-      for (const point of points) {
-        if (point.is_baseline_anchor || point.group_id !== groupId) continue;
-        const loopIndex = normalizedLoopIndex(point);
-        if (loopIndex != null) {
-          maxLoop = Math.max(maxLoop, loopIndex);
-        }
-      }
+    const mode = groupMeta[point.group_id]?.mode || "baseline";
+    if (mode === "inherit") {
+      const anchor = inheritAnchors[point.group_id] || {};
+      const parentLoops = Number(anchor.parent_anchor_loop_index || 0);
+      return { ...point, trajectory_x: parentLoops + loopIndex };
     }
-    cumulative += maxLoop;
-  }
-  return depths;
+    return { ...point, trajectory_x: loopIndex };
+  });
 }
 
 function normalizedLoopIndex(point) {
