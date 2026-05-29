@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import fcntl
 import json
 import os
-from contextlib import contextmanager
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
 from hiagentresearch.src.agents.prompts import build_phase1_prompt
 from hiagentresearch.src.core.models import FailureClass, IntentPacket, ResearchGroup, utc_now_iso
 from hiagentresearch.src.lineage.resolve import BranchBootstrap
-from hiagentresearch.src.paths import resolve_state_dir
 
 
 class AgentBackendError(RuntimeError):
@@ -97,44 +94,43 @@ def run_cursor_agent_cycle(
     agent: Any = None
     sdk_run: Any = None
     try:
-        with _local_agent_lock():
-            with Agent.create(
-                api_key=api_key,
-                model=model,
-                local=LocalAgentOptions(cwd=str(workdir)),
-            ) as agent:
-                _append_stream_event(
-                    stream_path,
-                    {
-                        "type": "agent_created",
-                        "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
-                        "model": model,
-                        "cwd": str(workdir),
-                    },
-                )
-                sdk_run = agent.send(prompt)
-                _append_stream_event(
-                    stream_path,
-                    {
-                        "type": "run_started",
-                        "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
-                        "sdk_run_id": getattr(sdk_run, "id", ""),
-                    },
-                )
-                try:
-                    for message in sdk_run.messages():
-                        payload = _sdk_message_payload(message)
-                        _append_stream_event(stream_path, payload)
-                        text = _message_text(message)
-                        if text:
-                            with messages_path.open("a", encoding="utf-8") as handle:
-                                handle.write(text)
-                                if not text.endswith("\n"):
-                                    handle.write("\n")
-                except Exception as exc:  # pragma: no cover - defensive; wait() still gives terminal status.
-                    stream_error = f"{type(exc).__name__}: {exc}"
-                    _append_stream_event(stream_path, {"type": "stream_error", "error": stream_error})
-                result = sdk_run.wait()
+        with Agent.create(
+            api_key=api_key,
+            model=model,
+            local=LocalAgentOptions(cwd=str(workdir)),
+        ) as agent:
+            _append_stream_event(
+                stream_path,
+                {
+                    "type": "agent_created",
+                    "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
+                    "model": model,
+                    "cwd": str(workdir),
+                },
+            )
+            sdk_run = agent.send(prompt)
+            _append_stream_event(
+                stream_path,
+                {
+                    "type": "run_started",
+                    "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
+                    "sdk_run_id": getattr(sdk_run, "id", ""),
+                },
+            )
+            try:
+                for message in sdk_run.messages():
+                    payload = _sdk_message_payload(message)
+                    _append_stream_event(stream_path, payload)
+                    text = _message_text(message)
+                    if text:
+                        with messages_path.open("a", encoding="utf-8") as handle:
+                            handle.write(text)
+                            if not text.endswith("\n"):
+                                handle.write("\n")
+            except Exception as exc:  # pragma: no cover - defensive; wait() still gives terminal status.
+                stream_error = f"{type(exc).__name__}: {exc}"
+                _append_stream_event(stream_path, {"type": "stream_error", "error": stream_error})
+            result = sdk_run.wait()
     except CursorAgentError as exc:
         record = _record_from_cursor_error(exc)
         _write_record(run_dir=run_dir, record=record, prompt=prompt)
@@ -164,13 +160,8 @@ def run_cursor_agent_cycle(
     )
     _write_record(run_dir=run_dir, record=record, prompt=prompt)
     if not success:
-        duration_ms = int(getattr(result, "duration_ms", 0) or record.raw_result.get("duration_ms") or 0)
-        detail = f"Cursor agent run did not finish successfully (status={status}"
-        if duration_ms:
-            detail += f", duration_ms={duration_ms}"
-        detail += ")."
         raise AgentBackendError(
-            detail,
+            f"Cursor agent run did not finish successfully (status={status}).",
             failure_class=failure_class,
             record=record,
         )
@@ -231,19 +222,6 @@ def _agent_id(agent: Any | None) -> str:
     if agent is None:
         return ""
     return str(getattr(agent, "agent_id", "") or getattr(agent, "id", ""))
-
-
-@contextmanager
-def _local_agent_lock() -> Iterator[None]:
-    """Serialize local Cursor SDK runs across parallel loop subprocesses."""
-    lock_path = resolve_state_dir() / "cursor_local_agent.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("w", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _append_stream_event(path: Path, payload: dict[str, Any]) -> None:
