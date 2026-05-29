@@ -55,8 +55,17 @@ The run command writes visibility artifacts under:
 - `.hiagentresearch/experiments/<group_id>/<run_id>.json` on research branches
 
 The agent-owned workspace (`workdir`), read-only eval zone (derived from `evaluation.entrypoint`),
-eval command, targets, artifact requirements, and quality retry expectations all
-come from `config.yaml`. The workspace `AGENTS.md` is generated from it.
+eval command, targets, and quality retry expectations come from `config.yaml`. The workspace
+`AGENTS.md` is generated from it.
+
+Framework guidance documents (read before each cycle) are fixed in
+`hiagentresearch/src/core/guidance.py`:
+
+- `hiagentresearch/AGENTS.md` — control-plane rules
+- `hiagentresearch/skills/phase1-experiment-cycle/SKILL.md` — phase-1 cycle workflow
+
+The prompt also prepends `<workdir>/AGENTS.md` automatically. To change framework
+behavior for a fork, edit those files in the repo; do not add paths to `config.yaml`.
 
 Agents get fast feedback from their own quick tests in the workspace. The frozen
 eval adapter under `.hiagentresearch/eval/` remains the final authority and emits

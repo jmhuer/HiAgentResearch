@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config, resolve_group_id_for_branch
+from hiagentresearch.src.core.config import AgentContractConfig, HiAgentResearchConfig, load_config, resolve_group_id_for_branch
+from hiagentresearch.src.core.guidance import DEFAULT_GUIDANCE_FILES
 
 
 def test_load_root_config() -> None:
@@ -18,8 +19,7 @@ def test_load_root_config() -> None:
     assert "reference_paths" not in HiAgentResearchConfig.model_fields
     assert "mnist/data/" in config.generated_paths_resolved()
     assert "mnist/src/checkpoints/" in config.generated_paths_resolved()
-    assert "metrics.json" in config.artifact_contract.required
-    assert "experiment_manifest.json" in config.artifact_contract.optional
+    assert "artifact_contract" not in HiAgentResearchConfig.model_fields
     assert config.dashboard.enabled is True
     assert config.dashboard.metrics == ["accuracy", "latency_ms"]
     command = config.format_eval_command(config.group_by_id("model_architecture"))
@@ -36,10 +36,8 @@ def test_load_root_config() -> None:
     assert ".hiagentresearch/eval/" in group.reference_paths
     assert "mnist/data/" in group.generated_paths
     assert group.workspace_agents_path == "mnist/AGENTS.md"
-    assert group.guidance_files == [
-        "hiagentresearch/AGENTS.md",
-        "hiagentresearch/skills/phase1-experiment-cycle/SKILL.md",
-    ]
+    assert group.guidance_files == list(DEFAULT_GUIDANCE_FILES)
+    assert "guidance_files" not in AgentContractConfig.model_fields
 
 
 def test_group_resolution_from_branch() -> None:
@@ -64,8 +62,6 @@ evaluation:
   targets:
     f1:
       min: 0.9
-artifact_contract:
-  required: [metrics.json]
 policy_modes:
   explore: Explore.
 research_groups:
@@ -93,8 +89,6 @@ evaluation:
   targets:
     f1:
       min: 0.9
-artifact_contract:
-  required: [metrics.json]
 policy_modes:
   explore: Explore.
 research_groups:
@@ -122,8 +116,6 @@ evaluation:
   targets:
     f1:
       min: 0.9
-artifact_contract:
-  required: [metrics.json]
 policy_modes:
   explore: Explore.
 research_groups:

@@ -10,7 +10,8 @@ HiAgentResearch uses one small root `config.yaml` with two zones: an agent-owned
    - `workdir` — agent-owned workspace (full read/write/create)
    - `evaluation` — `entrypoint`, `command_template`, and `targets` (the entrypoint’s directory is the read-only eval zone automatically)
    - `research_groups`
-   - plus `artifact_contract`, `policy_modes`, and optional `dependency_files` / `generated_paths` / `hidden_paths`
+   - plus `policy_modes`, optional `agent_contract` (`research_output_expectations`, `retry_policy`), and optional `dependency_files` / `generated_paths` / `hidden_paths`
+   - framework guidance doc paths live in `hiagentresearch/src/core/guidance.py` (not config); workspace `<workdir>/AGENTS.md` is generated from config
 3. Put the runtime-owned eval adapter and scorer under `.hiagentresearch/eval/` (outside the workspace).
 4. The agent may read the eval zone to understand scoring but never edit or run it. The frozen adapter in `.hiagentresearch/eval/` is what HiAgentResearch and CI execute.
 5. Validate config:
@@ -42,6 +43,14 @@ hiagentresearch run-group --group-id model_architecture --workdir . --quick
 ```bash
 hiagentresearch status --group-id model_architecture
 ```
+
+## Framework artifact contracts
+
+Artifact filenames are fixed in `hiagentresearch/src/core/artifacts.py` (not in config):
+
+- **Eval node** (flat dir after eval or GitHub artifact root): four canonical JSON files (`metrics.json`, `failure_class.json`, `research_outcome.json`, `run_meta.json`) plus optional `stdout.txt`, `stderr.txt`, and `parsed_eval.json`. Metric keys come from `evaluation.targets`; the frozen adapter shapes stdout JSON.
+- **Run cycle** (`.hiagentresearch/runs/<run_id>/`): `experiment_intent.json`, `experiment_plan.md`, `agent_actions.jsonl`.
+- **Experiment manifest** (when present): copied to the GH bundle as `experiment_manifest.json`.
 
 ## Contract Boundaries
 

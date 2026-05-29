@@ -7,6 +7,12 @@ from pathlib import Path
 
 from collections.abc import Iterable
 
+from hiagentresearch.src.core.artifacts import (
+    EXPERIMENT_MANIFEST,
+    eval_node_index_names,
+    ingest_required_names,
+    validate_ingest_bundle,
+)
 from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.core.outcomes import (
     BASELINE_REQUIRED_METRICS,
@@ -30,14 +36,14 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
     outcome_path = artifact_dir / "research_outcome.json"
     meta_path = artifact_dir / "run_meta.json"
 
-    validation_error = _validate_artifact_contract(artifact_dir, config.artifact_contract.required)
+    validation_error = validate_ingest_bundle(artifact_dir)
     if validation_error:
         print(
             json.dumps(
                 {
                     "ok": False,
                     "error": validation_error,
-                    "required": config.artifact_contract.required,
+                    "required": list(ingest_required_names()),
                 },
                 indent=2,
             )
@@ -76,7 +82,7 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
             metrics=metrics,
             required=required,
         )
-    manifest_path = artifact_dir / "experiment_manifest.json"
+    manifest_path = artifact_dir / EXPERIMENT_MANIFEST
     if manifest_path.exists():
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -85,15 +91,13 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
             return 1
         registry.record_experiment_manifest(
             run_id=run_id,
-            manifest_path="experiment_manifest.json",
+            manifest_path=EXPERIMENT_MANIFEST,
             manifest=manifest,
         )
         record_baseline_snapshot_from_manifest(registry, manifest, required=required)
     registry.record_artifacts(
         run_id=run_id,
-        artifact_paths=[
-            artifact_dir / name for name in config.artifact_contract.required + config.artifact_contract.optional
-        ],
+        artifact_paths=[artifact_dir / name for name in eval_node_index_names()],
         artifact_type="github_eval",
         base_dir=artifact_dir,
     )
@@ -157,26 +161,6 @@ def record_baseline_snapshot_from_metrics(
     if existing and baseline_metrics_complete((existing.get("metrics") or {}), required):
         return
     registry.record_baseline_snapshot(ref=ref, metrics=normalized)
-
-
-def _validate_artifact_contract(artifact_dir: Path, required: list[str]) -> str:
-    missing = [name for name in required if not (artifact_dir / name).exists()]
-    if missing:
-        return f"missing required artifacts: {missing}"
-    malformed: list[str] = []
-    for name in ("metrics.json", "failure_class.json", "research_outcome.json", "run_meta.json"):
-        path = artifact_dir / name
-        if path.exists():
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                malformed.append(name)
-                continue
-            if not isinstance(payload, dict):
-                malformed.append(name)
-    if malformed:
-        return f"malformed required artifacts: {malformed}"
-    return ""
 
 
 def build_parser() -> argparse.ArgumentParser:

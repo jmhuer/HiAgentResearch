@@ -30,6 +30,8 @@ Runtime state is intentionally SQLite-only; durable experiment intent belongs in
 - `experiments` records the concise branch manifest: hypothesis, planned changes, target files, and manifest path.
 - `artifacts` records artifact paths, types, hashes, and sizes without embedding large payloads in the database.
 
+Indexed artifact filenames for eval bundles and run cycles are defined in `hiagentresearch/src/core/artifacts.py` (not in config).
+
 This keeps the database useful for humans and dashboards while keeping agent context small.
 Metric rows come from the deterministic canonical-JSON reader. Frozen eval
 adapters emit canonical JSON to stdout (health flags plus the metric keys named

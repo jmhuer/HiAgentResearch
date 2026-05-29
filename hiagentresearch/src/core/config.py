@@ -11,6 +11,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from hiagentresearch.src.core.artifacts import FRAMEWORK_ARTIFACT_CONTRACT_VERSION
+from hiagentresearch.src.core.guidance import default_guidance_files
 from hiagentresearch.src.core.models import EvaluationSpec, ResearchGroup
 from hiagentresearch.src.paths import DEFAULT_CONFIG_PATH, REPO_ROOT
 
@@ -24,18 +26,6 @@ class EvaluationConfig(BaseModel):
     entrypoint: str
     command_template: str
     targets: dict[str, MetricExpectation] = Field(default_factory=dict)
-
-
-class ArtifactContract(BaseModel):
-    required: list[str]
-    optional: list[str] = Field(default_factory=list)
-
-    @field_validator("required")
-    @classmethod
-    def required_must_not_be_empty(cls, value: list[str]) -> list[str]:
-        if not value:
-            raise ValueError("artifact_contract.required must contain at least one artifact")
-        return value
 
 
 class RetryPolicyConfig(BaseModel):
@@ -58,7 +48,6 @@ class DashboardConfig(BaseModel):
 
 
 class AgentContractConfig(BaseModel):
-    guidance_files: list[str] = Field(default_factory=list)
     research_output_expectations: list[str] = Field(default_factory=list)
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
 
@@ -103,7 +92,6 @@ class HiAgentResearchConfig(BaseModel):
     evaluation: EvaluationConfig
     research_groups: list[ResearchGroupConfig]
     orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
-    artifact_contract: ArtifactContract
     policy_modes: dict[str, str]
     github: GitHubConfig = Field(default_factory=GitHubConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
@@ -251,7 +239,7 @@ class HiAgentResearchConfig(BaseModel):
             generated_paths=self.generated_paths_resolved(),
             hidden_paths=list(self.hidden_paths),
             research_output_expectations=list(self.agent_contract.research_output_expectations),
-            guidance_files=list(self.agent_contract.guidance_files),
+            guidance_files=list(default_guidance_files()),
             workspace_agents_path=self.workspace_agents_path(),
         )
 
@@ -319,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
                     "groups": [group.id for group in config.research_groups],
                     "dashboard_enabled": config.dashboard.enabled,
                     "eval_entrypoint": config.evaluation.entrypoint,
-                    "required_artifacts": config.artifact_contract.required,
+                    "framework_artifact_contract_version": FRAMEWORK_ARTIFACT_CONTRACT_VERSION,
                 },
                 indent=2,
             )

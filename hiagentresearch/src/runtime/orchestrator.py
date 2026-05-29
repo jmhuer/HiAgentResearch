@@ -16,6 +16,7 @@ from hiagentresearch.src.core.artifact_schema import (
     ArtifactParseError,
     classify_non_json_failure,
 )
+from hiagentresearch.src.core.artifacts import local_run_index_names
 from hiagentresearch.src.core.config import load_config, resolve_group_id_for_branch
 from hiagentresearch.src.core.models import (
     EvaluationSpec,
@@ -700,7 +701,7 @@ def run_group(
     )
     registry.record_artifacts(
         run_id=run_id,
-        artifact_paths=[run_dir / name for name in config.artifact_contract.required + config.artifact_contract.optional],
+        artifact_paths=[run_dir / name for name in local_run_index_names()],
         artifact_type="local_eval",
         base_dir=run_dir,
     )

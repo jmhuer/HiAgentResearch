@@ -82,7 +82,6 @@ Required fields:
 - `evaluation.command_template`
 - `evaluation.parser`
 - `research_groups`
-- `artifact_contract`
 - `policy_modes`
 
 Runtime requirement:

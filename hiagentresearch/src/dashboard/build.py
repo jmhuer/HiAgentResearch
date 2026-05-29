@@ -13,6 +13,11 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from hiagentresearch.src.core.artifacts import (
+    EXPERIMENT_MANIFEST,
+    INGEST_REQUIRED,
+    eval_node_index_names,
+)
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
 from hiagentresearch.src.dashboard.trajectory import (
     assign_trajectory_positions,
@@ -624,7 +629,7 @@ def _ingest_artifact_root(*, registry: Registry, config: HiAgentResearchConfig, 
 
 
 def _ingest_artifact_dir(*, registry: Registry, config: HiAgentResearchConfig, artifact_dir: Path) -> bool:
-    required = [artifact_dir / name for name in config.artifact_contract.required]
+    required = [artifact_dir / name for name in INGEST_REQUIRED]
     if any(not path.exists() for path in required):
         return False
     try:
@@ -651,12 +656,12 @@ def _ingest_artifact_dir(*, registry: Registry, config: HiAgentResearchConfig, a
         correlation_id=str(meta.get("correlation_id") or run_id),
     )
     registry.record_research_outcome(run_id=run_id, outcome=outcome)
-    manifest_path = artifact_dir / "experiment_manifest.json"
+    manifest_path = artifact_dir / EXPERIMENT_MANIFEST
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         registry.record_experiment_manifest(
             run_id=run_id,
-            manifest_path="experiment_manifest.json",
+            manifest_path=EXPERIMENT_MANIFEST,
             manifest=manifest,
         )
         record_baseline_snapshot_from_manifest(
@@ -664,7 +669,7 @@ def _ingest_artifact_dir(*, registry: Registry, config: HiAgentResearchConfig, a
         )
     registry.record_artifacts(
         run_id=run_id,
-        artifact_paths=[artifact_dir / name for name in config.artifact_contract.required + config.artifact_contract.optional],
+        artifact_paths=[artifact_dir / name for name in eval_node_index_names()],
         artifact_type="github_eval",
         base_dir=artifact_dir,
     )

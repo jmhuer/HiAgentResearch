@@ -14,21 +14,6 @@ hidden_paths: []
 generated_paths:
   - data/
   - src/checkpoints/
-artifact_contract:
-  required:
-    - metrics.json
-    - failure_class.json
-    - research_outcome.json
-    - run_meta.json
-    - stdout.txt
-    - stderr.txt
-  optional:
-    - parsed_eval.json
-    - agent_actions.jsonl
-    - train_metrics.json
-    - experiment_manifest.json
-    - experiment_intent.json
-    - experiment_plan.md
 policy_modes:
   explore: "Try one bounded hypothesis and allow measured regressions with evidence."
   exploit: "Prefer refinements to evidence-backed promising directions."
@@ -52,9 +37,6 @@ dashboard:
     - latency_ms
   output_dir: .hiagentresearch/dashboard
 agent_contract:
-  guidance_files:
-    - hiagentresearch/AGENTS.md
-    - hiagentresearch/skills/phase1-experiment-cycle/SKILL.md
   research_output_expectations:
     - "Every cycle starts with concrete evidence and a written plan before code edits."
     - "Every cycle applies at least one bounded edit to a workspace source file."

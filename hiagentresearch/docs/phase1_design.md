@@ -31,12 +31,11 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 - agent validation commands,
 - eval command template and parser,
 - research groups,
-- artifact contract,
 - policy modes,
 - optional dashboard publishing,
 - agent context and quality expectations.
 
-Core runtime code should stay project-agnostic. If a project needs different files, prompts, or eval behavior, change config or the frozen eval adapter rather than hardcoding a new path in Python.
+Core runtime code should stay project-agnostic. Framework artifact filenames live in `hiagentresearch/src/core/artifacts.py`; if a project needs different files, prompts, or eval behavior, change config or the frozen eval adapter rather than hardcoding a new path in Python.
 Project experiments may add dependencies through their configured requirements file; do not add experiment-only packages to the core runtime dependencies.
 
 ## Eval Abstraction

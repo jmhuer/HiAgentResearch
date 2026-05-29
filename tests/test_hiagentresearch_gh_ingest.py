@@ -1,6 +1,7 @@
 import json
 
 import hiagentresearch.src.github.ingest as gh_ingest
+from hiagentresearch.src.core.artifacts import eval_node_index_names
 
 
 def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 1}') -> None:
@@ -25,6 +26,7 @@ def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 
     )
     (artifact_dir / "stdout.txt").write_text("{}", encoding="utf-8")
     (artifact_dir / "stderr.txt").write_text("", encoding="utf-8")
+    (artifact_dir / "parsed_eval.json").write_text("{}", encoding="utf-8")
     (artifact_dir / "experiment_manifest.json").write_text(
         json.dumps(
             {
@@ -66,13 +68,8 @@ def test_ingest_records_artifacts_and_is_idempotent(tmp_path, monkeypatch) -> No
     assert registry.outcome_for_run("gh_1")["research_outcome"] == "met_targets"
     assert registry.experiment_for_run("gh_1")["hypothesis_id"] == "h1"
     assert registry.baseline_snapshot()["metrics"]["accuracy"] == 0.81
-    assert {artifact["artifact_path"] for artifact in registry.artifacts_for_run("gh_1")} >= {
-        "metrics.json",
-        "failure_class.json",
-        "research_outcome.json",
-        "run_meta.json",
-        "experiment_manifest.json",
-    }
+    indexed = {artifact["artifact_path"] for artifact in registry.artifacts_for_run("gh_1")}
+    assert indexed >= set(eval_node_index_names())
 
 
 def test_ingest_rejects_malformed_metrics(tmp_path, monkeypatch) -> None:

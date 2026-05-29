@@ -161,17 +161,19 @@ jobs:
             --branch "${{ github.ref_name }}" \
             --artifact-dir "."
 
+      # Eval bundle filenames: hiagentresearch.src.core.artifacts.EVAL_NODE_INDEX + EXPERIMENT_MANIFEST
       - name: Upload observability artifacts
         uses: actions/upload-artifact@v4
         with:
           name: hiagentresearch-${{ github.run_id }}
           path: |
-            stdout.txt
-            stderr.txt
             metrics.json
             failure_class.json
             research_outcome.json
             run_meta.json
+            stdout.txt
+            stderr.txt
+            parsed_eval.json
             experiment_manifest.json
             .hiagentresearch/state/evals.db
 
