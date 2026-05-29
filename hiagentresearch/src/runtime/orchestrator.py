@@ -350,8 +350,6 @@ def _seed_intent(group: ResearchGroup) -> IntentPacket:
         attempt_count=0,
         last_failure_class="none",
         next_action="continue",
-        rollback_anchor_sha="",
-        key_evidence_refs=[],
     )
 
 
@@ -603,7 +601,6 @@ def run_group(
         prior.attempt_count += 1
     prior.last_failure_class = failure_class if failure_class != "none" else "none"
     prior.next_action = str(research_outcome["next_action"])
-    prior.key_evidence_refs = [run_id]
     prior.updated_at = utc_now_iso()
     registry.write_intent_packet(prior)
 
