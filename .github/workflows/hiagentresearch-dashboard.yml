@@ -18,6 +18,15 @@ concurrency:
 
 jobs:
   build-and-deploy:
+    # Baseline evals run on main (dispatched by ensure_baseline_snapshot) and are not
+    # dashboard inputs. Only rebuild after research-branch evals complete.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        startsWith(github.event.workflow_run.head_branch, 'research/')
+      )
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -56,13 +65,14 @@ jobs:
           PY
 
       - name: Collect research artifacts
+        id: collect_artifacts
         if: steps.dashboard_config.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p dashboard-artifacts
           git fetch --no-tags --prune origin '+refs/heads/research/*:refs/remotes/origin/research/*'
-          python - <<'PY'
+          python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           import subprocess
           from pathlib import Path
@@ -117,10 +127,14 @@ jobs:
                   ],
                   check=False,
               )
+          ingested = sum(1 for _ in target.rglob("metrics.json"))
+          print(f"artifact_count={ingested}")
           PY
 
       - name: Build dashboard
-        if: steps.dashboard_config.outputs.enabled == 'true'
+        if: >-
+          steps.dashboard_config.outputs.enabled == 'true' &&
+          steps.collect_artifacts.outputs.artifact_count != '0'
         run: |
           hiagentresearch dashboard build-from-artifacts \
             --artifact-root dashboard-artifacts \
@@ -128,16 +142,22 @@ jobs:
             --require-sqlite-assets
 
       - name: Configure Pages
-        if: steps.dashboard_config.outputs.enabled == 'true'
+        if: >-
+          steps.dashboard_config.outputs.enabled == 'true' &&
+          steps.collect_artifacts.outputs.artifact_count != '0'
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
-        if: steps.dashboard_config.outputs.enabled == 'true'
+        if: >-
+          steps.dashboard_config.outputs.enabled == 'true' &&
+          steps.collect_artifacts.outputs.artifact_count != '0'
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
       - name: Deploy Pages
-        if: steps.dashboard_config.outputs.enabled == 'true'
+        if: >-
+          steps.dashboard_config.outputs.enabled == 'true' &&
+          steps.collect_artifacts.outputs.artifact_count != '0'
         id: deployment
         uses: actions/deploy-pages@v4
