@@ -11,11 +11,18 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class TrajectoryAnchor:
-    """A point on a parent group's lineage axis (L0 frozen baseline or Lk loop)."""
+    """A point on a group's lineage axis, expressed as a global coordinate.
+
+    ``trajectory_step`` counts accepted agent loops since the original (L0) baseline,
+    so it is comparable across groups. ``source_group_id`` names the group that owns
+    the commit (``None`` => the frozen L0 baseline), which may be an ancestor when an
+    inherited group never beat the baseline it started from.
+    """
 
     ref: str
     trajectory_step: int
     metric_value: float
+    source_group_id: str | None = None
 
 
 def best_trajectory_anchor(
@@ -26,8 +33,14 @@ def best_trajectory_anchor(
     registry: Registry,
     git: GitService,
 ) -> TrajectoryAnchor | None:
-    """Pick the best metric on the parent trajectory (origin + loops)."""
-    candidates: list[TrajectoryAnchor] = []
+    """Pick the best metric on the parent trajectory (its relative L0 + its loops).
+
+    The relative L0 is the parent's own origin point, which is itself the best point
+    of whatever the parent inherited from. Loops are placed at ``base_step + loop_index``
+    so the returned step is a single global axis position. When the origin wins (the
+    parent never improved on its baseline), the anchor naturally points back to the
+    ancestor that produced the best commit.
+    """
     origin = origin_trajectory_anchor(
         parent_group_id=parent_group_id,
         anchor_metric=anchor_metric,
@@ -35,12 +48,15 @@ def best_trajectory_anchor(
         registry=registry,
         git=git,
     )
+    base_step = origin.trajectory_step if origin is not None else 0
+    candidates: list[TrajectoryAnchor] = []
     if origin is not None:
         candidates.append(origin)
     candidates.extend(
         loop_trajectory_anchors(
             parent_group_id=parent_group_id,
             anchor_metric=anchor_metric,
+            base_step=base_step,
             registry=registry,
         )
     )
@@ -69,6 +85,7 @@ def origin_trajectory_anchor(
                     ref=inherited_sha,
                     trajectory_step=int(origin.get("lineage_parent_anchor_step") or 0),
                     metric_value=float(metric_value),
+                    source_group_id=inherited_group_id,
                 )
     snapshot = registry.baseline_snapshot()
     metrics = (snapshot or {}).get("metrics") or {}
@@ -77,6 +94,7 @@ def origin_trajectory_anchor(
             ref=git.resolve_ref(baseline_ref),
             trajectory_step=0,
             metric_value=float(metrics[anchor_metric]),
+            source_group_id=None,
         )
     return None
 
@@ -85,20 +103,27 @@ def loop_trajectory_anchors(
     *,
     parent_group_id: str,
     anchor_metric: str,
+    base_step: int,
     registry: Registry,
 ) -> list[TrajectoryAnchor]:
-    """Resolve parent loop points (L1..Lk) from successful GitHub runs."""
+    """Resolve parent loop points from successful GitHub runs as global coordinates.
+
+    ``base_step`` is the global axis position of the parent's relative L0, so loop *k*
+    lands at ``base_step + k``.
+    """
     anchors: list[TrajectoryAnchor] = []
     for row in registry.github_runs_with_metric(parent_group_id, anchor_metric):
         commit_sha = str(row.get("commit_sha", "")).strip()
         metric_value = row.get("metric_value")
         if not commit_sha or metric_value is None:
             continue
+        loop_index = parent_trajectory_step_for_run(registry, parent_group_id, str(row["run_id"]))
         anchors.append(
             TrajectoryAnchor(
                 ref=commit_sha,
-                trajectory_step=parent_trajectory_step_for_run(registry, parent_group_id, str(row["run_id"])),
+                trajectory_step=base_step + loop_index,
                 metric_value=float(metric_value),
+                source_group_id=parent_group_id,
             )
         )
     return anchors

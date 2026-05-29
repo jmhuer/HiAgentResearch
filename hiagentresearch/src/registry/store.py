@@ -9,7 +9,7 @@ from hiagentresearch.src.core.models import IntentPacket, TransitionEvent, utc_n
 from hiagentresearch.src.core.outcomes import normalize_research_outcome_name, outcome_met_targets
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class Registry:
@@ -168,6 +168,7 @@ class Registry:
             ("lineage_anchor_sha", "ALTER TABLE experiments ADD COLUMN lineage_anchor_sha TEXT"),
             ("lineage_anchor_policy", "ALTER TABLE experiments ADD COLUMN lineage_anchor_policy TEXT"),
             ("lineage_parent_anchor_step", "ALTER TABLE experiments ADD COLUMN lineage_parent_anchor_step INTEGER"),
+            ("lineage_anchor_source_group", "ALTER TABLE experiments ADD COLUMN lineage_anchor_source_group TEXT"),
         ):
             if column not in experiment_columns:
                 conn.execute(ddl)
@@ -360,9 +361,10 @@ class Registry:
                     lineage_anchor_sha,
                     lineage_anchor_policy,
                     lineage_parent_anchor_step,
+                    lineage_anchor_source_group,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -379,6 +381,7 @@ class Registry:
                     _optional_str(manifest.get("lineage_anchor_sha")),
                     _optional_str(manifest.get("lineage_anchor_policy")),
                     _as_int_or_none(manifest.get("lineage_parent_anchor_step")),
+                    _optional_str(manifest.get("lineage_anchor_source_group")),
                     now,
                 ),
             )

@@ -293,6 +293,7 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
             lineage_anchor_sha TEXT,
             lineage_anchor_policy TEXT,
             lineage_parent_anchor_step INTEGER,
+            lineage_anchor_source_group TEXT,
             created_at TEXT NOT NULL
         );
         CREATE TABLE artifacts (
@@ -343,7 +344,7 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
                    r.correlation_id, r.created_at, m.metric_name, m.metric_value,
                    e.loop_index, e.lineage_mode, e.lineage_parent_group_id,
                    e.lineage_anchor_sha, e.lineage_anchor_policy,
-                   e.lineage_parent_anchor_step
+                   e.lineage_parent_anchor_step, e.lineage_anchor_source_group
             FROM runs r
             JOIN metrics m ON r.run_id = m.run_id
             LEFT JOIN experiments e ON r.run_id = e.run_id;
@@ -506,6 +507,7 @@ def _inherit_anchors_combined(
             resolved_step = 0
         anchors[group.id] = {
             "parent_group_id": bootstrap.parent_group_id,
+            "anchor_source_group": bootstrap.parent_anchor_source_group_id or bootstrap.parent_group_id,
             "commit_sha": bootstrap.start_ref,
             "anchor_policy": bootstrap.anchor_policy,
             "parent_trajectory_step": resolved_step,
@@ -518,6 +520,7 @@ def _inherit_anchors_from_experiments(
     experiments: list[dict[str, Any]],
     runs: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
+    commit_owners = _commit_owner_groups(experiments, runs)
     anchors: dict[str, dict[str, Any]] = {}
     for row in experiments:
         group_id = str(row.get("group_id", ""))
@@ -541,9 +544,16 @@ def _inherit_anchors_from_experiments(
                 experiments=experiments,
                 runs=runs,
             )
+        # The anchor commit may belong to an ancestor (e.g. a grandparent peak that
+        # an intermediate group never beat). Prefer the recorded owner, then fall
+        # back to the group that actually owns the commit, then the immediate parent.
+        source_group = str(row.get("lineage_anchor_source_group", "") or "").strip()
+        if not source_group:
+            source_group = _resolve_commit_owner(commit_owners, commit_sha) or parent_group_id
         anchors[group_id] = {
             "bootstrap_loop_index": loop_index,
             "parent_group_id": parent_group_id,
+            "anchor_source_group": source_group,
             "commit_sha": commit_sha,
             "anchor_policy": row.get("lineage_anchor_policy"),
             "parent_trajectory_step": parent_step,
@@ -553,6 +563,35 @@ def _inherit_anchors_from_experiments(
         group_id: {key: value for key, value in payload.items() if key != "bootstrap_loop_index"}
         for group_id, payload in anchors.items()
     }
+
+
+def _commit_owner_groups(
+    experiments: list[dict[str, Any]],
+    runs: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Map each run commit sha to the group that produced it."""
+    runs_by_id = {str(row["run_id"]): row for row in runs}
+    owners: dict[str, str] = {}
+    for experiment in experiments:
+        run_id = str(experiment.get("run_id", ""))
+        commit_sha = str(runs_by_id.get(run_id, {}).get("commit_sha", "") or "").strip().lower()
+        group_id = str(experiment.get("group_id", "") or "").strip()
+        if commit_sha and group_id:
+            owners.setdefault(commit_sha, group_id)
+    return owners
+
+
+def _resolve_commit_owner(commit_owners: dict[str, str], commit_sha: str) -> str:
+    target = commit_sha.strip().lower()
+    if not target:
+        return ""
+    owner = commit_owners.get(target)
+    if owner:
+        return owner
+    for known_sha, group_id in commit_owners.items():
+        if known_sha.startswith(target) or target.startswith(known_sha):
+            return group_id
+    return ""
 
 
 def _metric_targets(config: HiAgentResearchConfig) -> list[dict[str, Any]]:

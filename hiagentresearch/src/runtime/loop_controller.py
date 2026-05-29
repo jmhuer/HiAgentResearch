@@ -385,6 +385,7 @@ def _write_experiment_manifest(
         "lineage_anchor_sha": bootstrap.start_ref,
         "lineage_anchor_policy": bootstrap.anchor_policy,
         "lineage_parent_anchor_step": bootstrap.parent_anchor_step,
+        "lineage_anchor_source_group": bootstrap.parent_anchor_source_group_id,
     }
     baseline_metrics = ((baseline_snapshot or {}).get("metrics") or {})
     required = required_metrics or required_baseline_metrics(None)

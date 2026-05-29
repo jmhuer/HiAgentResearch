@@ -753,13 +753,17 @@ function seriesDataForGroup(groupId, rows, trajectoryAxis, grouped, metricName) 
     return series;
   }
   const topology = dashboardData.lineage_topology || {};
+  const anchorMeta = topology.inherit_anchors?.[groupId] || {};
   const parentId = topology.groups?.[groupId]?.inherit_from;
   if (!parentId) {
     return withTrajectoryAnchor(series, trajectoryAxis, 0, () =>
       resolveBaselineAnchorPoint(groupId, metricName, lineageRows),
     );
   }
-  const parentAnchor = resolveInheritAnchorPoint(groupId, parentId, grouped);
+  // The anchor commit can live on an ancestor (a grandparent peak the immediate
+  // parent never beat), so draw the connector from its true source group.
+  const sourceGroup = anchorMeta.anchor_source_group || parentId;
+  const parentAnchor = resolveInheritAnchorPoint(groupId, sourceGroup, grouped);
   if (!parentAnchor) {
     return series;
   }
@@ -770,55 +774,47 @@ function seriesDataForGroup(groupId, rows, trajectoryAxis, grouped, metricName) 
   return withTrajectoryAnchor(series, trajectoryAxis, parentX, () => ({
     ...parentAnchor,
     group_id: groupId,
-    lineage_parent_group_id: parentId,
+    lineage_parent_group_id: sourceGroup,
     is_inheritance_connector: true,
   }));
 }
 
-function resolveInheritAnchorPoint(groupId, parentId, grouped) {
+function resolveInheritAnchorPoint(groupId, sourceGroup, grouped) {
   const anchorMeta = dashboardData.lineage_topology?.inherit_anchors?.[groupId] || {};
   const parentStep = anchorMeta.parent_trajectory_step ?? anchorMeta.parent_anchor_loop_index;
+  const sourceRows = grouped[sourceGroup] || [];
   if (parentStep != null && parentStep !== "") {
     if (Number(parentStep) === 0) {
-      const baselinePoint = (grouped[parentId] || []).find((row) => row.is_baseline_anchor);
+      const baselinePoint = sourceRows.find((row) => row.is_baseline_anchor);
       if (baselinePoint) {
         return baselinePoint;
       }
     }
-    const atStep = (grouped[parentId] || []).find((row) => Number(row.trajectory_x) === Number(parentStep));
+    const atStep = sourceRows.find((row) => Number(row.trajectory_x) === Number(parentStep));
     if (atStep) {
       return atStep;
     }
   }
-  const parentRows = (grouped[parentId] || [])
+  const candidateRows = sourceRows
     .filter((point) => !point.is_baseline_anchor)
     .sort((left, right) => Number(left.trajectory_x) - Number(right.trajectory_x));
-  if (!parentRows.length) {
+  const anchorSha = anchorMeta.commit_sha || inheritAnchorShaForGroup(groupId);
+  if (anchorSha) {
+    const matched = candidateRows.find((row) => shaMatches(row.commit_sha, anchorSha));
+    if (matched) {
+      return matched;
+    }
+  }
+  if (!candidateRows.length) {
     return null;
   }
-  const anchorSha = inheritAnchorShaForGroup(groupId);
-  if (anchorSha) {
-    const matched = parentRows.find((row) => shaMatches(row.commit_sha, anchorSha));
-    if (matched) {
-      return matched;
-    }
-  }
-  const topology = dashboardData.lineage_topology || {};
-  const resolved = topology.inherit_anchors?.[groupId];
-  if (resolved?.commit_sha) {
-    const matched = parentRows.find((row) => shaMatches(row.commit_sha, resolved.commit_sha));
-    if (matched) {
-      return matched;
-    }
-  }
-  const resolvedStep = resolved?.parent_trajectory_step ?? resolved?.parent_anchor_loop_index;
-  if (Number(resolvedStep) === 0) {
-    const baselinePoint = (grouped[parentId] || []).find((row) => row.is_baseline_anchor);
+  if (Number(parentStep) === 0) {
+    const baselinePoint = sourceRows.find((row) => row.is_baseline_anchor);
     if (baselinePoint) {
       return baselinePoint;
     }
   }
-  return parentRows[parentRows.length - 1];
+  return candidateRows[candidateRows.length - 1];
 }
 
 function inheritAnchorShaForGroup(groupId) {

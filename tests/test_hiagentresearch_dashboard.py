@@ -253,6 +253,9 @@ def test_dashboard_resolves_hyperparameter_anchor_from_optimization_origin(tmp_p
     anchor = topology["inherit_anchors"]["hyperparameter_optimization"]
     assert anchor["commit_sha"] == "parentsha"
     assert anchor["parent_trajectory_step"] == 2
+    # The anchor commit belongs to model_architecture (the grandparent peak), so the
+    # dashboard must attribute the connector there, not to optimization_strategy.
+    assert anchor["anchor_source_group"] == "model_architecture"
 
 
 def test_dashboard_build_from_artifacts(tmp_path) -> None:
