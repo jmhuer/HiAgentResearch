@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
+from hiagentresearch.src.agents.cursor_client import cursor_sdk_client
 from hiagentresearch.src.agents.prompts import build_phase1_prompt
 from hiagentresearch.src.core.models import FailureClass, IntentPacket, ResearchGroup, utc_now_iso
 from hiagentresearch.src.lineage.resolve import BranchBootstrap
@@ -98,6 +99,7 @@ def run_cursor_agent_cycle(
             api_key=api_key,
             model=model,
             local=LocalAgentOptions(cwd=str(workdir)),
+            client=cursor_sdk_client(),
         ) as agent:
             _append_stream_event(
                 stream_path,

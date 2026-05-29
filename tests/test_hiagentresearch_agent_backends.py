@@ -84,6 +84,10 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
     fake_module.CursorAgentError = FakeCursorAgentError
     fake_module.LocalAgentOptions = FakeLocalAgentOptions
     monkeypatch.setitem(sys.modules, "cursor_sdk", fake_module)
+    monkeypatch.setattr(
+        "hiagentresearch.src.agents.agent_backends.cursor_sdk_client",
+        lambda: object(),
+    )
 
     config = load_config(Path("config.yaml"))
     group = config.research_groups_by_id()["model_architecture"]
@@ -109,6 +113,7 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
 
     assert record.success is True
     assert FakeAgent.kwargs["model"] == "composer-2.5"
+    assert "client" in FakeAgent.kwargs
     assert "hiagentresearch/AGENTS.md" in (run_dir / "agent_prompt.txt").read_text(encoding="utf-8")
     assert "streamed assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
     assert "dict assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
