@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Train MNIST CNN and write metrics for downstream evaluation."""
+"""Train MNIST ensemble and write a checkpoint manifest for the frozen scorer.
+
+Authoritative accuracy and latency come from `.hiagentresearch/eval/score.py`;
+this script only trains and records checkpoint metadata.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
-import time
 from pathlib import Path
 
 import torch
@@ -39,35 +42,6 @@ def pretrain_autoencoder(autoencoder: Autoencoder, loader: DataLoader, device: t
             total_loss += loss.item()
         print(f"Autoencoder Pre-train Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(loader):.4f}")
     print("Autoencoder pre-training finished.")
-
-
-def _accuracy(model: nn.Module, loader: DataLoader, device: torch.device) -> float:
-    model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for images, labels in loader:
-            images = images.to(device)
-            labels = labels.to(device)
-            preds = model(images).argmax(dim=1)
-            correct += (preds == labels).sum().item()
-            total += labels.size(0)
-    return correct / max(total, 1)
-
-
-def _latency_ms(model: nn.Module, loader: DataLoader, device: torch.device, samples: int = 256) -> float:
-    model.eval()
-    seen = 0
-    start = time.perf_counter()
-    with torch.no_grad():
-        for images, _ in loader:
-            images = images.to(device)
-            _ = model(images)
-            seen += images.size(0)
-            if seen >= samples:
-                break
-    elapsed = time.perf_counter() - start
-    return (elapsed / max(seen, 1)) * 1000.0
 
 
 def main() -> None:
@@ -172,17 +146,12 @@ def main() -> None:
                 )
                 break
 
-    accuracy = _accuracy(ensemble_model, test_loader, device)
-    latency_ms = _latency_ms(ensemble_model, test_loader, device)
-
     ckpt_dir = mnist_root / "src" / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = args.checkpoint or (ckpt_dir / "mnist_cnn_ensemble.pt")
-    torch.save({"model_state_dict": ensemble_model.state_dict(), "accuracy": accuracy}, checkpoint_path)
+    torch.save({"model_state_dict": ensemble_model.state_dict()}, checkpoint_path)
 
     metrics = {
-        "accuracy": round(accuracy, 6),
-        "latency_ms": round(latency_ms, 4),
         "epochs": args.epochs,
         "checkpoint": str(checkpoint_path.relative_to(mnist_root)),
         "device": str(device),

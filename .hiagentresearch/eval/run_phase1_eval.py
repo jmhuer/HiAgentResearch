@@ -60,8 +60,7 @@ def _tail(text: str, *, limit: int = 4000) -> str:
 
 def _metric_thresholds(group_id: str = "model_architecture") -> dict[str, float | None]:
     config = load_config()
-    group = config.group_by_id(group_id)
-    eval_config = group.evaluation or config.evaluation
+    eval_config = config.evaluation
     accuracy = eval_config.targets.get("accuracy")
     latency = eval_config.targets.get("latency_ms")
     return {
@@ -94,7 +93,7 @@ def main() -> int:
     thresholds = _metric_thresholds(args.group_id)
 
     # Keep the selection narrow and stable for phase-1 reproducibility.
-    selected_tests = [f"{workdir}/src/test_kwta.py"]
+    selected_tests = [f"{workdir}/src/tests/test_kwta.py"]
     start = time.perf_counter()
     test_proc = _run([sys.executable, "-m", "pytest", "-q", *selected_tests], cwd=repo_root)
     with _train_metrics_path() as train_metrics_path:

@@ -23,24 +23,24 @@ this folder for the exact evaluation command and targets.
 
 ## Runnable entrypoints
 
+Workspace (agent-owned):
+
 ```bash
-# from the repository root
 python -m pip install -r mnist/requirements.txt
-python mnist/src/train.py --quick --output /tmp/hiagentresearch_mnist_train_metrics.json
-python .hiagentresearch/eval/score.py --workdir mnist --quick --metrics /tmp/hiagentresearch_mnist_train_metrics.json
+python -m pytest -q mnist/src/tests          # fast unit tests
+python mnist/src/train.py --quick --output /tmp/train_metrics.json
 ```
 
-Full training (downloads MNIST to `mnist/data/`):
+Frozen eval zone (orchestrator / CI only — do not run from agent cycles):
 
 ```bash
-python mnist/src/train.py --epochs 3
-python .hiagentresearch/eval/score.py --workdir mnist --accuracy-min 0.985 --latency-ms-max 13.0
+python .hiagentresearch/eval/run_phase1_eval.py --workdir mnist --quick
 ```
 
 Artifacts:
 
 - `mnist/src/checkpoints/mnist_cnn_ensemble.pt` — trained weights
-- train metrics are printed to stdout or written to the explicit `--output` path
+- `train.py --output` writes checkpoint metadata (not authoritative metrics)
 
 ## Goal
 
