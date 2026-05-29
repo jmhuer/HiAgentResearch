@@ -35,7 +35,7 @@ hiagentresearch render-workspace-docs
 8. Run one group:
 
 ```bash
-hiagentresearch run-group --group-id model_architecture --workdir . --quick
+hiagentresearch run-group --group-id model_architecture --workdir .
 ```
 
 9. Inspect status:

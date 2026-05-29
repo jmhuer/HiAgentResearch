@@ -25,7 +25,6 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run-group", help="Run one research group cycle.")
     run.add_argument("--group-id", required=True)
     run.add_argument("--workdir", type=Path, default=REPO_ROOT)
-    run.add_argument("--quick", action="store_true")
     run.add_argument("--agent-model", default="composer-2.5")
 
     loops = sub.add_parser("loops", help="Run backend-owned research loops.")
@@ -33,14 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     loops.add_argument("--branch", default=None)
     loops.add_argument("--loops", type=int, default=3)
     loops.add_argument("--workdir", type=Path, default=REPO_ROOT)
-    loops.add_argument("--quick", action="store_true")
     loops.add_argument("--agent-model", default="composer-2.5")
     loops.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
 
     loops_all = sub.add_parser("loops-all", help="Run all research groups in configured execution waves.")
     loops_all.add_argument("--loops", type=int, default=3)
     loops_all.add_argument("--workdir", type=Path, default=REPO_ROOT)
-    loops_all.add_argument("--quick", action="store_true")
     loops_all.add_argument("--agent-model", default="composer-2.5")
     loops_all.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
     loops_all.add_argument(
@@ -87,7 +84,6 @@ def main(argv: list[str] | None = None) -> int:
         return run_group(
             group_id=args.group_id,
             workdir=args.workdir.resolve(),
-            quick=args.quick,
             agent_model=args.agent_model,
         )
     if args.cmd == "loops":
@@ -96,7 +92,6 @@ def main(argv: list[str] | None = None) -> int:
             branch=args.branch,
             loops=args.loops,
             workdir=args.workdir.resolve(),
-            quick=args.quick,
             agent_model=args.agent_model,
             stop_on_success=not args.run_exact_loops,
         )
@@ -106,7 +101,6 @@ def main(argv: list[str] | None = None) -> int:
         return run_loops_all(
             loops=args.loops,
             workdir=args.workdir.resolve(),
-            quick=args.quick,
             agent_model=args.agent_model,
             stop_on_success=not args.run_exact_loops,
             parallel=args.parallel,

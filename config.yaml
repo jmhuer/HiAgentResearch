@@ -40,7 +40,7 @@ agent_contract:
   research_output_expectations:
     - "Every cycle starts with concrete evidence and a written plan before code edits."
     - "Every cycle applies at least one bounded edit to a workspace source file."
-    - "Every cycle produces eval artifacts, records whether the experiment improved baseline, and updates tactical intent."
+    - "Every cycle leaves an auditable trail (planning artifacts, committed manifest, updated tactical intent); the orchestrator runs eval after the edit."
     - "Research branches keep accumulating valid experiments; metric regressions are knowledge, not execution failures."
   retry_policy:
     max_repair_attempts: 1

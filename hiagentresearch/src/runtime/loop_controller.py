@@ -16,14 +16,22 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
 
+from hiagentresearch.src.core.coerce import as_string_list
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
-from hiagentresearch.src.github.ingest import ingest, record_baseline_snapshot_from_metrics
+from hiagentresearch.src.github.ingest import ingest
 from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
 from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.git.worktree import WorktreeManager
 from hiagentresearch.src.lineage.resolve import BranchBootstrap, resolve_branch_bootstrap
 from hiagentresearch.src.github.actions import GitHubActionsService, load_run_meta
-from hiagentresearch.src.paths import REPO_ROOT, is_linked_git_worktree, resolve_execution_root, resolve_runs_dir
+from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot, install_dependency_files
+from hiagentresearch.src.paths import (
+    REPO_ROOT,
+    is_linked_git_worktree,
+    resolve_execution_root,
+    resolve_runs_dir,
+    resolve_state_dir,
+)
 from hiagentresearch.src.runtime.orchestrator import init_state, run_group
 from hiagentresearch.src.core.outcomes import (
     baseline_metrics_complete,
@@ -109,6 +117,65 @@ RunGroupCallable = Callable[..., int]
 IngestCallable = Callable[[str, str, str, Path], int]
 EXPERIMENT_MANIFEST_ROOT = Path(".hiagentresearch") / "experiments"
 FAILED_RUNS_ROOT = Path(".hiagentresearch") / "failed-runs"
+EXPERIMENT_MANIFEST_SCHEMA_VERSION = 1
+
+
+@dataclass(slots=True)
+class ExperimentManifest:
+    """The per-cycle manifest committed to a research branch and ingested by the registry.
+
+    This is the single source of truth for manifest field names; both the file on
+    the branch and the registry row are derived from it via ``to_dict()``.
+    """
+
+    run_id: str
+    group_id: str
+    branch: str
+    loop_index: int
+    hypothesis_id: str
+    hypothesis: str
+    planned_code_changes: list[str]
+    target_files: list[str]
+    success_criteria: list[str]
+    rollback_plan: str
+    local_status: str
+    local_failure_class: str
+    local_research_outcome: str
+    lineage_mode: str
+    lineage_parent_group_id: str | None
+    lineage_anchor_sha: str
+    lineage_anchor_policy: str | None
+    lineage_parent_anchor_step: int | None
+    lineage_anchor_source_group: str | None
+    lineage_baseline_snapshot: dict | None = None
+    schema_version: int = EXPERIMENT_MANIFEST_SCHEMA_VERSION
+
+    def to_dict(self) -> dict:
+        payload = {
+            "schema_version": self.schema_version,
+            "run_id": self.run_id,
+            "group_id": self.group_id,
+            "branch": self.branch,
+            "loop_index": self.loop_index,
+            "hypothesis_id": self.hypothesis_id,
+            "hypothesis": self.hypothesis,
+            "planned_code_changes": list(self.planned_code_changes),
+            "target_files": list(self.target_files),
+            "success_criteria": list(self.success_criteria),
+            "rollback_plan": self.rollback_plan,
+            "local_status": self.local_status,
+            "local_failure_class": self.local_failure_class,
+            "local_research_outcome": self.local_research_outcome,
+            "lineage_mode": self.lineage_mode,
+            "lineage_parent_group_id": self.lineage_parent_group_id,
+            "lineage_anchor_sha": self.lineage_anchor_sha,
+            "lineage_anchor_policy": self.lineage_anchor_policy,
+            "lineage_parent_anchor_step": self.lineage_parent_anchor_step,
+            "lineage_anchor_source_group": self.lineage_anchor_source_group,
+        }
+        if self.lineage_baseline_snapshot is not None:
+            payload["lineage_baseline_snapshot"] = self.lineage_baseline_snapshot
+        return payload
 
 
 def run_loops(
@@ -117,7 +184,6 @@ def run_loops(
     branch: str | None,
     loops: int,
     workdir: Path,
-    quick: bool,
     agent_model: str,
     config: HiAgentResearchConfig | None = None,
     git: GitLike | None = None,
@@ -134,9 +200,9 @@ def run_loops(
     github_service = github or GitHubActionsService(REPO_ROOT)
 
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        _install_dependency_files(loaded_config)
+        install_dependency_files(loaded_config)
         init_state()
-    registry = Registry(REPO_ROOT / ".hiagentresearch" / "state")
+    registry = Registry(resolve_state_dir())
     registry.init()
     bootstrap = resolve_branch_bootstrap(
         group_config,
@@ -157,7 +223,6 @@ def run_loops(
             run_group_func,
             group_id=group_id,
             workdir=git_root,
-            quick=quick,
             agent_model=agent_model,
             lineage_bootstrap=bootstrap,
         )
@@ -336,19 +401,6 @@ def _run_group_capture(run_group_func: RunGroupCallable, **kwargs) -> dict:
     return payload
 
 
-def _install_dependency_files(config: HiAgentResearchConfig) -> None:
-    for dependency_file in config.dependency_file_paths(REPO_ROOT):
-        if not dependency_file.exists():
-            raise FileNotFoundError(f"configured dependency file does not exist: {dependency_file}")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", str(dependency_file)],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-
 def _write_experiment_manifest(
     *,
     group_id: str,
@@ -363,37 +415,38 @@ def _write_experiment_manifest(
 ) -> tuple[str, dict]:
     run_dir = resolve_runs_dir(checkout_root) / local_run_id
     intent = _read_json(run_dir / "experiment_intent.json")
-    manifest = {
-        "schema_version": 1,
-        "run_id": local_run_id,
-        "group_id": group_id,
-        "branch": branch,
-        "loop_index": loop_index,
-        "hypothesis_id": intent.get("hypothesis_id", ""),
-        "hypothesis": intent.get("hypothesis", ""),
-        "planned_code_changes": _as_string_list(intent.get("planned_code_changes")),
-        "target_files": _as_string_list(intent.get("target_files")),
-        "success_criteria": _as_string_list(intent.get("success_criteria")),
-        "rollback_plan": intent.get("rollback_plan", ""),
-        "local_status": local_result.get("status", ""),
-        "local_failure_class": local_result.get("failure_class", ""),
-        "local_research_outcome": normalize_research_outcome_name(
-            str(local_result.get("research_outcome", "")),
-        ),
-        "lineage_mode": bootstrap.mode,
-        "lineage_parent_group_id": bootstrap.parent_group_id,
-        "lineage_anchor_sha": bootstrap.start_ref,
-        "lineage_anchor_policy": bootstrap.anchor_policy,
-        "lineage_parent_anchor_step": bootstrap.parent_anchor_step,
-        "lineage_anchor_source_group": bootstrap.parent_anchor_source_group_id,
-    }
     baseline_metrics = ((baseline_snapshot or {}).get("metrics") or {})
     required = required_metrics or required_baseline_metrics(None)
+    lineage_baseline_snapshot = None
     if baseline_metrics_complete(baseline_metrics, required):
-        manifest["lineage_baseline_snapshot"] = {
+        lineage_baseline_snapshot = {
             "ref": str((baseline_snapshot or {}).get("ref") or "main"),
             "metrics": {str(name): float(value) for name, value in baseline_metrics.items()},
         }
+    manifest = ExperimentManifest(
+        run_id=local_run_id,
+        group_id=group_id,
+        branch=branch,
+        loop_index=loop_index,
+        hypothesis_id=intent.get("hypothesis_id", ""),
+        hypothesis=intent.get("hypothesis", ""),
+        planned_code_changes=as_string_list(intent.get("planned_code_changes")),
+        target_files=as_string_list(intent.get("target_files")),
+        success_criteria=as_string_list(intent.get("success_criteria")),
+        rollback_plan=intent.get("rollback_plan", ""),
+        local_status=local_result.get("status", ""),
+        local_failure_class=local_result.get("failure_class", ""),
+        local_research_outcome=normalize_research_outcome_name(
+            str(local_result.get("research_outcome", "")),
+        ),
+        lineage_mode=bootstrap.mode,
+        lineage_parent_group_id=bootstrap.parent_group_id,
+        lineage_anchor_sha=bootstrap.start_ref,
+        lineage_anchor_policy=bootstrap.anchor_policy,
+        lineage_parent_anchor_step=bootstrap.parent_anchor_step,
+        lineage_anchor_source_group=bootstrap.anchor_source_group_id,
+        lineage_baseline_snapshot=lineage_baseline_snapshot,
+    ).to_dict()
     path = EXPERIMENT_MANIFEST_ROOT / group_id / f"{local_run_id}.json"
     absolute_path = checkout_root / path
     absolute_path.parent.mkdir(parents=True, exist_ok=True)
@@ -407,12 +460,6 @@ def _read_json(path: Path) -> dict:
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
-
-
-def _as_string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value]
 
 
 def _commit_subject(*, loop_index: int, manifest: dict) -> str:
@@ -441,68 +488,10 @@ def _manifest_summary(manifest: dict) -> str:
     return text or "experiment update"
 
 
-def _ensure_baseline_snapshot(
-    registry: Registry,
-    config: HiAgentResearchConfig,
-    *,
-    github: GitHubActionsService | None = None,
-    git: GitService | None = None,
-) -> None:
-    required = required_baseline_metrics(config.evaluation.targets)
-    existing = registry.baseline_snapshot()
-    if existing and baseline_metrics_complete(existing.get("metrics") or {}, required):
-        return
-    anchor_group = next((group.id for group in config.research_groups), "model_architecture")
-    ref = config.orchestration.baseline_ref
-    git_service = git or GitService(REPO_ROOT)
-    github_service = github or GitHubActionsService(REPO_ROOT)
-    head_sha = git_service.resolve_ref(ref)
-    known_run_ids = {
-        run.database_id
-        for run in github_service.list_runs(branch=ref)
-        if run.name == config.github.workflow_name
-    }
-    correlation_id = f"baseline_{head_sha[:12]}"
-    github_service.dispatch_workflow(
-        workflow_name=config.github.workflow_name,
-        ref=ref,
-        inputs={
-            "node_kind": "baseline",
-            "group_id": anchor_group,
-            "correlation_id": correlation_id,
-        },
-    )
-    run = github_service.find_new_run_for_head(
-        branch=ref,
-        head_sha=head_sha,
-        workflow_name=config.github.workflow_name,
-        known_run_ids=known_run_ids,
-        attempts=config.github.run_lookup_attempts,
-        sleep_sec=config.github.run_lookup_sleep_sec,
-    )
-    if not github_service.watch_run(run.database_id):
-        raise RuntimeError(f"baseline eval GitHub Actions run failed: {run.database_id}")
-    with tempfile.TemporaryDirectory(prefix="hiagentresearch-baseline-") as tmp:
-        download_dir = github_service.download_artifacts(
-            run_id=run.database_id,
-            target_dir=Path(tmp),
-            clean=True,
-        )
-        artifact_dir = github_service.artifact_payload_dir(download_dir)
-        failure = json.loads((artifact_dir / "failure_class.json").read_text(encoding="utf-8"))
-        if failure.get("failure_class") != "none":
-            raise RuntimeError(f"baseline eval failed with {failure.get('failure_class')}: {run.database_id}")
-        metrics = json.loads((artifact_dir / "metrics.json").read_text(encoding="utf-8"))
-        record_baseline_snapshot_from_metrics(registry, ref=ref, metrics=metrics, required=required)
-    if not registry.baseline_snapshot():
-        raise RuntimeError(f"baseline eval did not produce complete baseline metrics: {run.database_id}")
-
-
 def run_loops_all(
     *,
     loops: int,
     workdir: Path,
-    quick: bool,
     agent_model: str,
     config: HiAgentResearchConfig | None = None,
     stop_on_success: bool = True,
@@ -510,9 +499,9 @@ def run_loops_all(
 ) -> int:
     ensure_cursor_api_key()
     loaded_config = config or load_config()
-    registry = Registry(REPO_ROOT / ".hiagentresearch" / "state")
+    registry = Registry(resolve_state_dir())
     registry.init()
-    _ensure_baseline_snapshot(registry, loaded_config)
+    ensure_baseline_snapshot(registry, loaded_config)
     summaries: list[LoopSummary] = []
     worktrees = WorktreeManager(worktree_root=loaded_config.orchestration.worktree_root)
     if parallel:
@@ -523,7 +512,6 @@ def run_loops_all(
                 exit_code = _run_wave_parallel(
                     wave,
                     loops=loops,
-                    quick=quick,
                     agent_model=agent_model,
                     config=loaded_config,
                     stop_on_success=stop_on_success,
@@ -539,7 +527,6 @@ def run_loops_all(
                     branch=None,
                     loops=loops,
                     workdir=workdir,
-                    quick=quick,
                     agent_model=agent_model,
                     config=loaded_config,
                     stop_on_success=stop_on_success,
@@ -559,13 +546,12 @@ def _run_wave_parallel(
     wave: list[str],
     *,
     loops: int,
-    quick: bool,
     agent_model: str,
     config: HiAgentResearchConfig,
     stop_on_success: bool,
     worktrees: WorktreeManager,
 ) -> int:
-    registry = Registry(REPO_ROOT / ".hiagentresearch" / "state")
+    registry = Registry(resolve_state_dir())
     registry.init()
     git_main = GitService(REPO_ROOT)
     processes: list[tuple[str, subprocess.Popen[str]]] = []
@@ -599,8 +585,6 @@ def _run_wave_parallel(
             "--agent-model",
             agent_model,
         ]
-        if quick:
-            cmd.append("--quick")
         if not stop_on_success:
             cmd.append("--run-exact-loops")
         proc = subprocess.Popen(
@@ -705,7 +689,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--branch", default=None)
     parser.add_argument("--loops", type=int, default=3)
     parser.add_argument("--workdir", type=Path, default=REPO_ROOT)
-    parser.add_argument("--quick", action="store_true")
     parser.add_argument("--agent-model", default="composer-2.5")
     parser.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
     return parser
@@ -718,7 +701,6 @@ def main(argv: list[str] | None = None) -> int:
         branch=args.branch,
         loops=args.loops,
         workdir=args.workdir.resolve(),
-        quick=args.quick,
         agent_model=args.agent_model,
         stop_on_success=not args.run_exact_loops,
     )

@@ -2,11 +2,11 @@ from pathlib import Path
 
 from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.core.models import IntentPacket
+from hiagentresearch.src.core.pathspec import is_within
 from hiagentresearch.src.runtime.orchestrator import (
     _apply_agent_intent_update,
     _metadata_payload,
     _is_generated_path,
-    _is_within_workdir,
     _validate_agent_intent_contract,
 )
 
@@ -135,7 +135,6 @@ def test_agent_intent_update_preserves_latest_hypothesis(tmp_path) -> None:
         attempt_count=1,
         last_failure_class="eval_failure",
         next_action="pivot",
-        rollback_anchor_sha="",
     )
 
     updated = _apply_agent_intent_update(run_dir=run_dir, prior=packet)
@@ -153,10 +152,10 @@ def test_generated_paths_match_files_and_directories() -> None:
 
 
 def test_is_within_workdir() -> None:
-    assert _is_within_workdir("mnist/src/model.py", "mnist") is True
-    assert _is_within_workdir("mnist", "mnist") is True
-    assert _is_within_workdir(".hiagentresearch/eval/score.py", "mnist") is False
-    assert _is_within_workdir("anything", ".") is True
+    assert is_within("mnist/src/model.py", "mnist") is True
+    assert is_within("mnist", "mnist") is True
+    assert is_within(".hiagentresearch/eval/score.py", "mnist") is False
+    assert is_within("anything", ".") is True
 
 
 def test_metadata_payload_redacts_eval_command() -> None:

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 DEFAULT_GUIDANCE_FILES = (
     "hiagentresearch/AGENTS.md",
-    "hiagentresearch/skills/phase1-experiment-cycle/SKILL.md",
 )
 
 

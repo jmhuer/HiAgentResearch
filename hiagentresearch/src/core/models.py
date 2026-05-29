@@ -9,14 +9,9 @@ PolicyMode = Literal["exploit", "explore", "reset"]
 FailureClass = Literal["none", "infra_failure", "code_failure", "eval_failure", "invalid_cycle"]
 GroupState = Literal[
     "idle",
-    "queued_for_wake",
     "running_agent_cycle",
-    "awaiting_eval",
-    "ingesting_results",
     "ready_for_wake",
-    "merge_candidate",
     "blocked",
-    "retired",
 ]
 
 
@@ -37,6 +32,7 @@ class ResearchGroup:
     policy_mode: PolicyMode | str
     evaluation: EvaluationSpec
     workdir: str = "."
+    policy_mode_description: str = ""
     reference_paths: list[str] = field(default_factory=list)
     generated_paths: list[str] = field(default_factory=list)
     hidden_paths: list[str] = field(default_factory=list)
@@ -53,8 +49,6 @@ class IntentPacket:
     attempt_count: int
     last_failure_class: FailureClass
     next_action: Literal["repair", "continue", "pivot", "reset"]
-    rollback_anchor_sha: str
-    key_evidence_refs: list[str] = field(default_factory=list)
     updated_at: str = field(default_factory=utc_now_iso)
 
     def to_dict(self) -> dict[str, Any]:

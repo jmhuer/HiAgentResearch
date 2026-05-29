@@ -15,7 +15,6 @@ def test_prompt_is_config_backed() -> None:
         attempt_count=0,
         last_failure_class="none",
         next_action="continue",
-        rollback_anchor_sha="",
     )
 
     prompt = build_phase1_prompt(group=group, intent_packet=packet, run_id="run_abc")
@@ -26,10 +25,10 @@ def test_prompt_is_config_backed() -> None:
     assert ".hiagentresearch/eval/" in prompt
     assert "mnist/AGENTS.md" in prompt
     assert "hiagentresearch/AGENTS.md" in prompt
-    assert "hiagentresearch/skills/phase1-experiment-cycle/SKILL.md" in prompt
     assert group.evaluation.command not in prompt
     assert "orchestrator and GitHub eval nodes" in prompt
-    assert "Research north star" in prompt
+    # The policy mode is sent with its meaning, not just the bare label.
+    assert config.policy_modes[group.policy_mode] in prompt
     # No MNIST-internal source paths are hardcoded into the prompt anymore.
     assert "mnist/src/model.py" not in prompt
     assert "mnist/pipeline" not in prompt

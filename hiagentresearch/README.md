@@ -35,7 +35,7 @@ This directory contains the first implementation of the branch-based research ru
 export CURSOR_API_KEY="cursor_..."
 hiagentresearch config validate
 hiagentresearch init
-hiagentresearch run-group --group-id model_architecture --workdir . --quick
+hiagentresearch run-group --group-id model_architecture --workdir .
 hiagentresearch status --group-id model_architecture
 ```
 
@@ -58,14 +58,14 @@ The agent-owned workspace (`workdir`), read-only eval zone (derived from `evalua
 eval command, targets, and quality retry expectations come from `config.yaml`. The workspace
 `AGENTS.md` is generated from it.
 
-Framework guidance documents (read before each cycle) are fixed in
+The single framework guidance document (read before each cycle) is fixed in
 `hiagentresearch/src/core/guidance.py`:
 
-- `hiagentresearch/AGENTS.md` — control-plane rules
-- `hiagentresearch/skills/phase1-experiment-cycle/SKILL.md` — phase-1 cycle workflow
+- `hiagentresearch/AGENTS.md` — control-plane rules and the per-cycle contract
 
-The prompt also prepends `<workdir>/AGENTS.md` automatically. To change framework
-behavior for a fork, edit those files in the repo; do not add paths to `config.yaml`.
+The prompt also prepends `<workdir>/AGENTS.md` automatically (the project-scoped eval
+command and targets). To change framework behavior for a fork, edit `AGENTS.md`; do not
+add paths to `config.yaml`.
 
 Agents get fast feedback from their own quick tests in the workspace. The frozen
 eval adapter under `.hiagentresearch/eval/` remains the final authority and emits

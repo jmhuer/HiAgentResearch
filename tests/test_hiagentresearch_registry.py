@@ -15,8 +15,6 @@ def test_registry_init_and_intent_packet(tmp_path) -> None:
         attempt_count=1,
         last_failure_class="none",
         next_action="continue",
-        rollback_anchor_sha="",
-        key_evidence_refs=["run_1"],
     )
     registry.write_intent_packet(packet)
     loaded = registry.read_intent_packet("model_architecture")

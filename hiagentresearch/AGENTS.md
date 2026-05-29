@@ -8,10 +8,12 @@ This project uses a Cursor-first phase-1 research loop with a thin Python contro
 2. Each run writes planning artifacts under `.hiagentresearch/runs/<run_id>/`:
    - `experiment_intent.json`
    - `experiment_plan.md`
-3. Each run applies at least one bounded code edit to a workspace source file.
+3. Each run applies one bounded, real code edit to a workspace source file; keep edits
+   small, reversible, and syntactically valid. No marker-only or no-op runs.
 4. Each committed experiment includes a concise `.hiagentresearch/experiments/<group_id>/<run_id>.json` manifest.
 5. Do not create branch-memory Python files for hypotheses or markers.
-6. Every run must finish with eval artifacts and an auditable trail.
+6. Every run leaves an auditable trail. The orchestrator runs the eval *after* your edit
+   and that result is authoritative; you do not produce metric/eval artifacts yourself.
 
 ## Editing boundaries
 

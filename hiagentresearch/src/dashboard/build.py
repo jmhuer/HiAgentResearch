@@ -29,8 +29,9 @@ from hiagentresearch.src.core.outcomes import required_baseline_metrics
 from hiagentresearch.src.github.ingest import record_baseline_snapshot_from_manifest
 from hiagentresearch.src.lineage.resolve import LineageError, resolve_branch_bootstrap
 from hiagentresearch.src.paths import REPO_ROOT
+from hiagentresearch.src.registry import schema
 from hiagentresearch.src.registry.store import Registry
-from hiagentresearch.src.runtime.loop_controller import _ensure_baseline_snapshot, _install_dependency_files
+from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot, install_dependency_files
 
 
 DASHBOARD_SCHEMA_VERSION = 1
@@ -75,9 +76,9 @@ def build_from_registry(
     registry.init()
     should_compute_baseline = not source_label.startswith("github_artifacts")
     if should_compute_baseline and (source_label.startswith("github_artifacts") or os.environ.get("CI")):
-        _install_dependency_files(loaded)
+        install_dependency_files(loaded)
     if should_compute_baseline:
-        _ensure_baseline_snapshot(registry, loaded)
+        ensure_baseline_snapshot(registry, loaded)
     snapshot = registry.dashboard_snapshot()
     metric_targets = _metric_targets(loaded)
     snapshot["metric_targets"] = metric_targets
@@ -249,62 +250,10 @@ def _write_dashboard_db(
 
 
 def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
+    for table_ddl in schema.SHARED_TABLES:
+        conn.execute(table_ddl)
     conn.executescript(
         """
-        CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE runs (
-            run_id TEXT PRIMARY KEY,
-            group_id TEXT NOT NULL,
-            branch TEXT NOT NULL,
-            commit_sha TEXT,
-            workflow_run_id TEXT,
-            correlation_id TEXT DEFAULT '',
-            status TEXT NOT NULL,
-            failure_class TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE metrics (
-            run_id TEXT NOT NULL,
-            metric_name TEXT NOT NULL,
-            metric_value REAL NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE research_outcomes (
-            run_id TEXT PRIMARY KEY,
-            research_outcome TEXT NOT NULL,
-            improved_baseline INTEGER NOT NULL,
-            metrics_ok INTEGER NOT NULL,
-            next_action TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE experiments (
-            run_id TEXT PRIMARY KEY,
-            group_id TEXT NOT NULL,
-            branch TEXT NOT NULL,
-            loop_index INTEGER,
-            hypothesis_id TEXT NOT NULL,
-            hypothesis TEXT NOT NULL,
-            target_files_json TEXT NOT NULL,
-            planned_code_changes_json TEXT NOT NULL,
-            manifest_path TEXT NOT NULL,
-            lineage_mode TEXT,
-            lineage_parent_group_id TEXT,
-            lineage_anchor_sha TEXT,
-            lineage_anchor_policy TEXT,
-            lineage_parent_anchor_step INTEGER,
-            lineage_anchor_source_group TEXT,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE artifacts (
-            run_id TEXT NOT NULL,
-            artifact_path TEXT NOT NULL,
-            artifact_type TEXT NOT NULL,
-            sha256 TEXT NOT NULL,
-            size_bytes INTEGER NOT NULL,
-            created_at TEXT NOT NULL,
-            PRIMARY KEY (run_id, artifact_path)
-        );
         CREATE TABLE metric_expectations (
             group_id TEXT NOT NULL,
             metric_name TEXT NOT NULL,
@@ -319,26 +268,11 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_dashboard_outcomes_outcome ON research_outcomes(research_outcome, improved_baseline);
         CREATE INDEX idx_dashboard_experiments_group ON experiments(group_id, loop_index);
         CREATE INDEX idx_dashboard_expectations_metric ON metric_expectations(metric_name, group_id);
-        CREATE VIEW latest_group_summary AS
-            WITH latest AS (
-                SELECT *
-                FROM runs r
-                WHERE created_at = (
-                    SELECT MAX(created_at)
-                    FROM runs inner_r
-                    WHERE inner_r.group_id = r.group_id
-                )
-            )
-            SELECT latest.*,
-                   outcome.research_outcome,
-                   outcome.improved_baseline,
-                   outcome.next_action,
-                   accuracy.metric_value AS accuracy,
-                   latency.metric_value AS latency_ms
-            FROM latest
-            LEFT JOIN research_outcomes outcome ON latest.run_id = outcome.run_id
-            LEFT JOIN metrics accuracy ON latest.run_id = accuracy.run_id AND accuracy.metric_name = 'accuracy'
-            LEFT JOIN metrics latency ON latest.run_id = latency.run_id AND latency.metric_name = 'latency_ms';
+        """
+    )
+    conn.execute(f"CREATE VIEW latest_group_summary AS{schema.GROUP_SUMMARY_SELECT}")
+    conn.executescript(
+        """
         CREATE VIEW metric_series AS
             SELECT r.run_id, r.group_id, r.branch, r.commit_sha, r.workflow_run_id,
                    r.correlation_id, r.created_at, m.metric_name, m.metric_value,
@@ -507,7 +441,7 @@ def _inherit_anchors_combined(
             resolved_step = 0
         anchors[group.id] = {
             "parent_group_id": bootstrap.parent_group_id,
-            "anchor_source_group": bootstrap.parent_anchor_source_group_id or bootstrap.parent_group_id,
+            "anchor_source_group": bootstrap.anchor_source_group_id or bootstrap.parent_group_id,
             "commit_sha": bootstrap.start_ref,
             "anchor_policy": bootstrap.anchor_policy,
             "parent_trajectory_step": resolved_step,

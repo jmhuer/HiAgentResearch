@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from hiagentresearch.src.core.artifacts import FRAMEWORK_ARTIFACT_CONTRACT_VERSION
 from hiagentresearch.src.core.guidance import default_guidance_files
 from hiagentresearch.src.core.models import EvaluationSpec, ResearchGroup
+from hiagentresearch.src.core.pathspec import is_within
 from hiagentresearch.src.paths import DEFAULT_CONFIG_PATH, REPO_ROOT
 
 
@@ -106,14 +107,14 @@ class HiAgentResearchConfig(BaseModel):
         workdir = self.workdir.rstrip("/")
         if workdir not in ("", "."):
             dependency_outside = sorted(
-                path for path in self.dependency_files if not _is_within(path, workdir)
+                path for path in self.dependency_files if not is_within(path, workdir)
             )
             if dependency_outside:
                 raise ValueError(
                     f"dependency_files must live inside workdir ({self.workdir}): {dependency_outside}"
                 )
             entrypoint = self.evaluation.entrypoint.rstrip("/")
-            if _is_within(entrypoint, workdir):
+            if is_within(entrypoint, workdir):
                 raise ValueError(
                     f"evaluation.entrypoint must live outside workdir ({self.workdir}) so agents cannot own it: "
                     f"{self.evaluation.entrypoint}"
@@ -247,6 +248,7 @@ class HiAgentResearchConfig(BaseModel):
             branch=group.branch,
             objective=group.objective,
             policy_mode=group.policy_mode,
+            policy_mode_description=self.policy_modes.get(group.policy_mode, ""),
             evaluation=self.evaluation_for_group(group),
             workdir=self.workdir,
             reference_paths=self.all_reference_paths(),
@@ -267,14 +269,6 @@ def _safe_format(template: str, values: dict[str, str]) -> str:
         if field_name:
             used[field_name] = values.get(field_name, "")
     return template.format(**used)
-
-
-def _is_within(path: str, root: str) -> bool:
-    normalized = path.rstrip("/")
-    root_normalized = root.rstrip("/")
-    if root_normalized in ("", "."):
-        return True
-    return normalized == root_normalized or normalized.startswith(f"{root_normalized}/")
 
 
 def load_config(path: Path | None = None) -> HiAgentResearchConfig:

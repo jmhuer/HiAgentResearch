@@ -4,28 +4,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from hiagentresearch.src.core.pathspec import is_under_any, is_within
+
 
 class GitServiceError(RuntimeError):
     """Raised when a git operation fails."""
-
-
-def _is_within(path: str, root: str) -> bool:
-    normalized = path.rstrip("/")
-    root_normalized = root.rstrip("/")
-    if root_normalized in ("", "."):
-        return True
-    return normalized == root_normalized or normalized.startswith(f"{root_normalized}/")
-
-
-def _is_under_any(path: str, prefixes: list[str]) -> bool:
-    normalized = path.rstrip("/")
-    for prefix in prefixes:
-        prefix_normalized = prefix.rstrip("/")
-        if not prefix_normalized:
-            continue
-        if normalized == prefix_normalized or normalized.startswith(f"{prefix_normalized}/"):
-            return True
-    return False
 
 
 def _is_workspace_bytecode_artifact(path: str) -> bool:
@@ -111,15 +94,6 @@ class GitService:
             changed.append(path.strip('"'))
         return sorted(set(changed))
 
-    def stage_paths(self, paths: list[str]) -> None:
-        if not paths:
-            raise GitServiceError("no paths provided to stage")
-        args = ["add"]
-        if any(path.startswith(".hiagentresearch/experiments/") for path in paths):
-            args.append("-f")
-        args.extend(paths)
-        self._run(args)
-
     def stage_research_commit(
         self,
         *,
@@ -155,7 +129,7 @@ class GitService:
                 candidate = path.strip()
                 if not candidate:
                     continue
-                if _is_under_any(candidate, excluded_paths) or _is_workspace_bytecode_artifact(candidate):
+                if is_under_any(candidate, excluded_paths) or _is_workspace_bytecode_artifact(candidate):
                     continue
                 self._run(["add", "--", candidate])
         self.assert_no_excluded_staged_paths(excluded_paths=excluded_paths)
@@ -181,7 +155,7 @@ class GitService:
         blocked = [
             path
             for path in self.changed_files(staged=True)
-            if _is_under_any(path, excluded_paths) or _is_workspace_bytecode_artifact(path)
+            if is_under_any(path, excluded_paths) or _is_workspace_bytecode_artifact(path)
         ]
         if blocked:
             raise GitServiceError(
@@ -199,9 +173,9 @@ class GitService:
     ) -> bool:
         excluded = [*generated_paths, *reference_paths, *hidden_paths]
         for path in self.changed_files(staged=True):
-            if not _is_within(path, workdir):
+            if not is_within(path, workdir):
                 continue
-            if _is_under_any(path, excluded):
+            if is_under_any(path, excluded):
                 continue
             return True
         return False

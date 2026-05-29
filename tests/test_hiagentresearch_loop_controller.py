@@ -3,8 +3,8 @@ from pathlib import Path
 
 from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.github.actions import GitHubRun
+from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot
 from hiagentresearch.src.runtime.loop_controller import (
-    _ensure_baseline_snapshot,
     _extract_last_json_object,
     _preserve_parallel_failure_artifacts,
     _run_group_capture,
@@ -114,6 +114,7 @@ def test_run_group_capture_parses_json_after_pip_noise() -> None:
 
 def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
     monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.init_state", lambda: 0)
     run_dir = tmp_path / ".hiagentresearch" / "runs" / "run_test"
     run_dir.mkdir(parents=True)
@@ -170,7 +171,7 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
     git = FakeGit()
     installed = {}
     monkeypatch.setattr(
-        "hiagentresearch.src.runtime.loop_controller._install_dependency_files",
+        "hiagentresearch.src.runtime.loop_controller.install_dependency_files",
         lambda config: installed.setdefault("called", True),
     )
     registry = Registry(tmp_path / ".hiagentresearch" / "state")
@@ -181,7 +182,6 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
         branch="research/model-architecture",
         loops=1,
         workdir=tmp_path,
-        quick=True,
         agent_model="composer-2.5",
         config=load_config(Path("config.yaml")),
         git=git,
@@ -290,7 +290,7 @@ def test_ensure_baseline_snapshot_uses_github_eval_node(tmp_path) -> None:
 
     fake_github = FakeGitHub()
 
-    _ensure_baseline_snapshot(
+    ensure_baseline_snapshot(
         registry,
         load_config(Path("config.yaml")),
         github=fake_github,

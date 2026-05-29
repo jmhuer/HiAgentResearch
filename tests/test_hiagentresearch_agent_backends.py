@@ -94,7 +94,6 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
         attempt_count=0,
         last_failure_class="none",
         next_action="continue",
-        rollback_anchor_sha="",
     )
     run_dir = tmp_path / "run_test"
     run_dir.mkdir()
@@ -111,9 +110,6 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
     assert record.success is True
     assert FakeAgent.kwargs["model"] == "composer-2.5"
     assert "hiagentresearch/AGENTS.md" in (run_dir / "agent_prompt.txt").read_text(encoding="utf-8")
-    assert "hiagentresearch/skills/phase1-experiment-cycle/SKILL.md" in (
-        run_dir / "agent_prompt.txt"
-    ).read_text(encoding="utf-8")
     assert "streamed assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
     assert "dict assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
     assert "dump text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")

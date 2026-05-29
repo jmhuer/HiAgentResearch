@@ -205,7 +205,7 @@ def test_best_commit_prefers_parent_l0_when_baseline_is_higher(monkeypatch, tmp_
     )
     assert bootstrap.start_ref == "mainsha"
     assert bootstrap.parent_anchor_step == 0
-    assert bootstrap.parent_anchor_source_group_id is None
+    assert bootstrap.anchor_source_group_id is None
 
 
 def test_hyperparameter_can_inherit_parent_origin_commit_from_model(monkeypatch, tmp_path) -> None:
@@ -270,7 +270,7 @@ def test_hyperparameter_can_inherit_parent_origin_commit_from_model(monkeypatch,
     assert bootstrap.parent_anchor_step == 2
     # The winning commit is owned by the grandparent (model_architecture), not the
     # immediate parent (optimization_strategy) which never beat that baseline.
-    assert bootstrap.parent_anchor_source_group_id == "model_architecture"
+    assert bootstrap.anchor_source_group_id == "model_architecture"
 
 
 def test_force_mode_fails_fast(tmp_path) -> None:

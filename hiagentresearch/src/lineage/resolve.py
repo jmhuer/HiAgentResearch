@@ -28,7 +28,9 @@ class BranchBootstrap:
     anchor_policy: str | None = None
     anchor_metric: str | None = None
     parent_anchor_step: int | None = None
-    parent_anchor_source_group_id: str | None = None
+    # Group that actually owns the anchor commit; may be an ancestor (not the
+    # immediate parent) when the parent never beat the baseline it inherited.
+    anchor_source_group_id: str | None = None
 
 
 def resolve_branch_bootstrap(
@@ -73,7 +75,7 @@ def resolve_branch_bootstrap(
         anchor_policy=lineage.anchor_policy,
         anchor_metric=lineage.anchor_metric,
         parent_anchor_step=parent_anchor_step,
-        parent_anchor_source_group_id=anchor_source_group,
+        anchor_source_group_id=anchor_source_group,
     )
 
 

@@ -5,11 +5,13 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from hiagentresearch.src.core.coerce import as_int_or_none, as_string_list, optional_str
 from hiagentresearch.src.core.models import IntentPacket, TransitionEvent, utc_now_iso
 from hiagentresearch.src.core.outcomes import normalize_research_outcome_name, outcome_met_targets
+from hiagentresearch.src.registry import schema
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class Registry:
@@ -22,39 +24,8 @@ class Registry:
         conn = sqlite3.connect(self.db_path)
         try:
             conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS schema_meta (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS runs (
-                    run_id TEXT PRIMARY KEY,
-                    group_id TEXT NOT NULL,
-                    branch TEXT NOT NULL,
-                    commit_sha TEXT,
-                    workflow_run_id TEXT,
-                    correlation_id TEXT DEFAULT '',
-                    status TEXT NOT NULL,
-                    failure_class TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS metrics (
-                    run_id TEXT NOT NULL,
-                    metric_name TEXT NOT NULL,
-                    metric_value REAL NOT NULL,
-                    created_at TEXT NOT NULL
-                )
-                """
-            )
+            for table_ddl in schema.SHARED_TABLES:
+                conn.execute(table_ddl)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS transitions (
@@ -70,52 +41,10 @@ class Registry:
             )
             conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS artifacts (
-                    run_id TEXT NOT NULL,
-                    artifact_path TEXT NOT NULL,
-                    artifact_type TEXT NOT NULL,
-                    sha256 TEXT NOT NULL,
-                    size_bytes INTEGER NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (run_id, artifact_path)
-                )
-                """
-            )
-            conn.execute(
-                """
                 CREATE TABLE IF NOT EXISTS intent_packets (
                     group_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS research_outcomes (
-                    run_id TEXT PRIMARY KEY,
-                    research_outcome TEXT NOT NULL,
-                    improved_baseline INTEGER NOT NULL,
-                    metrics_ok INTEGER NOT NULL,
-                    next_action TEXT NOT NULL,
-                    reason TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS experiments (
-                    run_id TEXT PRIMARY KEY,
-                    group_id TEXT NOT NULL,
-                    branch TEXT NOT NULL,
-                    loop_index INTEGER,
-                    hypothesis_id TEXT NOT NULL,
-                    hypothesis TEXT NOT NULL,
-                    target_files_json TEXT NOT NULL,
-                    planned_code_changes_json TEXT NOT NULL,
-                    manifest_path TEXT NOT NULL,
-                    created_at TEXT NOT NULL
                 )
                 """
             )
@@ -172,6 +101,11 @@ class Registry:
         ):
             if column not in experiment_columns:
                 conn.execute(ddl)
+        outcome_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(research_outcomes)").fetchall()
+        }
+        if "metrics_ok" in outcome_columns:
+            conn.execute("ALTER TABLE research_outcomes DROP COLUMN metrics_ok")
         conn.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -319,13 +253,12 @@ class Registry:
         conn.execute(
             """
             INSERT OR REPLACE INTO research_outcomes
-            (run_id, research_outcome, improved_baseline, metrics_ok, next_action, reason, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (run_id, research_outcome, improved_baseline, next_action, reason, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
                 research_outcome,
-                1 if met_targets else 0,
                 1 if met_targets else 0,
                 str(outcome.get("next_action", "")),
                 str(outcome.get("reason", "")),
@@ -370,18 +303,18 @@ class Registry:
                     run_id,
                     str(manifest.get("group_id", "")),
                     str(manifest.get("branch", "")),
-                    _as_int_or_none(manifest.get("loop_index")),
+                    as_int_or_none(manifest.get("loop_index")),
                     str(manifest.get("hypothesis_id", "")),
                     str(manifest.get("hypothesis", "")),
-                    json.dumps(_as_string_list(manifest.get("target_files")), sort_keys=True),
-                    json.dumps(_as_string_list(manifest.get("planned_code_changes")), sort_keys=True),
+                    json.dumps(as_string_list(manifest.get("target_files")), sort_keys=True),
+                    json.dumps(as_string_list(manifest.get("planned_code_changes")), sort_keys=True),
                     manifest_path,
-                    _optional_str(manifest.get("lineage_mode")),
-                    _optional_str(manifest.get("lineage_parent_group_id")),
-                    _optional_str(manifest.get("lineage_anchor_sha")),
-                    _optional_str(manifest.get("lineage_anchor_policy")),
-                    _as_int_or_none(manifest.get("lineage_parent_anchor_step")),
-                    _optional_str(manifest.get("lineage_anchor_source_group")),
+                    optional_str(manifest.get("lineage_mode")),
+                    optional_str(manifest.get("lineage_parent_group_id")),
+                    optional_str(manifest.get("lineage_anchor_sha")),
+                    optional_str(manifest.get("lineage_anchor_policy")),
+                    as_int_or_none(manifest.get("lineage_parent_anchor_step")),
+                    optional_str(manifest.get("lineage_anchor_source_group")),
                     now,
                 ),
             )
@@ -492,29 +425,6 @@ class Registry:
         finally:
             conn.close()
 
-    def best_github_run(self, group_id: str, metric_name: str) -> dict[str, Any] | None:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            row = conn.execute(
-                """
-                SELECT r.*
-                FROM runs r
-                JOIN metrics m ON r.run_id = m.run_id
-                WHERE r.group_id = ?
-                  AND r.failure_class = 'none'
-                  AND m.metric_name = ?
-                  AND r.run_id LIKE 'gh_%'
-                  AND r.commit_sha != ''
-                ORDER BY m.metric_value DESC, r.created_at DESC
-                LIMIT 1
-                """,
-                (group_id, metric_name),
-            ).fetchone()
-            return _row_to_dict(row) if row else None
-        finally:
-            conn.close()
-
     def github_runs_with_metric(self, group_id: str, metric_name: str) -> list[dict[str, Any]]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -553,10 +463,7 @@ class Registry:
             ).fetchone()
             if not row:
                 return None
-            payload = _row_to_dict(row)
-            payload["target_files"] = json.loads(str(payload.pop("target_files_json")))
-            payload["planned_code_changes"] = json.loads(str(payload.pop("planned_code_changes_json")))
-            return payload
+            return _experiment_row_to_dict(row)
         finally:
             conn.close()
 
@@ -650,10 +557,7 @@ class Registry:
             ).fetchone()
             if not row:
                 return None
-            payload = _row_to_dict(row)
-            payload["target_files"] = json.loads(str(payload.pop("target_files_json")))
-            payload["planned_code_changes"] = json.loads(str(payload.pop("planned_code_changes_json")))
-            return payload
+            return _experiment_row_to_dict(row)
         finally:
             conn.close()
 
@@ -712,28 +616,7 @@ class Registry:
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(
-                """
-                WITH latest AS (
-                    SELECT *
-                    FROM runs r
-                    WHERE created_at = (
-                        SELECT MAX(created_at)
-                        FROM runs inner_r
-                        WHERE inner_r.group_id = r.group_id
-                    )
-                )
-                SELECT latest.*,
-                       outcome.research_outcome,
-                       outcome.improved_baseline,
-                       outcome.next_action,
-                       accuracy.metric_value AS accuracy,
-                       latency.metric_value AS latency_ms
-                FROM latest
-                LEFT JOIN research_outcomes outcome ON latest.run_id = outcome.run_id
-                LEFT JOIN metrics accuracy ON latest.run_id = accuracy.run_id AND accuracy.metric_name = 'accuracy'
-                LEFT JOIN metrics latency ON latest.run_id = latency.run_id AND latency.metric_name = 'latency_ms'
-                ORDER BY latest.group_id
-                """
+                f"{schema.GROUP_SUMMARY_SELECT}\nORDER BY latest.group_id"
             ).fetchall()
             return [_row_to_dict(row) for row in rows]
         finally:
@@ -755,12 +638,12 @@ class Registry:
                     """
                 ).fetchall()
             ]
-            experiments = []
-            for row in conn.execute("SELECT * FROM experiments ORDER BY group_id, loop_index, created_at").fetchall():
-                payload = _row_to_dict(row)
-                payload["target_files"] = json.loads(str(payload.pop("target_files_json")))
-                payload["planned_code_changes"] = json.loads(str(payload.pop("planned_code_changes_json")))
-                experiments.append(payload)
+            experiments = [
+                _experiment_row_to_dict(row)
+                for row in conn.execute(
+                    "SELECT * FROM experiments ORDER BY group_id, loop_index, created_at"
+                ).fetchall()
+            ]
             return {
                 "export_schema_version": 1,
                 "registry_schema_version": self.schema_version(),
@@ -790,27 +673,14 @@ def _sha256(payload: bytes) -> str:
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     payload = dict(row)
-    for key in ("improved_baseline", "metrics_ok"):
-        if key in payload and payload[key] is not None:
-            payload[key] = bool(payload[key])
+    if payload.get("improved_baseline") is not None:
+        payload["improved_baseline"] = bool(payload["improved_baseline"])
     return payload
 
 
-def _as_string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value]
-
-
-def _as_int_or_none(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
+def _experiment_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    """Parse a single ``experiments`` row, decoding its JSON list columns once."""
+    payload = _row_to_dict(row)
+    payload["target_files"] = json.loads(str(payload.pop("target_files_json")))
+    payload["planned_code_changes"] = json.loads(str(payload.pop("planned_code_changes_json")))
+    return payload
