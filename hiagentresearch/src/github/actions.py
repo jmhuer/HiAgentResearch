@@ -134,17 +134,46 @@ class GitHubActionsService:
             raise GitHubActionsError(f"no hiagentresearch artifact directory found in {download_dir}")
         return candidates[0]
 
-    def _run(self, args: list[str]) -> str:
-        proc = subprocess.run(
-            ["gh", *args],
-            cwd=self.repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            raise GitHubActionsError(f"gh {' '.join(args)} failed: {proc.stderr.strip()}")
-        return proc.stdout
+    def _run(self, args: list[str], *, retries: int = 4, backoff_sec: float = 3.0) -> str:
+        last_error = ""
+        for attempt in range(retries + 1):
+            proc = subprocess.run(
+                ["gh", *args],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if proc.returncode == 0:
+                return proc.stdout
+            last_error = proc.stderr.strip()
+            if attempt < retries and _is_transient_gh_error(last_error):
+                time.sleep(backoff_sec * (attempt + 1))
+                continue
+            break
+        raise GitHubActionsError(f"gh {' '.join(args)} failed: {last_error}")
+
+
+_TRANSIENT_GH_ERROR_MARKERS = (
+    "timeout",
+    "timed out",
+    "tls handshake",
+    "connection reset",
+    "connection refused",
+    "temporary failure",
+    "eof",
+    "no such host",
+    "i/o timeout",
+    "503",
+    "502",
+    "server error",
+)
+
+
+def _is_transient_gh_error(stderr: str) -> bool:
+    """True for network/server hiccups that are safe to retry (not bad-command/auth errors)."""
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in _TRANSIENT_GH_ERROR_MARKERS)
 
 
 def load_run_meta(artifact_dir: Path) -> dict[str, Any]:

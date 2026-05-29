@@ -1,6 +1,42 @@
 import subprocess
 
-from hiagentresearch.src.github.actions import GitHubActionsService
+from hiagentresearch.src.github.actions import GitHubActionsError, GitHubActionsService
+
+
+def test_github_actions_retries_transient_network_errors(monkeypatch, tmp_path) -> None:
+    calls = {"n": 0}
+
+    def fake_run(args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return subprocess.CompletedProcess(args, 1, "", "net/http: TLS handshake timeout")
+        return subprocess.CompletedProcess(args, 0, "[]", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("hiagentresearch.src.github.actions.time.sleep", lambda *_: None)
+    service = GitHubActionsService(tmp_path)
+
+    assert service.list_runs(branch="research/data-augmentation") == []
+    assert calls["n"] == 2
+
+
+def test_github_actions_does_not_retry_real_errors(monkeypatch, tmp_path) -> None:
+    calls = {"n": 0}
+
+    def fake_run(args, **kwargs):
+        calls["n"] += 1
+        return subprocess.CompletedProcess(args, 1, "", "unknown command \"bogus\" for \"gh\"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("hiagentresearch.src.github.actions.time.sleep", lambda *_: None)
+    service = GitHubActionsService(tmp_path)
+
+    try:
+        service.list_runs(branch="research/data-augmentation")
+        raise AssertionError("expected GitHubActionsError")
+    except GitHubActionsError:
+        pass
+    assert calls["n"] == 1
 
 
 def test_github_actions_lists_and_finds_runs(monkeypatch, tmp_path) -> None:
