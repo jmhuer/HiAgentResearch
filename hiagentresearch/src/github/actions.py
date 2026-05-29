@@ -97,15 +97,27 @@ class GitHubActionsService:
             time.sleep(sleep_sec)
         raise GitHubActionsError(f"no new GitHub Actions run found for {head_sha} on {branch}")
 
-    def watch_run(self, run_id: str) -> bool:
-        proc = subprocess.run(
-            ["gh", "run", "watch", run_id, "--exit-status"],
-            cwd=self.repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return proc.returncode == 0
+    def watch_run(self, run_id: str, *, poll_sec: float = 10.0, max_wait_sec: float = 2700.0) -> bool:
+        """Block until a run reaches a terminal status, returning True on success.
+
+        Polls ``gh run view`` rather than ``gh run watch``: the streaming watch can hang
+        indefinitely even after a run has completed, which stalls the whole loop.
+        """
+        deadline = time.monotonic() + max_wait_sec
+        while time.monotonic() < deadline:
+            proc = subprocess.run(
+                ["gh", "run", "view", run_id, "--json", "status,conclusion"],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if proc.returncode == 0:
+                payload = json.loads(proc.stdout or "{}")
+                if payload.get("status") == "completed":
+                    return payload.get("conclusion") == "success"
+            time.sleep(poll_sec)
+        return False
 
     def download_artifacts(self, *, run_id: str, target_dir: Path, clean: bool = True) -> Path:
         if clean and target_dir.exists():

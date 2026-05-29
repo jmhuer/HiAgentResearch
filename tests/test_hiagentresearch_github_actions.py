@@ -29,9 +29,20 @@ def test_github_actions_lists_and_finds_runs(monkeypatch, tmp_path) -> None:
     assert run.head_sha == "abc"
 
 
+def test_github_actions_watch_returns_true_on_successful_workflow(monkeypatch, tmp_path) -> None:
+    def fake_run(args, **kwargs):
+        assert args[1:4] == ["run", "view", "123"]
+        return subprocess.CompletedProcess(args, 0, '{"status": "completed", "conclusion": "success"}', "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    service = GitHubActionsService(tmp_path)
+
+    assert service.watch_run("123") is True
+
+
 def test_github_actions_watch_returns_false_on_failed_workflow(monkeypatch, tmp_path) -> None:
     def fake_run(args, **kwargs):
-        return subprocess.CompletedProcess(args, 1, "", "workflow failed")
+        return subprocess.CompletedProcess(args, 0, '{"status": "completed", "conclusion": "failure"}', "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     service = GitHubActionsService(tmp_path)
