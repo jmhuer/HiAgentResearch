@@ -53,7 +53,9 @@ def build_phase1_prompt(
         "are owned by the orchestrator and GitHub eval nodes.\n"
         "- Do not create branch-memory source files; the runtime records your intent.\n"
         "- These generated paths may appear while testing but are never committed as source changes:\n"
-        f"{generated_paths_text}\n"
+        f"{generated_paths_text}\n\n"
+        "When the intent JSON, the plan, and one bounded workspace edit are in place, stop and "
+        "return a short summary of what you changed. Do not keep exploring after the edit is done.\n"
     )
 
 

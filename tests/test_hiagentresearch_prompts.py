@@ -27,6 +27,9 @@ def test_prompt_is_config_backed() -> None:
     assert "hiagentresearch/AGENTS.md" in prompt
     assert group.evaluation.command not in prompt
     assert "orchestrator and GitHub eval nodes" in prompt
+    # The prompt gives the agent an explicit completion signal so the run finishes cleanly.
+    assert "stop and" in prompt
+    assert "Do not keep exploring after the edit is done" in prompt
     # The policy mode is sent with its meaning, not just the bare label.
     assert config.policy_modes[group.policy_mode] in prompt
     # No MNIST-internal source paths are hardcoded into the prompt anymore.
