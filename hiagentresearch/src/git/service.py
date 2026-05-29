@@ -129,46 +129,40 @@ class GitService:
     ) -> None:
         """Stage workspace edits and the experiment manifest without generated artifacts.
 
-        Uses git pathspec excludes derived from config (generated_paths, eval zone,
-        hidden_paths) so ``git add <workdir>`` cannot pick up MNIST data, checkpoints,
-        or bytecode even if an agent ran ``git add -f`` earlier in the cycle.
+        Unstages config-derived excluded prefixes, stages tracked updates and
+        untracked files that respect ``.gitignore``, then adds the manifest.
+        Rejects commits if data, checkpoints, bytecode, or eval-zone paths remain
+        in the index (including after agent ``git add -f``).
         """
         workdir_normalized = workdir.rstrip("/") or "."
         self.assert_no_excluded_staged_paths(excluded_paths=excluded_paths)
         self._unstage_excluded_paths(excluded_paths)
-        add_args = ["add", "--"]
-        if workdir_normalized not in ("", "."):
-            add_args.append(workdir_normalized)
-            for excluded in excluded_paths:
-                prefix = excluded.rstrip("/")
-                if not prefix or self._is_gitignored(prefix):
-                    continue
-                add_args.append(f":!{prefix}")
-                add_args.append(f":!{prefix}/**")
+        if workdir_normalized in ("", "."):
+            self._run(["add", "-u", "--", "."])
+            untracked_scope = ["--others", "--exclude-standard"]
         else:
-            add_args.append(".")
-            for excluded in excluded_paths:
-                prefix = excluded.rstrip("/")
-                if not prefix or self._is_gitignored(prefix):
-                    continue
-                add_args.append(f":!{prefix}")
-                add_args.append(f":!{prefix}/**")
-        self._run(add_args)
-        self.assert_no_excluded_staged_paths(excluded_paths=excluded_paths)
-        if manifest_path:
-            manifest = Path(self.repo_root) / manifest_path
-            if manifest.is_file():
-                self._run(["add", "-f", manifest_path])
-
-    def _is_gitignored(self, path: str) -> bool:
+            self._run(["add", "-u", "--", workdir_normalized])
+            untracked_scope = ["--others", "--exclude-standard", workdir_normalized]
         proc = subprocess.run(
-            ["git", "check-ignore", "-q", "--", path],
+            ["git", "ls-files", *untracked_scope],
             cwd=self.repo_root,
             capture_output=True,
             text=True,
             check=False,
         )
-        return proc.returncode == 0
+        if proc.returncode == 0:
+            for path in proc.stdout.splitlines():
+                candidate = path.strip()
+                if not candidate:
+                    continue
+                if _is_under_any(candidate, excluded_paths) or _is_workspace_bytecode_artifact(candidate):
+                    continue
+                self._run(["add", "--", candidate])
+        self.assert_no_excluded_staged_paths(excluded_paths=excluded_paths)
+        if manifest_path:
+            manifest = Path(self.repo_root) / manifest_path
+            if manifest.is_file():
+                self._run(["add", "-f", manifest_path])
 
     def _unstage_excluded_paths(self, excluded_paths: list[str]) -> None:
         for excluded in excluded_paths:
