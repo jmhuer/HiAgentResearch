@@ -19,6 +19,8 @@ def test_load_root_config() -> None:
     assert "reference_paths" not in HiAgentResearchConfig.model_fields
     assert "mnist/data/" in config.generated_paths_resolved()
     assert "mnist/src/checkpoints/" in config.generated_paths_resolved()
+    assert "mnist/data" in config.commit_excluded_paths()
+    assert "mnist/src/checkpoints" in config.commit_excluded_paths()
     assert "artifact_contract" not in HiAgentResearchConfig.model_fields
     assert config.dashboard.enabled is True
     assert config.dashboard.metrics == ["accuracy", "latency_ms"]

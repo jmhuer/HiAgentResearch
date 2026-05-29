@@ -37,8 +37,17 @@ class FakeGit:
     def resolve_ref(self, ref: str) -> str:
         return "mainsha"
 
-    def stage_paths(self, paths: list[str]) -> None:
-        self.staged_paths = paths
+    def stage_research_commit(
+        self,
+        *,
+        workdir: str,
+        manifest_path: str,
+        excluded_paths: list[str],
+    ) -> None:
+        self.staged_paths = [workdir, manifest_path]
+        self.staged_workdir = workdir
+        self.staged_manifest = manifest_path
+        self.staged_excluded = excluded_paths
 
     def changed_files(self, *, staged: bool = False) -> list[str]:
         return ["mnist/src/model.py"] if staged else []

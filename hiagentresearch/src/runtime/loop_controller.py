@@ -39,7 +39,13 @@ class GitLike(Protocol):
     def checkout_or_create(
         self, branch: str, *, base_branch: str = "main", start_ref: str | None = None
     ) -> None: ...
-    def stage_paths(self, paths: list[str]) -> None: ...
+    def stage_research_commit(
+        self,
+        *,
+        workdir: str,
+        manifest_path: str,
+        excluded_paths: list[str],
+    ) -> None: ...
     def changed_files(self, *, staged: bool = False) -> list[str]: ...
     def has_staged_workspace_change(
         self,
@@ -202,13 +208,16 @@ def run_loops(
             manifest_path=manifest_path,
             manifest=manifest,
         )
-        generated_paths = loaded_config.generated_paths_resolved()
-        reference_paths = loaded_config.all_reference_paths()
-        git_service.stage_paths([loaded_config.workdir, manifest_path])
+        excluded_paths = loaded_config.commit_excluded_paths()
+        git_service.stage_research_commit(
+            workdir=loaded_config.workdir,
+            manifest_path=manifest_path,
+            excluded_paths=excluded_paths,
+        )
         if not git_service.has_staged_workspace_change(
             workdir=loaded_config.workdir,
-            generated_paths=generated_paths,
-            reference_paths=reference_paths,
+            generated_paths=loaded_config.generated_paths_resolved(),
+            reference_paths=loaded_config.all_reference_paths(),
             hidden_paths=list(loaded_config.hidden_paths),
         ):
             return LoopSummary(

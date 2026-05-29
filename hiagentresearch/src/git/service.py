@@ -28,6 +28,11 @@ def _is_under_any(path: str, prefixes: list[str]) -> bool:
     return False
 
 
+def _is_workspace_bytecode_artifact(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return "/__pycache__/" in normalized or normalized.endswith(".pyc")
+
+
 @dataclass(slots=True)
 class GitCommandResult:
     args: list[str]
@@ -114,6 +119,81 @@ class GitService:
             args.append("-f")
         args.extend(paths)
         self._run(args)
+
+    def stage_research_commit(
+        self,
+        *,
+        workdir: str,
+        manifest_path: str,
+        excluded_paths: list[str],
+    ) -> None:
+        """Stage workspace edits and the experiment manifest without generated artifacts.
+
+        Uses git pathspec excludes derived from config (generated_paths, eval zone,
+        hidden_paths) so ``git add <workdir>`` cannot pick up MNIST data, checkpoints,
+        or bytecode even if an agent ran ``git add -f`` earlier in the cycle.
+        """
+        workdir_normalized = workdir.rstrip("/") or "."
+        self.assert_no_excluded_staged_paths(excluded_paths=excluded_paths)
+        self._unstage_excluded_paths(excluded_paths)
+        add_args = ["add", "--"]
+        if workdir_normalized not in ("", "."):
+            add_args.append(workdir_normalized)
+            for excluded in excluded_paths:
+                prefix = excluded.rstrip("/")
+                if not prefix or self._is_gitignored(prefix):
+                    continue
+                add_args.append(f":!{prefix}")
+                add_args.append(f":!{prefix}/**")
+        else:
+            add_args.append(".")
+            for excluded in excluded_paths:
+                prefix = excluded.rstrip("/")
+                if not prefix or self._is_gitignored(prefix):
+                    continue
+                add_args.append(f":!{prefix}")
+                add_args.append(f":!{prefix}/**")
+        self._run(add_args)
+        self.assert_no_excluded_staged_paths(excluded_paths=excluded_paths)
+        if manifest_path:
+            manifest = Path(self.repo_root) / manifest_path
+            if manifest.is_file():
+                self._run(["add", "-f", manifest_path])
+
+    def _is_gitignored(self, path: str) -> bool:
+        proc = subprocess.run(
+            ["git", "check-ignore", "-q", "--", path],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return proc.returncode == 0
+
+    def _unstage_excluded_paths(self, excluded_paths: list[str]) -> None:
+        for excluded in excluded_paths:
+            prefix = excluded.rstrip("/")
+            if not prefix:
+                continue
+            subprocess.run(
+                ["git", "reset", "HEAD", "--", prefix],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+    def assert_no_excluded_staged_paths(self, *, excluded_paths: list[str]) -> None:
+        blocked = [
+            path
+            for path in self.changed_files(staged=True)
+            if _is_under_any(path, excluded_paths) or _is_workspace_bytecode_artifact(path)
+        ]
+        if blocked:
+            raise GitServiceError(
+                "staged paths include generated or read-only artifacts: "
+                f"{sorted(blocked)}"
+            )
 
     def has_staged_workspace_change(
         self,

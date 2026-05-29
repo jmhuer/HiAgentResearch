@@ -187,6 +187,20 @@ class HiAgentResearchConfig(BaseModel):
                 resolved.append(f"{workdir}/{cleaned}")
         return resolved
 
+    def commit_excluded_paths(self) -> list[str]:
+        """Directory prefixes that must never be staged or committed on research branches."""
+        excluded = [
+            *self.generated_paths_resolved(),
+            *self.all_reference_paths(),
+            *self.hidden_paths,
+        ]
+        seen: list[str] = []
+        for path in excluded:
+            normalized = path.replace("\\", "/").rstrip("/")
+            if normalized and normalized not in seen:
+                seen.append(normalized)
+        return seen
+
     def workspace_agents_path(self) -> str:
         workdir = self.workdir.rstrip("/")
         return "AGENTS.md" if workdir in ("", ".") else f"{workdir}/AGENTS.md"
