@@ -26,7 +26,10 @@ from hiagentresearch.src.dashboard.trajectory import (
 )
 from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.core.outcomes import required_baseline_metrics
-from hiagentresearch.src.github.ingest import record_baseline_snapshot_from_manifest
+from hiagentresearch.src.github.ingest import (
+    build_synthetic_experiment_manifest,
+    record_baseline_snapshot_from_manifest,
+)
 from hiagentresearch.src.lineage.anchors import best_trajectory_anchor, last_trajectory_anchor
 from hiagentresearch.src.lineage.resolve import LineageError, resolve_branch_bootstrap
 from hiagentresearch.src.paths import REPO_ROOT
@@ -787,14 +790,23 @@ def _ingest_artifact_dir(*, registry: Registry, config: HiAgentResearchConfig, a
     manifest_path = artifact_dir / EXPERIMENT_MANIFEST
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        registry.record_experiment_manifest(
+        manifest_source = EXPERIMENT_MANIFEST
+    else:
+        manifest = build_synthetic_experiment_manifest(
             run_id=run_id,
-            manifest_path=EXPERIMENT_MANIFEST,
-            manifest=manifest,
+            group_id=group_id,
+            branch=branch,
+            meta=meta,
         )
-        record_baseline_snapshot_from_manifest(
-            registry, manifest, required=required_baseline_metrics(config.evaluation.targets)
-        )
+        manifest_source = "(synthetic:missing experiment_manifest.json)"
+    registry.record_experiment_manifest(
+        run_id=run_id,
+        manifest_path=manifest_source,
+        manifest=manifest,
+    )
+    record_baseline_snapshot_from_manifest(
+        registry, manifest, required=required_baseline_metrics(config.evaluation.targets)
+    )
     registry.record_artifacts(
         run_id=run_id,
         artifact_paths=[artifact_dir / name for name in eval_node_index_names()],

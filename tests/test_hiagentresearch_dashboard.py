@@ -394,6 +394,21 @@ def test_dashboard_build_from_artifacts(tmp_path) -> None:
     assert summary["metric_targets"]
 
 
+def test_dashboard_build_from_artifacts_synthesizes_missing_manifest(tmp_path) -> None:
+    artifact_dir = tmp_path / "artifacts" / "hiagentresearch-456"
+    artifact_dir.mkdir(parents=True)
+    _write_artifacts(artifact_dir)
+    (artifact_dir / "experiment_manifest.json").unlink()
+
+    output_dir = tmp_path / "site"
+    build_from_artifacts(artifact_root=tmp_path / "artifacts", output_dir=output_dir, config=load_config())
+
+    snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
+    experiment = snapshot["experiments"][0]
+    assert experiment["hypothesis_id"] == "model_architecture-direct-eval"
+    assert "missing" in (experiment["hypothesis"] or "").lower()
+
+
 def test_dashboard_cli_build(tmp_path, capsys) -> None:
     state_dir = tmp_path / "state"
     _seed_registry(state_dir)

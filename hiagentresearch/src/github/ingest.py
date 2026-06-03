@@ -89,12 +89,21 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
         except json.JSONDecodeError as exc:
             print(json.dumps({"ok": False, "error": f"malformed experiment manifest: {exc}"}, indent=2))
             return 1
-        registry.record_experiment_manifest(
+        manifest_source = EXPERIMENT_MANIFEST
+    else:
+        manifest = build_synthetic_experiment_manifest(
             run_id=run_id,
-            manifest_path=EXPERIMENT_MANIFEST,
-            manifest=manifest,
+            group_id=group_id,
+            branch=branch,
+            meta=meta,
         )
-        record_baseline_snapshot_from_manifest(registry, manifest, required=required)
+        manifest_source = "(synthetic:missing experiment_manifest.json)"
+    registry.record_experiment_manifest(
+        run_id=run_id,
+        manifest_path=manifest_source,
+        manifest=manifest,
+    )
+    record_baseline_snapshot_from_manifest(registry, manifest, required=required)
     registry.record_artifacts(
         run_id=run_id,
         artifact_paths=[artifact_dir / name for name in eval_node_index_names()],
@@ -161,6 +170,38 @@ def record_baseline_snapshot_from_metrics(
     if existing and baseline_metrics_complete((existing.get("metrics") or {}), required):
         return
     registry.record_baseline_snapshot(ref=ref, metrics=normalized)
+
+
+def build_synthetic_experiment_manifest(
+    *,
+    run_id: str,
+    group_id: str,
+    branch: str,
+    meta: dict,
+) -> dict[str, object]:
+    correlation_id = str(meta.get("correlation_id") or run_id)
+    commit_sha = str(meta.get("commit_sha") or "")
+    short_sha = commit_sha[:7] if commit_sha else "unknown"
+    return {
+        "group_id": group_id,
+        "branch": branch,
+        "loop_index": meta.get("loop_index"),
+        "hypothesis_id": f"{group_id}-direct-eval",
+        "hypothesis": (
+            "Direct branch evaluation fallback (experiment_manifest.json missing); "
+            f"correlation {correlation_id}, commit {short_sha}."
+        ),
+        "target_files": [],
+        "planned_code_changes": [
+            "Direct eval fallback: no experiment_manifest.json was uploaded with artifacts."
+        ],
+        "lineage_mode": meta.get("lineage_mode"),
+        "lineage_parent_group_id": meta.get("lineage_parent_group_id"),
+        "lineage_anchor_sha": meta.get("lineage_anchor_sha"),
+        "lineage_anchor_policy": meta.get("lineage_anchor_policy"),
+        "lineage_parent_anchor_step": meta.get("lineage_parent_anchor_step"),
+        "lineage_anchor_source_group": meta.get("lineage_anchor_source_group"),
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -326,6 +326,11 @@ function renderRunDetail() {
   const experiment = indexes.experiments.get(selectedRunId);
   const artifacts = (dashboardData.artifacts || []).filter((item) => item.run_id === selectedRunId);
   const metrics = (dashboardData.metrics || []).filter((item) => item.run_id === selectedRunId);
+  const fallbackExperiment = {
+    hypothesis: `Direct eval fallback for ${run?.group_id || "unknown"} (${run?.run_id || "unknown"}): experiment manifest metadata was not uploaded.`,
+    planned_code_changes: ["No experiment_manifest.json found for this run; showing eval-only provenance."],
+  };
+  const effectiveExperiment = experiment || fallbackExperiment;
   const container = document.getElementById("run-detail");
   const links = runLinks(run);
   if (!run) {
@@ -347,11 +352,11 @@ function renderRunDetail() {
     </div>
     <div class="detail-block">
       <strong>Hypothesis</strong>
-      ${escapeHtml(experiment?.hypothesis || "No experiment manifest recorded.")}
+      ${escapeHtml(effectiveExperiment.hypothesis || "No experiment manifest recorded.")}
     </div>
     <div class="detail-block">
       <strong>Planned Changes</strong>
-      ${(experiment?.planned_code_changes || []).map((item) => `<div>${escapeHtml(item)}</div>`).join("") || "None recorded."}
+      ${(effectiveExperiment.planned_code_changes || []).map((item) => `<div>${escapeHtml(item)}</div>`).join("") || "None recorded."}
     </div>
     <div class="detail-block">
       <strong>Metrics</strong>

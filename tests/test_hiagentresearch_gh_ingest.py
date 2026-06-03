@@ -97,3 +97,20 @@ def test_ingest_records_baseline_node_metrics(tmp_path, monkeypatch) -> None:
     registry.init()
     assert registry.baseline_snapshot()["ref"] == "main"
     assert registry.baseline_snapshot()["metrics"]["accuracy"] == 0.82
+
+
+def test_ingest_synthesizes_experiment_when_manifest_missing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(gh_ingest, "STATE_DIR", tmp_path / "state")
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    _write_required_artifacts(artifact_dir)
+    (artifact_dir / "experiment_manifest.json").unlink()
+
+    assert gh_ingest.ingest("gh_1", "model_architecture", "research/model-architecture", artifact_dir) == 0
+
+    registry = gh_ingest.Registry(tmp_path / "state")
+    registry.init()
+    experiment = registry.experiment_for_run("gh_1")
+    assert experiment is not None
+    assert experiment["hypothesis_id"] == "model_architecture-direct-eval"
+    assert "missing" in (experiment["hypothesis"] or "").lower()
