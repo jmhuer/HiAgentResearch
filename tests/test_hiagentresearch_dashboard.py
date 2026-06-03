@@ -277,6 +277,20 @@ def test_dashboard_lineage_winners_include_polish_last_commit_and_row_flags(tmp_
     registry.init()
     registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.80, "latency_ms": 50.0, "duration_sec": 1.0})
     registry.record_run(
+        run_id="gh_data_1",
+        group_id="data_augmentation",
+        branch="research/data-augmentation",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.85, "latency_ms": 9.8},
+        commit_sha="datasha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_data_1",
+        manifest_path=".hiagentresearch/experiments/data_augmentation/gh_data_1.json",
+        manifest={"group_id": "data_augmentation", "loop_index": 1},
+    )
+    registry.record_run(
         run_id="gh_model_1",
         group_id="model_architecture",
         branch="research/model-architecture",
@@ -397,6 +411,60 @@ def test_dashboard_lineage_winners_include_polish_last_commit_and_row_flags(tmp_
     anchor_row = next(row for row in snapshot["metrics"] if row.get("run_id") == "gh_hyper_1")
     assert anchor_row["is_inherit_anchor"] is True
     assert "polish_code" in anchor_row["inherit_anchor_for_groups"]
+
+
+def test_lineage_winner_after_wave_one_uses_model_not_unrun_inherit_children(tmp_path) -> None:
+    """Wave-1-only registry: model chain winner must not jump to baseline-only inherit groups."""
+    state_dir = tmp_path / "state"
+    registry = Registry(state_dir)
+    registry.init()
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.879, "latency_ms": 50.0, "duration_sec": 1.0})
+    for run_id, acc, sha, loop in (
+        ("gh_m1", 0.861, "sha1", 1),
+        ("gh_m2", 0.923, "sha2", 2),
+        ("gh_m3", 0.815, "sha3", 3),
+    ):
+        registry.record_run(
+            run_id=run_id,
+            group_id="model_architecture",
+            branch="research/model-architecture",
+            status="finished",
+            failure_class="none",
+            metrics={"accuracy": acc, "latency_ms": 10.0},
+            commit_sha=sha,
+        )
+        registry.record_experiment_manifest(
+            run_id=run_id,
+            manifest_path=f".hiagentresearch/experiments/model_architecture/{run_id}.json",
+            manifest={"group_id": "model_architecture", "loop_index": loop},
+        )
+    registry.record_run(
+        run_id="gh_d1",
+        group_id="data_augmentation",
+        branch="research/data-augmentation",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.939, "latency_ms": 10.0},
+        commit_sha="dsha1",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_d1",
+        manifest_path=".hiagentresearch/experiments/data_augmentation/gh_d1.json",
+        manifest={"group_id": "data_augmentation", "loop_index": 1},
+    )
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+    snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
+    winners = snapshot["lineage_topology"]["lineage_winners"]
+    assert winners["model_architecture"]["leaf_group_id"] == "model_architecture"
+    assert winners["model_architecture"]["winner_commit_sha"] == "sha2"
+    model_star = next(
+        row
+        for row in snapshot["metrics"]
+        if row.get("is_lineage_winner") and row.get("group_id") == "model_architecture"
+    )
+    assert model_star["run_id"] == "gh_m2"
+    assert "optimization_strategy" not in snapshot["lineage_topology"]["group_trajectory_winners"]
 
 
 def test_lineage_winner_uses_effective_leaf_when_configured_leaf_missing(tmp_path) -> None:

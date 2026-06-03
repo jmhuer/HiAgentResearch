@@ -447,6 +447,8 @@ def _lineage_winner_maps(
     git = GitService(REPO_ROOT)
     group_winners: dict[str, dict[str, Any]] = {}
     for group in config.research_groups:
+        if registry.last_github_run(group.id) is None:
+            continue
         policy = group.lineage.anchor_policy if group.lineage.mode == "inherit" else "best_commit"
         winner = _trajectory_winner_for_group(
             group_id=group.id,
@@ -470,7 +472,7 @@ def _lineage_winner_maps(
         if not chain:
             continue
         lineage_id = str(chain[0])
-        effective_leaf = _effective_leaf_group_id(chain, group_winners)
+        effective_leaf = _effective_leaf_group_id(chain, group_winners, registry)
         if not effective_leaf:
             continue
         leaf_winner = group_winners[effective_leaf]
@@ -488,10 +490,14 @@ def _lineage_winner_maps(
     return group_winners, lineage_winners
 
 
-def _effective_leaf_group_id(chain: list[str], group_winners: dict[str, dict[str, Any]]) -> str | None:
-    """Last chain group that has a trajectory winner (skips groups not run yet)."""
+def _effective_leaf_group_id(
+    chain: list[str],
+    group_winners: dict[str, dict[str, Any]],
+    registry: Registry,
+) -> str | None:
+    """Last chain group with a completed GitHub eval (skips not-yet-run inherit children)."""
     for group_id in reversed(chain):
-        if group_id in group_winners:
+        if group_id in group_winners and registry.last_github_run(group_id) is not None:
             return group_id
     return None
 
@@ -525,11 +531,12 @@ def _trajectory_winner_for_group(
         return None
     if anchor is None:
         return None
+    is_baseline = anchor.source_group_id is None and int(anchor.trajectory_step) == 0
     return {
         "commit_sha": anchor.ref,
-        "source_group_id": anchor.source_group_id or group_id,
+        "source_group_id": anchor.source_group_id,
         "trajectory_step": int(anchor.trajectory_step),
-        "is_baseline_anchor": anchor.source_group_id is None and int(anchor.trajectory_step) == 0,
+        "is_baseline_anchor": is_baseline,
     }
 
 
@@ -538,7 +545,11 @@ def _annotate_winner_flags(rows: list[dict[str, Any]], topology: dict[str, Any])
     lineage_winners = topology.get("lineage_winners") or {}
     inherit_anchors = topology.get("inherit_anchors") or {}
     lineage_by_source: dict[tuple[str, str], list[str]] = {}
+    lineage_baseline_roots: set[str] = set()
     for lineage_id, payload in lineage_winners.items():
+        if payload.get("is_baseline_anchor"):
+            lineage_baseline_roots.add(str(lineage_id))
+            continue
         source_group = str(payload.get("winner_source_group_id") or "")
         commit_sha = str(payload.get("winner_commit_sha") or "")
         if source_group and commit_sha:
@@ -557,14 +568,17 @@ def _annotate_winner_flags(rows: list[dict[str, Any]], topology: dict[str, Any])
         group_winner = group_winners.get(row_group)
         is_group_policy_winner = False
         if group_winner:
-            winner_source = str(group_winner.get("source_group_id") or "")
+            winner_group = str(group_winner.get("group_id") or row_group)
+            winner_source = str(group_winner.get("source_group_id") or winner_group)
             winner_sha = str(group_winner.get("commit_sha") or "").lower()
             winner_baseline = bool(group_winner.get("is_baseline_anchor", False))
             if winner_baseline:
-                is_group_policy_winner = bool(row.get("is_baseline_anchor")) and row_group == winner_source
+                is_group_policy_winner = bool(row.get("is_baseline_anchor")) and row_group == winner_group
             else:
                 is_group_policy_winner = row_group == winner_source and bool(row_sha) and _sha_match(row_sha, winner_sha)
-        matching_lineages = lineage_by_source.get((row_group, row_sha), [])
+        matching_lineages = list(lineage_by_source.get((row_group, row_sha), []))
+        if row.get("is_baseline_anchor") and row_group in lineage_baseline_roots:
+            matching_lineages.append(row_group)
         matching_inherit_groups = inherit_by_source.get((row_group, row_sha), [])
         annotated.append(
             {
