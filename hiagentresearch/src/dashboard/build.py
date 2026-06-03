@@ -27,6 +27,7 @@ from hiagentresearch.src.dashboard.trajectory import (
 from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.core.outcomes import required_baseline_metrics
 from hiagentresearch.src.github.ingest import record_baseline_snapshot_from_manifest
+from hiagentresearch.src.lineage.anchors import best_trajectory_anchor, last_trajectory_anchor
 from hiagentresearch.src.lineage.resolve import LineageError, resolve_branch_bootstrap
 from hiagentresearch.src.paths import REPO_ROOT
 from hiagentresearch.src.registry import schema
@@ -88,6 +89,16 @@ def build_from_registry(
         registry,
         snapshot.get("experiments", []),
         snapshot.get("runs", []),
+    )
+    group_winners, lineage_winners = _lineage_winner_maps(loaded, registry=registry)
+    topology["group_trajectory_winners"] = group_winners
+    topology["lineage_winners"] = lineage_winners
+    registry.write_lineage_winners(
+        {
+            "updated_at": _now_iso(),
+            "group_trajectory_winners": group_winners,
+            "lineage_winners": lineage_winners,
+        }
     )
     snapshot["lineage_topology"] = topology
     snapshot["metrics"] = _enrich_metrics_for_dashboard(
@@ -349,9 +360,8 @@ def _enrich_metrics_for_dashboard(
                 baseline_snapshot=baseline_snapshot,
             )
         )
-    if not anchored:
-        return positioned
-    return assign_trajectory_positions([*anchored, *positioned], topology)
+    final_rows = positioned if not anchored else assign_trajectory_positions([*anchored, *positioned], topology)
+    return _annotate_winner_flags(final_rows, topology)
 
 
 def _dedupe_metric_rows(metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -411,7 +421,142 @@ def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | Non
         "execution_waves": config.execution_waves(),
         "baseline_snapshot": baseline_snapshot,
         "inherit_anchors": {},
+        "group_trajectory_winners": {},
+        "lineage_winners": {},
     }
+
+
+def _lineage_winner_maps(
+    config: HiAgentResearchConfig,
+    *,
+    registry: Registry,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    git = GitService(REPO_ROOT)
+    group_winners: dict[str, dict[str, Any]] = {}
+    for group in config.research_groups:
+        policy = group.lineage.anchor_policy if group.lineage.mode == "inherit" else "best_commit"
+        winner = _trajectory_winner_for_group(
+            group_id=group.id,
+            policy=policy,
+            metric=group.lineage.anchor_metric,
+            baseline_ref=config.orchestration.baseline_ref,
+            registry=registry,
+            git=git,
+        )
+        if winner is None:
+            continue
+        group_winners[group.id] = {
+            "group_id": group.id,
+            "anchor_policy": policy,
+            "anchor_metric": group.lineage.anchor_metric,
+            **winner,
+        }
+
+    lineage_winners: dict[str, dict[str, Any]] = {}
+    for chain in _lineage_topology(config, registry=registry).get("chains", []):
+        if not chain:
+            continue
+        lineage_id = str(chain[0])
+        leaf_group_id = str(chain[-1])
+        leaf_winner = group_winners.get(leaf_group_id)
+        if not leaf_winner:
+            continue
+        lineage_winners[lineage_id] = {
+            "lineage_id": lineage_id,
+            "leaf_group_id": leaf_group_id,
+            "winner_commit_sha": leaf_winner.get("commit_sha", ""),
+            "winner_source_group_id": leaf_winner.get("source_group_id"),
+            "anchor_policy": leaf_winner.get("anchor_policy"),
+            "anchor_metric": leaf_winner.get("anchor_metric"),
+            "trajectory_step": leaf_winner.get("trajectory_step"),
+            "is_baseline_anchor": bool(leaf_winner.get("is_baseline_anchor", False)),
+        }
+    return group_winners, lineage_winners
+
+
+def _trajectory_winner_for_group(
+    *,
+    group_id: str,
+    policy: str,
+    metric: str,
+    baseline_ref: str,
+    registry: Registry,
+    git: GitService,
+) -> dict[str, Any] | None:
+    if policy == "best_commit":
+        anchor = best_trajectory_anchor(
+            parent_group_id=group_id,
+            anchor_metric=metric,
+            baseline_ref=baseline_ref,
+            registry=registry,
+            git=git,
+        )
+    elif policy == "last_commit":
+        anchor = last_trajectory_anchor(
+            parent_group_id=group_id,
+            anchor_metric=metric,
+            baseline_ref=baseline_ref,
+            registry=registry,
+            git=git,
+        )
+    else:
+        return None
+    if anchor is None:
+        return None
+    return {
+        "commit_sha": anchor.ref,
+        "source_group_id": anchor.source_group_id or group_id,
+        "trajectory_step": int(anchor.trajectory_step),
+        "is_baseline_anchor": anchor.source_group_id is None and int(anchor.trajectory_step) == 0,
+    }
+
+
+def _annotate_winner_flags(rows: list[dict[str, Any]], topology: dict[str, Any]) -> list[dict[str, Any]]:
+    group_winners = topology.get("group_trajectory_winners") or {}
+    lineage_winners = topology.get("lineage_winners") or {}
+    lineage_by_source: dict[tuple[str, str], list[str]] = {}
+    for lineage_id, payload in lineage_winners.items():
+        source_group = str(payload.get("winner_source_group_id") or "")
+        commit_sha = str(payload.get("winner_commit_sha") or "")
+        if source_group and commit_sha:
+            lineage_by_source.setdefault((source_group, commit_sha.lower()), []).append(str(lineage_id))
+
+    annotated: list[dict[str, Any]] = []
+    for row in rows:
+        row_group = str(row.get("group_id", ""))
+        row_sha = str(row.get("commit_sha", "") or "").lower()
+        group_winner = group_winners.get(row_group)
+        is_group_policy_winner = False
+        if group_winner:
+            winner_source = str(group_winner.get("source_group_id") or "")
+            winner_sha = str(group_winner.get("commit_sha") or "").lower()
+            winner_baseline = bool(group_winner.get("is_baseline_anchor", False))
+            if winner_baseline:
+                is_group_policy_winner = bool(row.get("is_baseline_anchor")) and row_group == winner_source
+            else:
+                is_group_policy_winner = row_group == winner_source and bool(row_sha) and _sha_match(row_sha, winner_sha)
+        matching_lineages = lineage_by_source.get((row_group, row_sha), [])
+        annotated.append(
+            {
+                **row,
+                "is_group_policy_winner": is_group_policy_winner,
+                "is_lineage_winner": bool(matching_lineages),
+                "lineage_winner_ids": matching_lineages,
+            }
+        )
+    return annotated
+
+
+def _sha_match(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    return left == right or left.startswith(right) or right.startswith(left)
+
+
+def _now_iso() -> str:
+    from hiagentresearch.src.core.models import utc_now_iso
+
+    return utc_now_iso()
 
 
 def _inherit_anchors_combined(

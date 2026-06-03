@@ -29,6 +29,7 @@ orchestration:
     - [model_architecture, data_augmentation]
     - [optimization_strategy]
     - [hyperparameter_optimization]
+    - [polish_code]
 dashboard:
   enabled: true
   title: HiAgentResearch
@@ -75,4 +76,13 @@ research_groups:
       mode: inherit
       inherit_from: model_architecture
       anchor_policy: best_commit
+      anchor_metric: accuracy
+  - id: polish_code
+    branch: research/polish-code
+    objective: Improve code quality, structure, and maintainability.
+    policy_mode: exploit
+    lineage:
+      mode: inherit
+      inherit_from: hyperparameter_optimization
+      anchor_policy: last_commit
       anchor_metric: accuracy

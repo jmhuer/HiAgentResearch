@@ -65,6 +65,37 @@ def best_trajectory_anchor(
     return max(candidates, key=lambda item: _rank(item.metric_value, anchor_metric))
 
 
+def last_trajectory_anchor(
+    *,
+    parent_group_id: str,
+    anchor_metric: str,
+    baseline_ref: str,
+    registry: Registry,
+    git: GitService,
+) -> TrajectoryAnchor | None:
+    """Pick the latest successful commit on the parent trajectory."""
+    row = registry.last_github_run(parent_group_id)
+    if not row or not row.get("commit_sha"):
+        return None
+    commit_sha = str(row["commit_sha"])
+    origin = origin_trajectory_anchor(
+        parent_group_id=parent_group_id,
+        anchor_metric=anchor_metric,
+        baseline_ref=baseline_ref,
+        registry=registry,
+        git=git,
+    )
+    base_step = origin.trajectory_step if origin is not None else 0
+    loop_index = parent_trajectory_step_for_run(registry, parent_group_id, str(row["run_id"]))
+    metric_value = registry.metric_for_group_commit(parent_group_id, commit_sha, anchor_metric)
+    return TrajectoryAnchor(
+        ref=commit_sha,
+        trajectory_step=base_step + loop_index,
+        metric_value=float(metric_value) if metric_value is not None else 0.0,
+        source_group_id=parent_group_id,
+    )
+
+
 def origin_trajectory_anchor(
     *,
     parent_group_id: str,

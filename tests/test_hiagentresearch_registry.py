@@ -49,6 +49,22 @@ def test_registry_record_run(tmp_path) -> None:
     assert registry.metrics_for_run("run_abc") == {"accuracy": 0.991, "latency_ms": 12.0}
 
 
+def test_registry_lineage_winners_round_trip(tmp_path) -> None:
+    registry = Registry(tmp_path)
+    registry.init()
+    payload = {
+        "updated_at": "2026-06-02T00:00:00+00:00",
+        "lineage_winners": {
+            "model_architecture": {
+                "lineage_id": "model_architecture",
+                "winner_commit_sha": "abc123",
+            }
+        },
+    }
+    registry.write_lineage_winners(payload)
+    assert registry.lineage_winners() == payload
+
+
 def test_registry_records_research_outcome_and_experiment(tmp_path) -> None:
     registry = Registry(tmp_path)
     registry.init()

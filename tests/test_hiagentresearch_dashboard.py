@@ -42,13 +42,14 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
         "source": "global",
     } in snapshot["metric_targets"]
     assert snapshot["lineage_topology"]["chains"] == [
-        ["model_architecture", "optimization_strategy", "hyperparameter_optimization"],
+        ["model_architecture", "optimization_strategy", "hyperparameter_optimization", "polish_code"],
         ["data_augmentation"],
     ]
     assert snapshot["lineage_topology"]["execution_waves"] == [
         ["model_architecture", "data_augmentation"],
         ["optimization_strategy"],
         ["hyperparameter_optimization"],
+        ["polish_code"],
     ]
     assert all("trajectory_x" in row for row in snapshot["metrics"])
 
@@ -246,6 +247,131 @@ def test_dashboard_resolves_hyperparameter_anchor_from_optimization_origin(tmp_p
     # The anchor commit belongs to model_architecture (the grandparent peak), so the
     # dashboard must attribute the connector there, not to optimization_strategy.
     assert anchor["anchor_source_group"] == "model_architecture"
+
+
+def test_dashboard_lineage_winners_include_polish_last_commit_and_row_flags(tmp_path) -> None:
+    state_dir = tmp_path / "state"
+    registry = Registry(state_dir)
+    registry.init()
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.80, "latency_ms": 50.0, "duration_sec": 1.0})
+    registry.record_run(
+        run_id="gh_model_1",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.90, "latency_ms": 9.9},
+        commit_sha="modelsha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_model_1",
+        manifest_path=".hiagentresearch/experiments/model_architecture/gh_model_1.json",
+        manifest={"group_id": "model_architecture", "loop_index": 1},
+    )
+    registry.record_run(
+        run_id="gh_opt_1",
+        group_id="optimization_strategy",
+        branch="research/optimization-strategy",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.91, "latency_ms": 9.7},
+        commit_sha="optsha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_opt_1",
+        manifest_path=".hiagentresearch/experiments/optimization_strategy/gh_opt_1.json",
+        manifest={
+            "group_id": "optimization_strategy",
+            "loop_index": 1,
+            "lineage_mode": "inherit",
+            "lineage_parent_group_id": "model_architecture",
+            "lineage_anchor_sha": "modelsha",
+            "lineage_anchor_policy": "best_commit",
+            "lineage_parent_anchor_step": 1,
+            "lineage_anchor_source_group": "model_architecture",
+        },
+    )
+    registry.record_run(
+        run_id="gh_hyper_1",
+        group_id="hyperparameter_optimization",
+        branch="research/hyperparameter-optimization",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.92, "latency_ms": 9.6},
+        commit_sha="hypersha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_hyper_1",
+        manifest_path=".hiagentresearch/experiments/hyperparameter_optimization/gh_hyper_1.json",
+        manifest={
+            "group_id": "hyperparameter_optimization",
+            "loop_index": 1,
+            "lineage_mode": "inherit",
+            "lineage_parent_group_id": "optimization_strategy",
+            "lineage_anchor_sha": "optsha",
+            "lineage_anchor_policy": "best_commit",
+            "lineage_parent_anchor_step": 2,
+            "lineage_anchor_source_group": "optimization_strategy",
+        },
+    )
+    registry.record_run(
+        run_id="gh_polish_1",
+        group_id="polish_code",
+        branch="research/polish-code",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.89, "latency_ms": 9.5},
+        commit_sha="polishold",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_polish_1",
+        manifest_path=".hiagentresearch/experiments/polish_code/gh_polish_1.json",
+        manifest={
+            "group_id": "polish_code",
+            "loop_index": 1,
+            "lineage_mode": "inherit",
+            "lineage_parent_group_id": "hyperparameter_optimization",
+            "lineage_anchor_sha": "hypersha",
+            "lineage_anchor_policy": "last_commit",
+            "lineage_parent_anchor_step": 3,
+            "lineage_anchor_source_group": "hyperparameter_optimization",
+        },
+    )
+    registry.record_run(
+        run_id="gh_polish_2",
+        group_id="polish_code",
+        branch="research/polish-code",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.88, "latency_ms": 9.4},
+        commit_sha="polishnew",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_polish_2",
+        manifest_path=".hiagentresearch/experiments/polish_code/gh_polish_2.json",
+        manifest={
+            "group_id": "polish_code",
+            "loop_index": 2,
+            "lineage_mode": "inherit",
+            "lineage_parent_group_id": "hyperparameter_optimization",
+            "lineage_anchor_sha": "hypersha",
+            "lineage_anchor_policy": "last_commit",
+            "lineage_parent_anchor_step": 3,
+            "lineage_anchor_source_group": "hyperparameter_optimization",
+        },
+    )
+
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+    snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
+    topology = snapshot["lineage_topology"]
+    winners = topology["lineage_winners"]
+    assert winners["model_architecture"]["winner_commit_sha"] == "polishnew"
+    assert winners["model_architecture"]["leaf_group_id"] == "polish_code"
+    assert winners["data_augmentation"]["leaf_group_id"] == "data_augmentation"
+    row = next(row for row in snapshot["metrics"] if row.get("run_id") == "gh_polish_2")
+    assert row["is_group_policy_winner"] is True
+    assert row["is_lineage_winner"] is True
 
 
 def test_dashboard_build_from_artifacts(tmp_path) -> None:

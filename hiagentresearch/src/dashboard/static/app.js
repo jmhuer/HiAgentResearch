@@ -889,12 +889,19 @@ function resolveBaselineAnchorPoint(groupId, metricName, rows) {
 
 function chartPointDatum(point) {
   const selected = point.run_id === selectedRunId;
+  const isWinner = point.is_lineage_winner || point.is_group_policy_winner;
+  const symbol = isWinner ? "star" : "circle";
+  const baseSize = isWinner ? 12 : 8;
   return {
     value: point.metric_value,
     point,
-    symbol: "circle",
-    symbolSize: selected ? 12 : 8,
-    itemStyle: selected ? { borderColor: "#f6f7fb", borderWidth: 2 } : { borderWidth: 0 },
+    symbol,
+    symbolSize: selected ? baseSize + 2 : baseSize,
+    itemStyle: selected
+      ? { borderColor: "#f6f7fb", borderWidth: 2 }
+      : isWinner
+        ? { borderColor: "#f2cc60", borderWidth: 1.5 }
+        : { borderWidth: 0 },
   };
 }
 
@@ -977,6 +984,11 @@ function selectRun(runId, { scroll }) {
 
 function pointTooltipHtml(point) {
   if (!point) return "";
+  const winnerHint = point.is_lineage_winner
+    ? " · lineage winner"
+    : point.is_group_policy_winner
+      ? " · trajectory winner"
+      : "";
   const connector = point.is_baseline_anchor
     ? " · frozen baseline anchor"
     : point.is_inheritance_connector && point.lineage_parent_group_id
@@ -987,7 +999,7 @@ function pointTooltipHtml(point) {
   const lineage =
     point.lineage_mode === "inherit" && point.lineage_parent_group_id
       ? ` · inherit ${point.lineage_parent_group_id}@${shortSha(point.lineage_anchor_sha)}`
-      : connector;
+      : connector + winnerHint;
   return `
     <div class="tooltip-title">${escapeHtml(point.group_id)} · ${escapeHtml(point.metric_name)} ${formatMetric(point.metric_value)}</div>
     <div class="tooltip-muted">${escapeHtml(trajectoryLabel(point))}${lineage} · ${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</div>

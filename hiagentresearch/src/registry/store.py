@@ -127,10 +127,23 @@ class Registry:
             conn.close()
 
     def baseline_snapshot(self) -> dict[str, Any] | None:
+        return self._read_schema_meta_json("baseline_snapshot")
+
+    def lineage_winners(self) -> dict[str, Any]:
+        payload = self._read_schema_meta_json("lineage_winners")
+        if isinstance(payload, dict):
+            return payload
+        return {}
+
+    def write_lineage_winners(self, winners: dict[str, Any]) -> None:
+        self._write_schema_meta_json("lineage_winners", winners)
+
+    def _read_schema_meta_json(self, key: str) -> dict[str, Any] | None:
         conn = sqlite3.connect(self.db_path)
         try:
             row = conn.execute(
-                "SELECT value FROM schema_meta WHERE key = 'baseline_snapshot'",
+                "SELECT value FROM schema_meta WHERE key = ?",
+                (key,),
             ).fetchone()
         finally:
             conn.close()
@@ -148,14 +161,17 @@ class Registry:
             "metrics": {str(name): float(value) for name, value in metrics.items()},
             "created_at": utc_now_iso(),
         }
+        self._write_schema_meta_json("baseline_snapshot", payload)
+
+    def _write_schema_meta_json(self, key: str, payload: dict[str, Any]) -> None:
         conn = sqlite3.connect(self.db_path)
         try:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO schema_meta (key, value)
-                VALUES ('baseline_snapshot', ?)
+                VALUES (?, ?)
                 """,
-                (json.dumps(payload, sort_keys=True),),
+                (key, json.dumps(payload, sort_keys=True)),
             )
             conn.commit()
         finally:

@@ -142,6 +142,54 @@ def test_best_commit_prefers_highest_github_metric_not_latest(tmp_path) -> None:
     assert bootstrap.start_ref == "bestsha"
 
 
+def test_last_commit_prefers_latest_github_commit_even_if_metric_regresses(tmp_path) -> None:
+    registry = Registry(tmp_path / "state")
+    registry.init()
+    registry.record_run(
+        run_id="gh_old_better",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="completed",
+        failure_class="none",
+        metrics={"accuracy": 0.95},
+        commit_sha="oldsha",
+    )
+    registry.record_run(
+        run_id="gh_newer_worse",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="completed",
+        failure_class="none",
+        metrics={"accuracy": 0.70},
+        commit_sha="newersha",
+    )
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={"entrypoint": ".hiagentresearch/eval/run.py", "command_template": "true"},
+        policy_modes={"explore": "Explore."},
+        orchestration=OrchestrationConfig(
+            execution_waves=[["model_architecture"], ["optimization_strategy"]],
+        ),
+        research_groups=[
+            _group("model_architecture"),
+            _group(
+                "optimization_strategy",
+                mode="inherit",
+                inherit_from="model_architecture",
+                anchor_policy="last_commit",
+            ),
+        ],
+    )
+    bootstrap = resolve_branch_bootstrap(
+        config.group_by_id("optimization_strategy"),
+        config,
+        registry=registry,
+        git=GitService(tmp_path),
+    )
+    assert bootstrap.start_ref == "newersha"
+
+
 def test_record_experiment_manifest_persists_parent_anchor_step(tmp_path) -> None:
     registry = Registry(tmp_path / "state")
     registry.init()

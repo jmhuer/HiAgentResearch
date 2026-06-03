@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING
 from hiagentresearch.src.core.config import HiAgentResearchConfig, ResearchGroupConfig
 from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.lineage.anchors import (
+    TrajectoryAnchor,
     best_trajectory_anchor,
-    origin_trajectory_anchor,
-    parent_trajectory_step_for_run,
+    last_trajectory_anchor,
 )
 
 if TYPE_CHECKING:
@@ -88,31 +88,16 @@ def _resolve_inherit_ref(
     registry: Registry,
     git: GitService,
 ) -> tuple[str, int | None, str | None]:
-    if anchor_policy == "best_commit":
-        anchor = best_trajectory_anchor(
-            parent_group_id=parent.id,
-            anchor_metric=anchor_metric,
-            baseline_ref=baseline_ref,
-            registry=registry,
-            git=git,
-        )
-        if anchor:
-            return anchor.ref, anchor.trajectory_step, anchor.source_group_id
-    elif anchor_policy == "last_commit":
-        row = registry.last_github_run(parent.id)
-        if row and row.get("commit_sha"):
-            origin = origin_trajectory_anchor(
-                parent_group_id=parent.id,
-                anchor_metric=anchor_metric,
-                baseline_ref=baseline_ref,
-                registry=registry,
-                git=git,
-            )
-            base_step = origin.trajectory_step if origin is not None else 0
-            loop_index = parent_trajectory_step_for_run(registry, parent.id, str(row["run_id"]))
-            return str(row["commit_sha"]), base_step + loop_index, parent.id
-    else:
-        raise LineageError(f"unknown anchor_policy: {anchor_policy}")
+    anchor = _policy_anchor(
+        policy=anchor_policy,
+        parent_group_id=parent.id,
+        anchor_metric=anchor_metric,
+        baseline_ref=baseline_ref,
+        registry=registry,
+        git=git,
+    )
+    if anchor is not None:
+        return anchor.ref, anchor.trajectory_step, anchor.source_group_id
 
     for ref in (f"origin/{parent.branch}", parent.branch):
         if git.ref_exists(ref):
@@ -120,3 +105,31 @@ def _resolve_inherit_ref(
     raise LineageError(
         f"could not resolve inherit anchor for parent group {parent.id} (branch {parent.branch})"
     )
+
+
+def _policy_anchor(
+    *,
+    policy: str,
+    parent_group_id: str,
+    anchor_metric: str,
+    baseline_ref: str,
+    registry: Registry,
+    git: GitService,
+) -> TrajectoryAnchor | None:
+    if policy == "best_commit":
+        return best_trajectory_anchor(
+            parent_group_id=parent_group_id,
+            anchor_metric=anchor_metric,
+            baseline_ref=baseline_ref,
+            registry=registry,
+            git=git,
+        )
+    if policy == "last_commit":
+        return last_trajectory_anchor(
+            parent_group_id=parent_group_id,
+            anchor_metric=anchor_metric,
+            baseline_ref=baseline_ref,
+            registry=registry,
+            git=git,
+        )
+    raise LineageError(f"unknown anchor_policy: {policy}")
