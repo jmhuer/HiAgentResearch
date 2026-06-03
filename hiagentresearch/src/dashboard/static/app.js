@@ -236,7 +236,7 @@ function legendBandHeight(seriesCount) {
 }
 
 function renderFilters(data) {
-  const groups = unique((data.runs || []).map((run) => run.group_id));
+  const groups = configuredGroupIds(data);
   const metrics = chartMetricNames(data);
   setOptions("group-filter", groups, { allLabel: "All groups" });
   setOptions("metric-filter", metrics);
@@ -892,11 +892,20 @@ function resolveBaselineAnchorPoint(groupId, metricName, rows) {
   };
 }
 
+function configuredGroupIds(data) {
+  const topology = data.lineage_topology || {};
+  const fromWaves = (topology.execution_waves || []).flat();
+  const fromChains = (topology.chains || []).flat();
+  const fromRuns = (data.runs || []).map((run) => run.group_id);
+  return unique([...fromWaves, ...fromChains, ...fromRuns].filter(Boolean)).sort();
+}
+
 function chartPointDatum(point) {
   const selected = point.run_id === selectedRunId;
-  const isWinner = point.is_lineage_winner || point.is_group_policy_winner || point.is_inherit_anchor;
-  const symbol = isWinner ? "star" : "circle";
-  const baseSize = isWinner ? 12 : 8;
+  const isLineageWinner = Boolean(point.is_lineage_winner);
+  const isInheritAnchor = Boolean(point.is_inherit_anchor);
+  const symbol = isLineageWinner ? "star" : isInheritAnchor ? "diamond" : "circle";
+  const baseSize = isLineageWinner ? 12 : isInheritAnchor ? 10 : 8;
   return {
     value: point.metric_value,
     point,
@@ -904,9 +913,11 @@ function chartPointDatum(point) {
     symbolSize: selected ? baseSize + 2 : baseSize,
     itemStyle: selected
       ? { borderColor: "#f6f7fb", borderWidth: 2 }
-      : isWinner
+      : isLineageWinner
         ? { borderColor: "#f2cc60", borderWidth: 1.5 }
-        : { borderWidth: 0 },
+        : isInheritAnchor
+          ? { borderColor: "#7eb6ff", borderWidth: 1.5 }
+          : { borderWidth: 0 },
   };
 }
 

@@ -399,6 +399,59 @@ def test_dashboard_lineage_winners_include_polish_last_commit_and_row_flags(tmp_
     assert "polish_code" in anchor_row["inherit_anchor_for_groups"]
 
 
+def test_lineage_winner_uses_effective_leaf_when_configured_leaf_missing(tmp_path) -> None:
+    state_dir = tmp_path / "state"
+    registry = Registry(state_dir)
+    registry.init()
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.80, "latency_ms": 50.0, "duration_sec": 1.0})
+    registry.record_run(
+        run_id="gh_model_1",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.90, "latency_ms": 9.9},
+        commit_sha="modelsha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_model_1",
+        manifest_path=".hiagentresearch/experiments/model_architecture/gh_model_1.json",
+        manifest={"group_id": "model_architecture", "loop_index": 1},
+    )
+    registry.record_run(
+        run_id="gh_hyper_1",
+        group_id="hyperparameter_optimization",
+        branch="research/hyperparameter-optimization",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.94, "latency_ms": 9.5},
+        commit_sha="hypersha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_hyper_1",
+        manifest_path=".hiagentresearch/experiments/hyperparameter_optimization/gh_hyper_1.json",
+        manifest={
+            "group_id": "hyperparameter_optimization",
+            "loop_index": 1,
+            "lineage_mode": "inherit",
+            "lineage_parent_group_id": "optimization_strategy",
+            "lineage_anchor_sha": "optsha",
+            "lineage_anchor_policy": "best_commit",
+        },
+    )
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+    winners = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))["lineage_topology"]["lineage_winners"]
+    assert winners["model_architecture"]["leaf_group_id"] == "hyperparameter_optimization"
+    assert winners["model_architecture"]["configured_leaf_group_id"] == "polish_code"
+    lineage_stars = [
+        row
+        for row in json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))["metrics"]
+        if row.get("is_lineage_winner")
+    ]
+    assert len(lineage_stars) == 1
+
+
 def test_dashboard_build_from_artifacts(tmp_path) -> None:
     artifact_dir = tmp_path / "artifacts" / "hiagentresearch-123"
     artifact_dir.mkdir(parents=True)

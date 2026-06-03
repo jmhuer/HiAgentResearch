@@ -470,13 +470,14 @@ def _lineage_winner_maps(
         if not chain:
             continue
         lineage_id = str(chain[0])
-        leaf_group_id = str(chain[-1])
-        leaf_winner = group_winners.get(leaf_group_id)
-        if not leaf_winner:
+        effective_leaf = _effective_leaf_group_id(chain, group_winners)
+        if not effective_leaf:
             continue
+        leaf_winner = group_winners[effective_leaf]
         lineage_winners[lineage_id] = {
             "lineage_id": lineage_id,
-            "leaf_group_id": leaf_group_id,
+            "configured_leaf_group_id": str(chain[-1]),
+            "leaf_group_id": effective_leaf,
             "winner_commit_sha": leaf_winner.get("commit_sha", ""),
             "winner_source_group_id": leaf_winner.get("source_group_id"),
             "anchor_policy": leaf_winner.get("anchor_policy"),
@@ -485,6 +486,14 @@ def _lineage_winner_maps(
             "is_baseline_anchor": bool(leaf_winner.get("is_baseline_anchor", False)),
         }
     return group_winners, lineage_winners
+
+
+def _effective_leaf_group_id(chain: list[str], group_winners: dict[str, dict[str, Any]]) -> str | None:
+    """Last chain group that has a trajectory winner (skips groups not run yet)."""
+    for group_id in reversed(chain):
+        if group_id in group_winners:
+            return group_id
+    return None
 
 
 def _trajectory_winner_for_group(
