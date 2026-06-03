@@ -95,3 +95,17 @@ def test_edit_boundary_requires_a_workspace_source_change(monkeypatch) -> None:
     )
     assert valid is False
     assert "no workspace source change" in error
+
+
+def test_edit_boundary_allows_framework_experiment_artifacts(monkeypatch) -> None:
+    group = _group()
+    monkeypatch.setattr(
+        orchestrator,
+        "_git_changed_files",
+        lambda workdir: {"mnist/src/model.py", ".hiagentresearch/experiments/model_architecture/run_x.json"},
+    )
+    valid, error, changes = orchestrator._validate_edit_boundary(
+        workdir=Path("."), group=group, run_id="run_x", before_changes=set()
+    )
+    assert valid is True, error
+    assert "mnist/src/model.py" in changes

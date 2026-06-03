@@ -136,7 +136,11 @@ def _validate_edit_boundary(
 
 
 def _is_generated_path(path: str, generated_paths: list[str]) -> bool:
-    return is_under_any(path, generated_paths)
+    if is_under_any(path, generated_paths):
+        return True
+    # Experiment manifests are framework-generated bookkeeping and should not
+    # count as source edits during workspace boundary validation.
+    return is_under_any(path, [".hiagentresearch/experiments"])
 
 
 def _normalize_python_command(command: str) -> list[str]:
