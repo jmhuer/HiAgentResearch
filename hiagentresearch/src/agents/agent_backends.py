@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -94,53 +95,71 @@ def run_cursor_agent_cycle(
     result: Any
     agent: Any = None
     sdk_run: Any = None
-    try:
-        with Agent.create(
-            api_key=api_key,
-            model=model,
-            local=LocalAgentOptions(cwd=str(workdir)),
-            client=cursor_sdk_client(),
-        ) as agent:
+    startup_attempts = 2
+    for attempt in range(1, startup_attempts + 1):
+        try:
+            with Agent.create(
+                api_key=api_key,
+                model=model,
+                local=LocalAgentOptions(cwd=str(workdir)),
+                client=cursor_sdk_client(),
+            ) as agent:
+                _append_stream_event(
+                    stream_path,
+                    {
+                        "type": "agent_created",
+                        "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
+                        "model": model,
+                        "cwd": str(workdir),
+                        "startup_attempt": attempt,
+                    },
+                )
+                sdk_run = agent.send(prompt)
+                _append_stream_event(
+                    stream_path,
+                    {
+                        "type": "run_started",
+                        "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
+                        "sdk_run_id": getattr(sdk_run, "id", ""),
+                    },
+                )
+                try:
+                    for message in sdk_run.messages():
+                        payload = _sdk_message_payload(message)
+                        _append_stream_event(stream_path, payload)
+                        text = _message_text(message)
+                        if text:
+                            with messages_path.open("a", encoding="utf-8") as handle:
+                                handle.write(text)
+                                if not text.endswith("\n"):
+                                    handle.write("\n")
+                except Exception as exc:  # pragma: no cover - defensive; wait() still gives terminal status.
+                    stream_error = f"{type(exc).__name__}: {exc}"
+                    _append_stream_event(stream_path, {"type": "stream_error", "error": stream_error})
+                result = sdk_run.wait()
+                break
+        except CursorAgentError as exc:
+            can_retry = attempt < startup_attempts and bool(getattr(exc, "is_retryable", False))
             _append_stream_event(
                 stream_path,
                 {
-                    "type": "agent_created",
-                    "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
-                    "model": model,
-                    "cwd": str(workdir),
+                    "type": "startup_error",
+                    "attempt": attempt,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "is_retryable": bool(getattr(exc, "is_retryable", False)),
                 },
             )
-            sdk_run = agent.send(prompt)
-            _append_stream_event(
-                stream_path,
-                {
-                    "type": "run_started",
-                    "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
-                    "sdk_run_id": getattr(sdk_run, "id", ""),
-                },
-            )
-            try:
-                for message in sdk_run.messages():
-                    payload = _sdk_message_payload(message)
-                    _append_stream_event(stream_path, payload)
-                    text = _message_text(message)
-                    if text:
-                        with messages_path.open("a", encoding="utf-8") as handle:
-                            handle.write(text)
-                            if not text.endswith("\n"):
-                                handle.write("\n")
-            except Exception as exc:  # pragma: no cover - defensive; wait() still gives terminal status.
-                stream_error = f"{type(exc).__name__}: {exc}"
-                _append_stream_event(stream_path, {"type": "stream_error", "error": stream_error})
-            result = sdk_run.wait()
-    except CursorAgentError as exc:
-        record = _record_from_cursor_error(exc)
-        _write_record(run_dir=run_dir, record=record, prompt=prompt)
-        raise AgentBackendError(
-            f"Cursor agent failed to start ({type(exc).__name__}): {exc}",
-            failure_class=failure_class_for_cursor_agent_error(),
-            record=record,
-        ) from exc
+            if can_retry:
+                time.sleep(2.0)
+                continue
+            record = _record_from_cursor_error(exc)
+            _write_record(run_dir=run_dir, record=record, prompt=prompt)
+            raise AgentBackendError(
+                f"Cursor agent failed to start ({type(exc).__name__}): {exc}",
+                failure_class=failure_class_for_cursor_agent_error(),
+                record=record,
+            ) from exc
 
     status = str(result.status)
     failure_class = failure_class_for_cursor_run_status(status)
