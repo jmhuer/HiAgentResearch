@@ -175,6 +175,7 @@ jobs:
             stderr.txt
             parsed_eval.json
             experiment_manifest.json
+            orchestration_session.json
             .hiagentresearch/state/evals.db
 
       - name: Fail on execution failure

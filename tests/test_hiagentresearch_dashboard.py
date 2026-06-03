@@ -74,10 +74,10 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
 
 def test_dashboard_summary_includes_baseline_snapshot(tmp_path) -> None:
     state_dir = tmp_path / "state"
-    registry = _seed_registry(state_dir)
-    registry.record_baseline_snapshot(
-        ref="main",
-        metrics={"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
+    _seed_registry(
+        state_dir,
+        with_baseline=True,
+        baseline_metrics={"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
     )
     output_dir = tmp_path / "dashboard"
     build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
@@ -95,10 +95,10 @@ def test_dashboard_summary_includes_baseline_snapshot(tmp_path) -> None:
 
 def test_dashboard_skips_l0_baseline_for_inherit_groups(tmp_path) -> None:
     state_dir = tmp_path / "state"
-    registry = _seed_registry(state_dir)
-    registry.record_baseline_snapshot(
-        ref="main",
-        metrics={"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
+    registry = _seed_registry(
+        state_dir,
+        with_baseline=True,
+        baseline_metrics={"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
     )
     registry.record_run(
         run_id="gh_opt",
@@ -146,8 +146,11 @@ def test_dashboard_inherit_anchor_uses_resolved_best_commit(tmp_path, monkeypatc
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     state_dir = tmp_path / "state"
-    registry = _seed_registry(state_dir)
-    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.949, "latency_ms": 6.0})
+    registry = _seed_registry(
+        state_dir,
+        with_baseline=True,
+        baseline_metrics={"accuracy": 0.949, "latency_ms": 6.0, "duration_sec": 1.0},
+    )
     registry.record_run(
         run_id="gh_loop1",
         group_id="model_architecture",
@@ -167,7 +170,11 @@ def test_dashboard_inherit_anchor_uses_resolved_best_commit(tmp_path, monkeypatc
 
 def test_dashboard_topology_includes_inherit_anchors(tmp_path) -> None:
     state_dir = tmp_path / "state"
-    registry = _seed_registry(state_dir)
+    registry = _seed_registry(
+        state_dir,
+        with_baseline=True,
+        baseline_metrics={"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
+    )
     registry.record_run(
         run_id="gh_parent",
         group_id="model_architecture",
@@ -176,6 +183,18 @@ def test_dashboard_topology_includes_inherit_anchors(tmp_path) -> None:
         failure_class="none",
         metrics={"accuracy": 0.95, "latency_ms": 10.0},
         commit_sha="parentsha",
+    )
+    registry.record_experiment_manifest(
+        run_id="gh_parent",
+        manifest_path=".hiagentresearch/experiments/model_architecture/gh_parent.json",
+        manifest={
+            "group_id": "model_architecture",
+            "loop_index": 1,
+            "hypothesis_id": "parent",
+            "hypothesis": "Parent loop",
+            "target_files": ["mnist/src/model.py"],
+            "planned_code_changes": ["Edit model.py"],
+        },
     )
     registry.record_experiment_manifest(
         run_id="run_child",
@@ -194,7 +213,7 @@ def test_dashboard_topology_includes_inherit_anchors(tmp_path) -> None:
     topology = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))["lineage_topology"]
     anchor = topology["inherit_anchors"]["optimization_strategy"]
     assert anchor["commit_sha"] == "parentsha"
-    assert anchor["parent_anchor_loop_index"] == 0
+    assert anchor["parent_anchor_loop_index"] == 1
 
 
 def test_dashboard_resolves_hyperparameter_anchor_from_optimization_origin(tmp_path, monkeypatch) -> None:
@@ -205,8 +224,11 @@ def test_dashboard_resolves_hyperparameter_anchor_from_optimization_origin(tmp_p
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     state_dir = tmp_path / "state"
-    registry = _seed_registry(state_dir)
-    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.80, "latency_ms": 50.0, "duration_sec": 1.0})
+    registry = _seed_registry(
+        state_dir,
+        with_baseline=True,
+        baseline_metrics={"accuracy": 0.80, "latency_ms": 50.0, "duration_sec": 1.0},
+    )
     registry.record_run(
         run_id="gh_model_2",
         group_id="model_architecture",
@@ -409,6 +431,40 @@ def test_dashboard_build_from_artifacts_synthesizes_missing_manifest(tmp_path) -
     assert "missing" in (experiment["hypothesis"] or "").lower()
 
 
+def test_dashboard_excludes_runs_before_orchestration_session(tmp_path) -> None:
+    state_dir = tmp_path / "state"
+    registry = _seed_registry(state_dir)
+    conn = sqlite3.connect(registry.db_path)
+    try:
+        conn.execute(
+            "UPDATE runs SET created_at = ? WHERE run_id = ?",
+            ("2000-01-01T00:00:00+00:00", "run_abc"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    registry.record_baseline_snapshot(
+        ref="main",
+        metrics={"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
+    )
+    registry.record_run(
+        run_id="run_current",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.92, "latency_ms": 11.0},
+        correlation_id="run_current",
+    )
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+    snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
+    run_ids = {row["run_id"] for row in snapshot["runs"]}
+    assert "run_abc" not in run_ids
+    assert "run_current" in run_ids
+    assert snapshot["orchestration_session"]["started_at"]
+
+
 def test_dashboard_cli_build(tmp_path, capsys) -> None:
     state_dir = tmp_path / "state"
     _seed_registry(state_dir)
@@ -419,9 +475,20 @@ def test_dashboard_cli_build(tmp_path, capsys) -> None:
     assert payload["database_path"].endswith("dashboard.db")
 
 
-def _seed_registry(state_dir):
+def _seed_registry(
+    state_dir,
+    *,
+    with_baseline: bool = False,
+    baseline_metrics: dict | None = None,
+):
     registry = Registry(state_dir)
     registry.init()
+    if with_baseline:
+        registry.record_baseline_snapshot(
+            ref="main",
+            metrics=baseline_metrics
+            or {"accuracy": 0.81, "latency_ms": 50.0, "duration_sec": 1.0},
+        )
     registry.record_run(
         run_id="run_abc",
         group_id="model_architecture",

@@ -220,9 +220,13 @@ def _write_dashboard_db(
         destination.execute("PRAGMA journal_mode = DELETE")
         destination.execute("PRAGMA page_size = 4096")
         _create_dashboard_schema(destination)
+        session_run_ids = _session_run_ids(source)
         for table in ("runs", "metrics", "research_outcomes", "experiments", "artifacts"):
             rows = source.execute(f"SELECT * FROM {table}").fetchall()
             source_columns = [info[1] for info in source.execute(f"PRAGMA table_info({table})").fetchall()]
+            if session_run_ids is not None and "run_id" in source_columns:
+                run_id_idx = source_columns.index("run_id")
+                rows = [row for row in rows if str(row[run_id_idx]) in session_run_ids]
             dest_columns = [
                 info[1] for info in destination.execute(f"PRAGMA table_info({table})").fetchall()
             ]
@@ -418,11 +422,17 @@ def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | Non
             consumed.add(group_id)
         chains.append(chain)
     baseline_snapshot = registry.baseline_snapshot() if registry is not None else None
+    orchestration_session = registry.orchestration_session() if registry is not None else None
+    if orchestration_session is None and registry is not None:
+        started = registry.orchestration_session_started_at()
+        if started:
+            orchestration_session = {"started_at": started}
     return {
         "groups": group_meta,
         "chains": chains,
         "execution_waves": config.execution_waves(),
         "baseline_snapshot": baseline_snapshot,
+        "orchestration_session": orchestration_session,
         "inherit_anchors": {},
         "group_trajectory_winners": {},
         "lineage_winners": {},
@@ -775,18 +785,6 @@ def _ingest_artifact_dir(*, registry: Registry, config: HiAgentResearchConfig, a
     group_id = str(meta.get("group_id", "unknown"))
     branch = str(meta.get("branch", "unknown"))
     failure_class = str(failure.get("failure_class", "infra_failure"))
-    registry.record_run(
-        run_id=run_id,
-        group_id=group_id,
-        branch=branch,
-        status="finished" if failure_class == "none" else "error",
-        failure_class=failure_class,
-        metrics={key: float(value) for key, value in metrics.items()},
-        commit_sha=str(meta.get("commit_sha", "")),
-        workflow_run_id=str(meta.get("workflow_run_id", "")),
-        correlation_id=str(meta.get("correlation_id") or run_id),
-    )
-    registry.record_research_outcome(run_id=run_id, outcome=outcome)
     manifest_path = artifact_dir / EXPERIMENT_MANIFEST
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -799,13 +797,25 @@ def _ingest_artifact_dir(*, registry: Registry, config: HiAgentResearchConfig, a
             meta=meta,
         )
         manifest_source = "(synthetic:missing experiment_manifest.json)"
+    record_baseline_snapshot_from_manifest(
+        registry, manifest, required=required_baseline_metrics(config.evaluation.targets)
+    )
+    registry.record_run(
+        run_id=run_id,
+        group_id=group_id,
+        branch=branch,
+        status="finished" if failure_class == "none" else "error",
+        failure_class=failure_class,
+        metrics={key: float(value) for key, value in metrics.items()},
+        commit_sha=str(meta.get("commit_sha", "")),
+        workflow_run_id=str(meta.get("workflow_run_id", "")),
+        correlation_id=str(meta.get("correlation_id") or run_id),
+    )
+    registry.record_research_outcome(run_id=run_id, outcome=outcome)
     registry.record_experiment_manifest(
         run_id=run_id,
         manifest_path=manifest_source,
         manifest=manifest,
-    )
-    record_baseline_snapshot_from_manifest(
-        registry, manifest, required=required_baseline_metrics(config.evaluation.targets)
     )
     registry.record_artifacts(
         run_id=run_id,
@@ -814,6 +824,38 @@ def _ingest_artifact_dir(*, registry: Registry, config: HiAgentResearchConfig, a
         base_dir=artifact_dir,
     )
     return True
+
+
+def _session_run_ids(conn: sqlite3.Connection) -> set[str] | None:
+    cutoff = _session_cutoff_from_db(conn)
+    if not cutoff:
+        return None
+    rows = conn.execute(
+        "SELECT run_id FROM runs WHERE created_at >= ?",
+        (cutoff,),
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def _session_cutoff_from_db(conn: sqlite3.Connection) -> str | None:
+    for key in ("orchestration_session", "baseline_snapshot"):
+        row = conn.execute(
+            "SELECT value FROM schema_meta WHERE key = ?",
+            (key,),
+        ).fetchone()
+        if not row:
+            continue
+        try:
+            payload = json.loads(str(row[0]))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if key == "orchestration_session" and payload.get("started_at"):
+            return str(payload["started_at"])
+        if key == "baseline_snapshot" and payload.get("created_at"):
+            return str(payload["created_at"])
+    return None
 
 
 def _sha256(payload: bytes) -> str:

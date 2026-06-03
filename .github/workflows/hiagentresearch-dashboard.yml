@@ -78,10 +78,16 @@ jobs:
           from pathlib import Path
 
           from hiagentresearch.src.core.config import load_config
+          from hiagentresearch.src.github.session import resolve_github_session_started_at
+          from hiagentresearch.src.orchestration.session import timestamp_at_or_after
 
           config = load_config()
           workflow = config.github.workflow_name
           research_branches = {group.branch for group in config.research_groups}
+          session_started_at = resolve_github_session_started_at(config)
+          if not session_started_at:
+              print("artifact_count=0")
+              raise SystemExit(0)
           result = subprocess.run(
               [
                   "gh",
@@ -94,7 +100,7 @@ jobs:
                   "--limit",
                   "100",
                   "--json",
-                  "databaseId,headBranch,headSha",
+                  "databaseId,headBranch,headSha,createdAt",
               ],
               check=True,
               capture_output=True,
@@ -104,6 +110,9 @@ jobs:
           for row in json.loads(result.stdout):
               branch = str(row.get("headBranch", ""))
               sha = str(row.get("headSha", ""))
+              created_at = str(row.get("createdAt", ""))
+              if session_started_at and created_at and not timestamp_at_or_after(created_at, session_started_at):
+                  continue
               if branch not in research_branches or not sha:
                   continue
               live_ref = f"origin/{branch}"

@@ -19,6 +19,7 @@ from hiagentresearch.src.core.outcomes import (
     baseline_metrics_complete,
     required_baseline_metrics,
 )
+from hiagentresearch.src.github.session import write_session_artifact
 from hiagentresearch.src.registry.store import Registry
 
 
@@ -82,6 +83,9 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
             metrics=metrics,
             required=required,
         )
+        started = registry.orchestration_session_started_at()
+        if started:
+            write_session_artifact(artifact_dir, started_at=started)
     manifest_path = artifact_dir / EXPERIMENT_MANIFEST
     if manifest_path.exists():
         try:

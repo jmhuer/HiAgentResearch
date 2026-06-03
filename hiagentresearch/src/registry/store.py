@@ -8,6 +8,7 @@ from typing import Any
 from hiagentresearch.src.core.coerce import as_int_or_none, as_string_list, optional_str
 from hiagentresearch.src.core.models import IntentPacket, TransitionEvent, utc_now_iso
 from hiagentresearch.src.core.outcomes import normalize_research_outcome_name, outcome_met_targets
+from hiagentresearch.src.orchestration.session import SESSION_META_KEY
 from hiagentresearch.src.registry import schema
 
 
@@ -129,6 +130,26 @@ class Registry:
     def baseline_snapshot(self) -> dict[str, Any] | None:
         return self._read_schema_meta_json("baseline_snapshot")
 
+    def orchestration_session(self) -> dict[str, Any] | None:
+        return self._read_schema_meta_json(SESSION_META_KEY)
+
+    def orchestration_session_started_at(self) -> str | None:
+        session = self.orchestration_session()
+        if isinstance(session, dict) and session.get("started_at"):
+            return str(session["started_at"])
+        baseline = self.baseline_snapshot()
+        if isinstance(baseline, dict) and baseline.get("created_at"):
+            return str(baseline["created_at"])
+        return None
+
+    def _session_run_filter(self, *, table: str = "runs") -> tuple[str, list[Any]]:
+        cutoff = self.orchestration_session_started_at()
+        if not cutoff:
+            return "", []
+        if table == "runs":
+            return " AND created_at >= ?", [cutoff]
+        return f" AND {table}.created_at >= ?", [cutoff]
+
     def lineage_winners(self) -> dict[str, Any]:
         payload = self._read_schema_meta_json("lineage_winners")
         if isinstance(payload, dict):
@@ -156,12 +177,14 @@ class Registry:
         return payload if isinstance(payload, dict) else None
 
     def record_baseline_snapshot(self, *, ref: str, metrics: dict[str, float]) -> None:
+        started_at = utc_now_iso()
         payload = {
             "ref": ref,
             "metrics": {str(name): float(value) for name, value in metrics.items()},
-            "created_at": utc_now_iso(),
+            "created_at": started_at,
         }
         self._write_schema_meta_json("baseline_snapshot", payload)
+        self._write_schema_meta_json(SESSION_META_KEY, {"started_at": started_at})
 
     def _write_schema_meta_json(self, key: str, payload: dict[str, Any]) -> None:
         conn = sqlite3.connect(self.db_path)
@@ -421,32 +444,35 @@ class Registry:
             conn.close()
 
     def last_github_run(self, group_id: str) -> dict[str, Any] | None:
+        session_filter, session_params = self._session_run_filter(table="runs")
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
             row = conn.execute(
-                """
+                f"""
                 SELECT *
                 FROM runs
                 WHERE group_id = ?
                   AND failure_class = 'none'
                   AND commit_sha != ''
                   AND run_id LIKE 'gh_%'
+                  {session_filter}
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
-                (group_id,),
+                (group_id, *session_params),
             ).fetchone()
             return _row_to_dict(row) if row else None
         finally:
             conn.close()
 
     def github_runs_with_metric(self, group_id: str, metric_name: str) -> list[dict[str, Any]]:
+        session_filter, session_params = self._session_run_filter(table="r")
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(
-                """
+                f"""
                 SELECT r.*, m.metric_value
                 FROM runs r
                 JOIN metrics m ON r.run_id = m.run_id
@@ -455,9 +481,10 @@ class Registry:
                   AND m.metric_name = ?
                   AND r.run_id LIKE 'gh_%'
                   AND r.commit_sha != ''
+                  {session_filter}
                 ORDER BY r.created_at ASC
                 """,
-                (group_id, metric_name),
+                (group_id, metric_name, *session_params),
             ).fetchall()
             return [_row_to_dict(row) for row in rows]
         finally:
@@ -639,42 +666,107 @@ class Registry:
             conn.close()
 
     def dashboard_snapshot(self) -> dict[str, Any]:
+        session_filter, session_params = self._session_run_filter(table="r")
+        runs_session_filter, _ = self._session_run_filter()
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
             metrics = [
                 _row_to_dict(row)
                 for row in conn.execute(
-                    """
+                    f"""
                     SELECT r.run_id, r.group_id, r.branch, r.commit_sha, r.workflow_run_id,
                            r.correlation_id, r.created_at, m.metric_name, m.metric_value
                     FROM runs r
                     JOIN metrics m ON r.run_id = m.run_id
+                    WHERE 1=1{session_filter}
                     ORDER BY r.group_id, r.created_at, m.metric_name
-                    """
+                    """,
+                    session_params,
                 ).fetchall()
             ]
             experiments = [
                 _experiment_row_to_dict(row)
                 for row in conn.execute(
-                    "SELECT * FROM experiments ORDER BY group_id, loop_index, created_at"
+                    f"""
+                    SELECT e.*
+                    FROM experiments e
+                    JOIN runs r ON r.run_id = e.run_id
+                    WHERE 1=1{session_filter}
+                    ORDER BY e.group_id, e.loop_index, e.created_at
+                    """,
+                    session_params,
                 ).fetchall()
             ]
+            cutoff = self.orchestration_session_started_at()
+            if cutoff:
+                summary_rows = conn.execute(
+                    f"""
+                    WITH latest AS (
+                        SELECT *
+                        FROM runs r
+                        WHERE r.created_at >= ?
+                          AND r.created_at = (
+                            SELECT MAX(inner_r.created_at)
+                            FROM runs inner_r
+                            WHERE inner_r.group_id = r.group_id
+                              AND inner_r.created_at >= ?
+                          )
+                    )
+                    SELECT latest.*,
+                           outcome.research_outcome,
+                           outcome.improved_baseline,
+                           outcome.next_action,
+                           accuracy.metric_value AS accuracy,
+                           latency.metric_value AS latency_ms
+                    FROM latest
+                    LEFT JOIN research_outcomes outcome ON latest.run_id = outcome.run_id
+                    LEFT JOIN metrics accuracy
+                        ON latest.run_id = accuracy.run_id AND accuracy.metric_name = 'accuracy'
+                    LEFT JOIN metrics latency
+                        ON latest.run_id = latency.run_id AND latency.metric_name = 'latency_ms'
+                    ORDER BY latest.group_id
+                    """,
+                    (cutoff, cutoff),
+                ).fetchall()
+            else:
+                summary_rows = conn.execute(
+                    f"{schema.GROUP_SUMMARY_SELECT}\nORDER BY latest.group_id"
+                ).fetchall()
+            runs_sql = f"SELECT * FROM runs WHERE 1=1{runs_session_filter} ORDER BY created_at DESC LIMIT ?"
+            runs_params = [session_params[0]] if runs_session_filter else []
+            runs_rows = conn.execute(runs_sql, (*runs_params, 10_000)).fetchall()
+            outcomes_sql = f"""
+                SELECT o.*
+                FROM research_outcomes o
+                JOIN runs r ON r.run_id = o.run_id
+                WHERE 1=1{session_filter}
+                ORDER BY o.created_at
+                """
+            artifacts_sql = f"""
+                SELECT a.*
+                FROM artifacts a
+                JOIN runs r ON r.run_id = a.run_id
+                WHERE 1=1{session_filter}
+                ORDER BY a.run_id, a.artifact_path
+                """
+            session = self.orchestration_session()
+            if session is None and self.orchestration_session_started_at():
+                session = {"started_at": self.orchestration_session_started_at()}
             return {
                 "export_schema_version": 1,
                 "registry_schema_version": self.schema_version(),
-                "summary": self.group_summary(),
-                "runs": self.runs_for_group(None, limit=10_000),
+                "orchestration_session": session,
+                "summary": [_row_to_dict(row) for row in summary_rows],
+                "runs": [_row_to_dict(row) for row in runs_rows],
                 "metrics": metrics,
                 "metric_names": sorted({str(row["metric_name"]) for row in metrics}),
                 "research_outcomes": [
-                    _row_to_dict(row)
-                    for row in conn.execute("SELECT * FROM research_outcomes ORDER BY created_at").fetchall()
+                    _row_to_dict(row) for row in conn.execute(outcomes_sql, session_params).fetchall()
                 ],
                 "experiments": experiments,
                 "artifacts": [
-                    _row_to_dict(row)
-                    for row in conn.execute("SELECT * FROM artifacts ORDER BY run_id, artifact_path").fetchall()
+                    _row_to_dict(row) for row in conn.execute(artifacts_sql, session_params).fetchall()
                 ],
             }
         finally:
