@@ -57,6 +57,39 @@ def failure_class_for_cursor_agent_error() -> FailureClass:
     return "infra_failure"
 
 
+def _startup_retry_attempts_from_env() -> int:
+    raw = os.environ.get("HIAGENTRESEARCH_CURSOR_STARTUP_RETRY", "").strip().lower()
+    if raw in {"0", "false", "off", "no"}:
+        return 1
+    attempts_raw = os.environ.get("HIAGENTRESEARCH_CURSOR_STARTUP_ATTEMPTS", "").strip()
+    if not attempts_raw:
+        return 2
+    try:
+        attempts = int(attempts_raw)
+    except ValueError as exc:
+        raise ValueError(
+            "HIAGENTRESEARCH_CURSOR_STARTUP_ATTEMPTS must be an integer >= 1"
+        ) from exc
+    if attempts < 1:
+        raise ValueError("HIAGENTRESEARCH_CURSOR_STARTUP_ATTEMPTS must be >= 1")
+    return attempts
+
+
+def _startup_retry_backoff_sec_from_env() -> float:
+    raw = os.environ.get("HIAGENTRESEARCH_CURSOR_STARTUP_RETRY_BACKOFF_SEC", "").strip()
+    if not raw:
+        return 2.0
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "HIAGENTRESEARCH_CURSOR_STARTUP_RETRY_BACKOFF_SEC must be a non-negative number"
+        ) from exc
+    if value < 0:
+        raise ValueError("HIAGENTRESEARCH_CURSOR_STARTUP_RETRY_BACKOFF_SEC must be >= 0")
+    return value
+
+
 def run_cursor_agent_cycle(
     *,
     workdir: Path,
@@ -95,7 +128,8 @@ def run_cursor_agent_cycle(
     result: Any
     agent: Any = None
     sdk_run: Any = None
-    startup_attempts = 2
+    startup_attempts = _startup_retry_attempts_from_env()
+    retry_backoff_sec = _startup_retry_backoff_sec_from_env()
     for attempt in range(1, startup_attempts + 1):
         try:
             with Agent.create(
@@ -112,6 +146,7 @@ def run_cursor_agent_cycle(
                         "model": model,
                         "cwd": str(workdir),
                         "startup_attempt": attempt,
+                        "startup_attempts_config": startup_attempts,
                     },
                 )
                 sdk_run = agent.send(prompt)
@@ -151,7 +186,8 @@ def run_cursor_agent_cycle(
                 },
             )
             if can_retry:
-                time.sleep(2.0)
+                if retry_backoff_sec > 0:
+                    time.sleep(retry_backoff_sec)
                 continue
             record = _record_from_cursor_error(exc)
             _write_record(run_dir=run_dir, record=record, prompt=prompt)

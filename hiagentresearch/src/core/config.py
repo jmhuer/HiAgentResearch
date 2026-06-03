@@ -79,6 +79,7 @@ class ResearchGroupConfig(BaseModel):
     branch: str
     objective: str
     policy_mode: str
+    task_kind: Literal["metric_experiment", "engineering"] = "metric_experiment"
     lineage: LineageConfig = Field(default_factory=LineageConfig)
 
 
@@ -248,6 +249,7 @@ class HiAgentResearchConfig(BaseModel):
             branch=group.branch,
             objective=group.objective,
             policy_mode=group.policy_mode,
+            task_kind=group.task_kind,
             policy_mode_description=self.policy_modes.get(group.policy_mode, ""),
             evaluation=self.evaluation_for_group(group),
             workdir=self.workdir,

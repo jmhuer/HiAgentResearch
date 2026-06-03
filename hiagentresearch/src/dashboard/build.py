@@ -514,12 +514,19 @@ def _trajectory_winner_for_group(
 def _annotate_winner_flags(rows: list[dict[str, Any]], topology: dict[str, Any]) -> list[dict[str, Any]]:
     group_winners = topology.get("group_trajectory_winners") or {}
     lineage_winners = topology.get("lineage_winners") or {}
+    inherit_anchors = topology.get("inherit_anchors") or {}
     lineage_by_source: dict[tuple[str, str], list[str]] = {}
     for lineage_id, payload in lineage_winners.items():
         source_group = str(payload.get("winner_source_group_id") or "")
         commit_sha = str(payload.get("winner_commit_sha") or "")
         if source_group and commit_sha:
             lineage_by_source.setdefault((source_group, commit_sha.lower()), []).append(str(lineage_id))
+    inherit_by_source: dict[tuple[str, str], list[str]] = {}
+    for group_id, payload in inherit_anchors.items():
+        source_group = str(payload.get("anchor_source_group") or payload.get("parent_group_id") or "")
+        commit_sha = str(payload.get("commit_sha") or "")
+        if source_group and commit_sha:
+            inherit_by_source.setdefault((source_group, commit_sha.lower()), []).append(str(group_id))
 
     annotated: list[dict[str, Any]] = []
     for row in rows:
@@ -536,12 +543,15 @@ def _annotate_winner_flags(rows: list[dict[str, Any]], topology: dict[str, Any])
             else:
                 is_group_policy_winner = row_group == winner_source and bool(row_sha) and _sha_match(row_sha, winner_sha)
         matching_lineages = lineage_by_source.get((row_group, row_sha), [])
+        matching_inherit_groups = inherit_by_source.get((row_group, row_sha), [])
         annotated.append(
             {
                 **row,
                 "is_group_policy_winner": is_group_policy_winner,
                 "is_lineage_winner": bool(matching_lineages),
                 "lineage_winner_ids": matching_lineages,
+                "is_inherit_anchor": bool(matching_inherit_groups),
+                "inherit_anchor_for_groups": matching_inherit_groups,
             }
         )
     return annotated

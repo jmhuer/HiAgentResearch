@@ -4,6 +4,7 @@ import types
 from pathlib import Path
 
 from hiagentresearch.src.agents.agent_backends import (
+    _startup_retry_attempts_from_env,
     failure_class_for_cursor_agent_error,
     failure_class_for_cursor_run_status,
     run_cursor_agent_cycle,
@@ -122,7 +123,14 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
         json.loads(line) for line in (run_dir / "agent_stream.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert stream_events[0]["type"] == "agent_created"
+    assert stream_events[0]["startup_attempts_config"] == 2
     assert stream_events[1]["sdk_run_id"] == "sdk_run_123"
     backend_record = json.loads((run_dir / "agent_backend_record.json").read_text(encoding="utf-8"))
     assert backend_record["raw_result"]["agent_id"] == "agent_123"
     assert backend_record["raw_result"]["sdk_run_id"] == "sdk_run_123"
+
+
+def test_retry_off_switch_forces_single_attempt(monkeypatch) -> None:
+    monkeypatch.setenv("HIAGENTRESEARCH_CURSOR_STARTUP_RETRY", "0")
+    monkeypatch.setenv("HIAGENTRESEARCH_CURSOR_STARTUP_ATTEMPTS", "5")
+    assert _startup_retry_attempts_from_env() == 1

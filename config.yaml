@@ -81,6 +81,7 @@ research_groups:
     branch: research/polish-code
     objective: Improve code quality, structure, and maintainability.
     policy_mode: exploit
+    task_kind: engineering
     lineage:
       mode: inherit
       inherit_from: hyperparameter_optimization

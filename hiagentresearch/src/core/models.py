@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 
 PolicyMode = Literal["exploit", "explore", "reset"]
+TaskKind = Literal["metric_experiment", "engineering"]
 FailureClass = Literal["none", "infra_failure", "code_failure", "eval_failure", "invalid_cycle"]
 GroupState = Literal[
     "idle",
@@ -31,6 +32,7 @@ class ResearchGroup:
     objective: str
     policy_mode: PolicyMode | str
     evaluation: EvaluationSpec
+    task_kind: TaskKind = "metric_experiment"
     workdir: str = "."
     policy_mode_description: str = ""
     reference_paths: list[str] = field(default_factory=list)

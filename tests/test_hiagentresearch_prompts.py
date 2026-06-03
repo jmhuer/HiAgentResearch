@@ -32,6 +32,24 @@ def test_prompt_is_config_backed() -> None:
     assert "Do not keep exploring after the edit is done" in prompt
     # The policy mode is sent with its meaning, not just the bare label.
     assert config.policy_modes[group.policy_mode] in prompt
+    assert "## Eval Expectations" in prompt
     # No MNIST-internal source paths are hardcoded into the prompt anymore.
     assert "mnist/src/model.py" not in prompt
     assert "mnist/pipeline" not in prompt
+
+
+def test_engineering_prompt_uses_verification_heading() -> None:
+    config = load_config(Path("config.yaml"))
+    group = config.research_groups_by_id()["polish_code"]
+    packet = IntentPacket(
+        group_id=group.id,
+        active_hypothesis_id="h1",
+        hypothesis_text="refactor and improve structure",
+        attempt_count=0,
+        last_failure_class="none",
+        next_action="continue",
+    )
+    prompt = build_phase1_prompt(group=group, intent_packet=packet, run_id="run_eng")
+    assert group.task_kind == "engineering"
+    assert "## Verification" in prompt
+    assert "execution ownership" in prompt.lower() or "implementation ownership" in prompt.lower()

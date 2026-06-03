@@ -26,6 +26,21 @@ It contains enough concrete text to model an agent-written pre-code plan artifac
 """
 
 
+def _engineering_plan_md() -> str:
+    return """
+## Evidence
+test
+## Planned Edit
+test
+## Risk and Rollback
+test
+## Verification
+test
+This is intentionally long enough to satisfy the planning text length requirement.
+It contains enough concrete text to model an agent-written pre-code plan artifact.
+"""
+
+
 def test_agent_intent_contract_rejects_targets_outside_workspace(tmp_path) -> None:
     config = load_config(Path("config.yaml"))
     group = config.research_groups_by_id()["model_architecture"]
@@ -112,6 +127,35 @@ def test_agent_intent_contract_accepts_workspace_targets(tmp_path) -> None:
 
     valid, error = _validate_agent_intent_contract(run_dir=run_dir, group=group, run_id="run_ok")
 
+    assert valid is True
+    assert error == ""
+
+
+def test_agent_intent_contract_accepts_engineering_plan_heading(tmp_path) -> None:
+    config = load_config(Path("config.yaml"))
+    group = config.research_groups_by_id()["polish_code"]
+    run_dir = tmp_path / "run_eng"
+    run_dir.mkdir()
+    (run_dir / "experiment_intent.json").write_text(
+        """
+{
+  "run_id": "run_eng",
+  "group_id": "polish_code",
+  "objective": "test",
+  "hypothesis_id": "h1",
+  "hypothesis": "test",
+  "evidence_refs": ["mnist/src/model.py"],
+  "planned_code_changes": ["edit"],
+  "target_files": ["mnist/src/model.py"],
+  "success_criteria": ["behavior preserved"],
+  "rollback_plan": "revert"
+}
+""",
+        encoding="utf-8",
+    )
+    (run_dir / "experiment_plan.md").write_text(_engineering_plan_md(), encoding="utf-8")
+
+    valid, error = _validate_agent_intent_contract(run_dir=run_dir, group=group, run_id="run_eng")
     assert valid is True
     assert error == ""
 

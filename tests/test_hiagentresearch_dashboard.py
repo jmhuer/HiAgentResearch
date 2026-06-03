@@ -372,6 +372,9 @@ def test_dashboard_lineage_winners_include_polish_last_commit_and_row_flags(tmp_
     row = next(row for row in snapshot["metrics"] if row.get("run_id") == "gh_polish_2")
     assert row["is_group_policy_winner"] is True
     assert row["is_lineage_winner"] is True
+    anchor_row = next(row for row in snapshot["metrics"] if row.get("run_id") == "gh_hyper_1")
+    assert anchor_row["is_inherit_anchor"] is True
+    assert "polish_code" in anchor_row["inherit_anchor_for_groups"]
 
 
 def test_dashboard_build_from_artifacts(tmp_path) -> None:

@@ -889,7 +889,7 @@ function resolveBaselineAnchorPoint(groupId, metricName, rows) {
 
 function chartPointDatum(point) {
   const selected = point.run_id === selectedRunId;
-  const isWinner = point.is_lineage_winner || point.is_group_policy_winner;
+  const isWinner = point.is_lineage_winner || point.is_group_policy_winner || point.is_inherit_anchor;
   const symbol = isWinner ? "star" : "circle";
   const baseSize = isWinner ? 12 : 8;
   return {
@@ -984,6 +984,10 @@ function selectRun(runId, { scroll }) {
 
 function pointTooltipHtml(point) {
   if (!point) return "";
+  const inheritAnchorHint =
+    point.is_inherit_anchor && (point.inherit_anchor_for_groups || []).length
+      ? ` · anchor for ${point.inherit_anchor_for_groups.join(", ")}`
+      : "";
   const winnerHint = point.is_lineage_winner
     ? " · lineage winner"
     : point.is_group_policy_winner
@@ -998,8 +1002,8 @@ function pointTooltipHtml(point) {
         : "";
   const lineage =
     point.lineage_mode === "inherit" && point.lineage_parent_group_id
-      ? ` · inherit ${point.lineage_parent_group_id}@${shortSha(point.lineage_anchor_sha)}`
-      : connector + winnerHint;
+      ? ` · inherit ${point.lineage_parent_group_id}@${shortSha(point.lineage_anchor_sha)}${winnerHint}${inheritAnchorHint}`
+      : connector + winnerHint + inheritAnchorHint;
   return `
     <div class="tooltip-title">${escapeHtml(point.group_id)} · ${escapeHtml(point.metric_name)} ${formatMetric(point.metric_value)}</div>
     <div class="tooltip-muted">${escapeHtml(trajectoryLabel(point))}${lineage} · ${escapeHtml(shortRunId(point.run_id))} · ${escapeHtml(point.outcome)}</div>

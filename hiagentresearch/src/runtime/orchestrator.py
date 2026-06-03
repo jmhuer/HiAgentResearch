@@ -60,6 +60,7 @@ def _load_groups(path: Path) -> dict[str, ResearchGroup]:
             objective=raw["objective"],
             policy_mode=raw["policy_mode"],
             evaluation=EvaluationSpec(command=command),
+            task_kind=str(raw.get("task_kind", "metric_experiment")),
             workdir=str(raw.get("workdir", ".")),
             reference_paths=[],
             generated_paths=list(raw.get("generated_paths", [])),
@@ -173,6 +174,7 @@ def _agent_safe_group_payload(group: ResearchGroup) -> dict[str, Any]:
         "branch": group.branch,
         "objective": group.objective,
         "policy_mode": group.policy_mode,
+        "task_kind": group.task_kind,
         "workdir": group.workdir,
         "reference_paths": list(group.reference_paths),
         "generated_paths": list(group.generated_paths),
@@ -315,13 +317,20 @@ def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_
         )
 
     plan_text = plan_path.read_text(encoding="utf-8")
-    for heading in ("## Evidence", "## Planned Edit", "## Risk and Rollback", "## Eval Expectations"):
+    for heading in _required_plan_headings(group):
         if heading not in plan_text:
             return False, f"experiment_plan.md missing heading: {heading}"
     if len(plan_text.strip()) < 200:
         return False, "experiment_plan.md is too short to qualify as pre-code planning"
 
     return True, ""
+
+
+def _required_plan_headings(group: ResearchGroup) -> tuple[str, ...]:
+    common = ("## Evidence", "## Planned Edit", "## Risk and Rollback")
+    if group.task_kind == "engineering":
+        return (*common, "## Verification")
+    return (*common, "## Eval Expectations")
 
 
 def _apply_agent_intent_update(*, run_dir: Path, prior: IntentPacket) -> IntentPacket:

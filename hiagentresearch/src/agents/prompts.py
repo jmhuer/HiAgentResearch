@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hiagentresearch.src.agents.task_contract import task_contract
 from hiagentresearch.src.lineage.resolve import BranchBootstrap
 from hiagentresearch.src.core.models import IntentPacket, ResearchGroup
 
@@ -21,7 +22,9 @@ def build_phase1_prompt(
     guidance_text = _bullets(guidance_files)
     reference_text = _bullets(group.reference_paths)
     generated_paths_text = _bullets(group.generated_paths)
+    expectations_text = _bullets(group.research_output_expectations)
     lineage_text = _lineage_stanza(lineage_bootstrap)
+    contract = task_contract(group.task_kind)
     policy_line = f"Policy mode: {group.policy_mode}"
     if group.policy_mode_description:
         policy_line += f" — {group.policy_mode_description}"
@@ -38,14 +41,15 @@ def build_phase1_prompt(
         f"{lineage_text}"
         "Read and follow these guides before editing (most specific first):\n"
         f"{guidance_text}\n\n"
-        f"Your workspace is `{workdir}/`; you own it fully. Make one bounded, "
-        "hypothesis-driven change per cycle, grounded in evidence and a written plan. "
-        "Treat metric regressions as learning, not execution failure.\n\n"
+        f"Your workspace is `{workdir}/`; you own it fully. {contract.cycle_instruction}\n\n"
+        "System expectations for this cycle:\n"
+        f"{expectations_text}\n\n"
         "Write these planning artifacts before editing code:\n"
         f"- {run_intent_json}: run_id, group_id, objective, hypothesis_id, hypothesis,\n"
         "  evidence_refs, planned_code_changes,\n"
         f"  target_files (all under `{workdir}/`), success_criteria, rollback_plan.\n"
-        f"- {run_plan_md}: headings ## Evidence, ## Planned Edit, ## Risk and Rollback, ## Eval Expectations.\n\n"
+        f"- {run_plan_md}: headings ## Evidence, ## Planned Edit, ## Risk and Rollback, {contract.plan_heading}.\n"
+        f"  In {contract.plan_heading}, {contract.plan_expectation}\n\n"
         "Read (never edit or run) the read-only evaluation zone to see exactly how you are scored:\n"
         f"{reference_text}\n\n"
         "Boundaries:\n"
