@@ -30,7 +30,7 @@ agent:
   model: composer-2.5
   thinking: high
 dashboard:
-  enabled: false
+  enabled: true
   title: HiAgentResearch Dashboard
   metrics:
     - accuracy
