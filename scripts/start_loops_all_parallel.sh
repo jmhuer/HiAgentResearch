@@ -88,7 +88,7 @@ printf '==> Log: %s\n' "${LOG_FILE}"
 # script — no OS-specific code in the framework. Note: on a laptop, closing the lid on
 # battery (clamshell) can still sleep; keep the lid open or stay on AC power.
 run_cmd=(hiagentresearch "${args[@]}")
-if command -v caffeinate >/dev/null 2>&1; then
+if [[ "$(uname)" == "Darwin" ]] && command -v caffeinate >/dev/null 2>&1; then
   run_cmd=(caffeinate -i "${run_cmd[@]}")
   echo "==> Wrapped in caffeinate -i (machine stays awake while the run is active)"
 fi
