@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "run_id": "run_af725a7c7594",
+  "group_id": "architecture__a3",
+  "branch": "research/architecture-a3",
+  "loop_index": 1,
+  "goal_id": "architecture__a3-g1",
+  "goal": "Replace the KWTA stage activations with ReLU after BatchNorm to stabilize training and improve accuracy at equal depth.",
+  "planned_code_changes": [
+    "In ResNet: replace kwta1 with relu1 (nn.ReLU(inplace=True)) after bn1; switch layer1 and layer2 _make_resnet_stage activation from 'kwta' to 'relu'",
+    "In Decoder: replace KWTA(k=10) with nn.ReLU(inplace=True) after the first ConvTranspose2d",
+    "Leave ensemble head aggregation (_ensemble_kwta) and kwta.py module untouched \u2014 not stage activations"
+  ],
+  "target_files": [
+    "mnist/src/model.py"
+  ],
+  "success_criteria": [
+    "accuracy > 0.873 (inherited floor from polish lineage)",
+    "latency_ms <= 13.0",
+    "pytest test_kwta.py and model smoke tests pass",
+    "ResNet18 and Decoder forward shapes unchanged"
+  ],
+  "rollback_plan": "Revert mnist/src/model.py ResNet kwta1/activation args and Decoder KWTA layer to restore prior KWTA stage activations.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "polish",
+  "lineage_anchor_sha": "8eee6a12aa93b2c5f8860bd8ce98998a82217abe",
+  "lineage_anchor_policy": "last_commit",
+  "lineage_parent_anchor_step": 3,
+  "lineage_anchor_source_group": "polish",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

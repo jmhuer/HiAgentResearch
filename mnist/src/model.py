@@ -28,7 +28,7 @@ class Decoder(nn.Module):
         super().__init__()
         self.decoder = nn.Sequential(
             nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
-            KWTA(k=10),
+            nn.ReLU(inplace=True),
             nn.ConvTranspose2d(32, 1, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.Sigmoid() # Output pixel values between 0 and 1
         )
@@ -134,12 +134,12 @@ class ResNet(nn.Module):
 
         self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
-        self.kwta1 = KWTA(k=10)
+        self.relu1 = nn.ReLU(inplace=True)
         self.layer1, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 64, num_blocks[0], stride=1, activation="kwta"
+            block, self.in_planes, 64, num_blocks[0], stride=1, activation="relu"
         )
         self.layer2, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 128, num_blocks[1], stride=2, activation="kwta"
+            block, self.in_planes, 128, num_blocks[1], stride=2, activation="relu"
         )
         self.layer3, self.in_planes = _make_resnet_stage(
             block, self.in_planes, 256, num_blocks[2], stride=2, activation="relu"
@@ -150,7 +150,7 @@ class ResNet(nn.Module):
         self.linear = nn.Linear(512 * block.expansion, num_classes)
 
     def forward(self, x):
-        out = self.kwta1(self.bn1(self.conv1(x)))
+        out = self.relu1(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
