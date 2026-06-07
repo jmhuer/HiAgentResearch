@@ -42,6 +42,13 @@ class AlbumentationsTransform:
                     shift_limit=0.1, scale_limit=0.1, rotate_limit=15, p=0.5
                 ),
                 A.RandomBrightnessContrast(p=0.2),
+                A.CoarseDropout(
+                    num_holes_range=(1, 1),
+                    hole_height_range=(0.11, 0.21),
+                    hole_width_range=(0.11, 0.21),
+                    fill=0,
+                    p=0.25,
+                ),
                 ToTensorV2(),
             ]
         )
