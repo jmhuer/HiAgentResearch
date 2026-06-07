@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "run_id": "run_88e695f0a838",
+  "group_id": "augmentation__a1",
+  "branch": "research/augmentation-a1",
+  "loop_index": 3,
+  "goal_id": "augmentation__a1-g1",
+  "goal": "Tune the affine augmentation magnitudes (rotation, shift, scale) to match MNIST digit variation without over-distorting.",
+  "planned_code_changes": [
+    "Keep loop-2 winning single A.ShiftScaleRotate structure and shift_limit=0.10, rotate_limit=15, p=0.5 unchanged",
+    "Refine only scale_limit from 0.10 to 0.08 \u2014 interpolate between loop-1 MNIST-calibrated 0.06 and loop-2 inherited 0.10 on the axis loop 1 evidence singled out",
+    "Leave A.RandomBrightnessContrast(p=0.2) and all training hyperparameters unchanged"
+  ],
+  "target_files": [
+    "mnist/src/train.py"
+  ],
+  "success_criteria": [
+    "accuracy > 0.882 group best and >= 0.873 inherited floor",
+    "latency_ms unchanged (train-time augmentation only)",
+    "pytest and AlbumentationsTransform smoke pass",
+    "Single experimental axis: scale_limit refinement on consolidated loop-2 recipe"
+  ],
+  "rollback_plan": "Revert mnist/src/train.py AlbumentationsTransform to loop-2 values A.ShiftScaleRotate(shift_limit=0.10, scale_limit=0.10, rotate_limit=15, p=0.5).",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "polish",
+  "lineage_anchor_sha": "8eee6a12aa93b2c5f8860bd8ce98998a82217abe",
+  "lineage_anchor_policy": "last_commit",
+  "lineage_parent_anchor_step": 3,
+  "lineage_anchor_source_group": "polish",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
