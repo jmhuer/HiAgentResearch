@@ -92,6 +92,7 @@ class BasicBlock(nn.Module):
         self.act1 = _stage_activation(activation)
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
+        self.bn3 = nn.BatchNorm2d(planes)
         self.act2 = _stage_activation(activation)
 
         self.shortcut = nn.Sequential()
@@ -105,7 +106,7 @@ class BasicBlock(nn.Module):
         out = self.act1(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
-        out = self.act2(out)
+        out = self.act2(self.bn3(out))
         return out
 
 

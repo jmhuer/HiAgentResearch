@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "run_id": "run_f4203320ae6b",
+  "group_id": "architecture__a3",
+  "branch": "research/architecture-a3",
+  "loop_index": 2,
+  "goal_id": "architecture__a3-g1",
+  "goal": "Replace the KWTA stage activations with ReLU after BatchNorm to stabilize training and improve accuracy at equal depth.",
+  "planned_code_changes": [
+    "In BasicBlock.__init__: add self.bn3 = nn.BatchNorm2d(planes) before the post-residual activation",
+    "In BasicBlock.forward: change out = self.act2(out) to out = self.act2(self.bn3(out)) after the shortcut add",
+    "No changes to depth, width, ensemble size, training hyperparameters, or loop-1 KWTA\u2192ReLU stage swaps"
+  ],
+  "target_files": [
+    "mnist/src/model.py"
+  ],
+  "success_criteria": [
+    "accuracy > 0.922 (beat group best from loop 1) and remain above 0.873 inherited floor",
+    "latency_ms <= 13.0",
+    "EnsembleMnistCNN forward pass succeeds with unchanged output shape (batch, 10)",
+    "test_kwta.py passes (eval-selected test)"
+  ],
+  "rollback_plan": "Remove bn3 from BasicBlock and restore out = self.act2(out) after the residual add in mnist/src/model.py.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "polish",
+  "lineage_anchor_sha": "8eee6a12aa93b2c5f8860bd8ce98998a82217abe",
+  "lineage_anchor_policy": "last_commit",
+  "lineage_parent_anchor_step": 3,
+  "lineage_anchor_source_group": "polish",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
