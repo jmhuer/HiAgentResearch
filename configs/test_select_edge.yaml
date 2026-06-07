@@ -19,7 +19,7 @@ policy_modes:
   exploit: "Prefer refinements to evidence-backed promising directions."
 github:
   workflow_name: hiagentresearch-research-eval
-  remote: disney
+  remote: origin
   run_lookup_attempts: 30
   run_lookup_sleep_sec: 3
 orchestration:

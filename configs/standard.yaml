@@ -19,7 +19,7 @@ policy_modes:
   exploit: "Prefer refinements to evidence-backed promising directions."
 github:
   workflow_name: hiagentresearch-research-eval
-  remote: disney   # git push + gh --repo target; derived from this remote's URL
+  remote: origin   # git push + gh --repo target; derived from this remote's URL
   run_lookup_attempts: 30
   run_lookup_sleep_sec: 3
 orchestration:

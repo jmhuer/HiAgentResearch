@@ -168,11 +168,8 @@ jobs:
             --branch "${{ github.ref_name }}" \
             --artifact-dir "."
 
-      # Eval bundle filenames: hiagentresearch.src.core.artifacts.EVAL_NODE_INDEX + CYCLE_MANIFEST
-      # NOTE: pinned to @v3 because the v4 artifact backend is not supported on GitHub
-      # Enterprise Server (GHES). v3 works on both GHES and github.com.
       - name: Upload observability artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: hiagentresearch-${{ github.run_id }}
           path: |
