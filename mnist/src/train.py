@@ -34,24 +34,26 @@ def set_training_seed(seed: int = TRAINING_SEED) -> None:
 
 
 class AlbumentationsTransform:
-    def __init__(self) -> None:
-        self.aug = A.Compose(
-            [
-                A.Rotate(limit=15, p=0.5),
-                A.ShiftScaleRotate(
-                    shift_limit=0.1, scale_limit=0.1, rotate_limit=15, p=0.5
-                ),
-                A.RandomBrightnessContrast(p=0.2),
+    def __init__(self, *, enable_cutout: bool = False) -> None:
+        transforms: list = [
+            A.Rotate(limit=15, p=0.5),
+            A.ShiftScaleRotate(
+                shift_limit=0.1, scale_limit=0.1, rotate_limit=15, p=0.5
+            ),
+            A.RandomBrightnessContrast(p=0.2),
+        ]
+        if enable_cutout:
+            transforms.append(
                 A.CoarseDropout(
                     num_holes_range=(1, 1),
                     hole_height_range=(0.11, 0.21),
                     hole_width_range=(0.11, 0.21),
                     fill=0,
                     p=0.25,
-                ),
-                ToTensorV2(),
-            ]
-        )
+                )
+            )
+        transforms.append(ToTensorV2())
+        self.aug = A.Compose(transforms)
 
     def __call__(self, img):
         img = np.array(img)
@@ -61,10 +63,10 @@ class AlbumentationsTransform:
         return out
 
 
-def build_mnist_transform() -> transforms.Compose:
+def build_mnist_transform(*, enable_cutout: bool = False) -> transforms.Compose:
     return transforms.Compose(
         [
-            AlbumentationsTransform(),
+            AlbumentationsTransform(enable_cutout=enable_cutout),
             transforms.Normalize((0.1307,), (0.3081,)),
         ]
     )
@@ -75,8 +77,9 @@ def build_mnist_dataloaders(
     batch_size: int,
     *,
     quick: bool = False,
+    enable_cutout: bool = False,
 ) -> tuple[DataLoader, DataLoader]:
-    transform = build_mnist_transform()
+    transform = build_mnist_transform(enable_cutout=enable_cutout)
     train_set = datasets.MNIST(str(data_dir), train=True, download=True, transform=transform)
     test_set = datasets.MNIST(str(data_dir), train=False, download=True, transform=transform)
     if quick:
@@ -198,7 +201,7 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
     device = torch.device(args.device)
     data_dir = mnist_root / "data"
     train_loader, test_loader = build_mnist_dataloaders(
-        data_dir, args.batch_size, quick=args.quick
+        data_dir, args.batch_size, quick=args.quick, enable_cutout=False
     )
 
     encoder_for_ae = MnistCNN().features
@@ -209,6 +212,10 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
     ensemble_model = EnsembleMnistCNN(args.num_sub_networks, args.kwta_k).to(device)
     ensemble_model.load_encoder_weights(autoencoder.encoder.state_dict())
     print("Loaded pre-trained encoder weights into shared trunk.")
+
+    train_loader, _ = build_mnist_dataloaders(
+        data_dir, args.batch_size, quick=args.quick, enable_cutout=True
+    )
 
     train_ensemble_with_early_stopping(
         ensemble_model,
