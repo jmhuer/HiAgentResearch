@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: hiagentresearch-dashboard-selfhosted
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
