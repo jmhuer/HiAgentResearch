@@ -66,6 +66,7 @@ jobs:
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           import subprocess
+          import sys
           from pathlib import Path
 
           from hiagentresearch.src.core.config import load_config
@@ -119,8 +120,11 @@ jobs:
                   check=False,
               ).returncode == 0
               if not is_current_branch_history:
-                  print(f"::warning::dropping run {row.get('databaseId')} on {branch} "
-                        f"({sha[:12]}): commit not in {live_ref} history")
+                  print(
+                      f"::warning::dropping run {row.get('databaseId')} on {branch} "
+                      f"({sha[:12]}): commit not in {live_ref} history",
+                      file=sys.stderr,
+                  )
                   continue
               run_id = str(row["databaseId"])
               subprocess.run(
