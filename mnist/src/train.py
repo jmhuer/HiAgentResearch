@@ -169,7 +169,6 @@ def train_ensemble_with_early_stopping(
 
 def save_ensemble_artifacts(
     model: EnsembleMnistCNN,
-    mnist_root: Path,
     checkpoint_path: Path,
     *,
     metrics: dict,
@@ -184,38 +183,8 @@ def save_ensemble_artifacts(
     return metrics
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Train MNIST CNN.")
-    parser.add_argument("--mnist-root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--epochs", type=int, default=3)
-    parser.add_argument(
-        "--autoencoder-epochs",
-        type=int,
-        default=5,
-        help="Number of epochs for autoencoder pre-training.",
-    )
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay (L2 penalty).")
-    parser.add_argument(
-        "--patience",
-        type=int,
-        default=5,
-        help="Number of epochs to wait for improvement before early stopping.",
-    )
-    parser.add_argument(
-        "--num-sub-networks",
-        type=int,
-        default=3,
-        help="Number of sub-networks in the ensemble.",
-    )
-    parser.add_argument("--kwta-k", type=int, default=1, help="k value for k-Winners-Take-All.")
-    parser.add_argument("--quick", action="store_true", help="Use a small train subset for fast smoke runs.")
-    parser.add_argument("--device", default="cpu")
-    parser.add_argument("--checkpoint", type=Path, default=None, help="Model checkpoint path.")
-    parser.add_argument("--output", type=Path, default=None, help="Optional output metrics file path.")
-    args = parser.parse_args()
-
+def run_training_pipeline(args: argparse.Namespace) -> dict:
+    """Run the full MNIST ensemble training pipeline and return checkpoint metadata."""
     set_training_seed()
 
     mnist_root = args.mnist_root.resolve()
@@ -255,13 +224,47 @@ def main() -> None:
         "num_sub_networks": args.num_sub_networks,
         "kwta_k": args.kwta_k,
     }
-    metrics = save_ensemble_artifacts(
+    return save_ensemble_artifacts(
         ensemble_model,
-        mnist_root,
         checkpoint_path,
         metrics=metrics,
         output_path=args.output,
     )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Train MNIST CNN.")
+    parser.add_argument("--mnist-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument(
+        "--autoencoder-epochs",
+        type=int,
+        default=5,
+        help="Number of epochs for autoencoder pre-training.",
+    )
+    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay (L2 penalty).")
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=5,
+        help="Number of epochs to wait for improvement before early stopping.",
+    )
+    parser.add_argument(
+        "--num-sub-networks",
+        type=int,
+        default=3,
+        help="Number of sub-networks in the ensemble.",
+    )
+    parser.add_argument("--kwta-k", type=int, default=1, help="k value for k-Winners-Take-All.")
+    parser.add_argument("--quick", action="store_true", help="Use a small train subset for fast smoke runs.")
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--checkpoint", type=Path, default=None, help="Model checkpoint path.")
+    parser.add_argument("--output", type=Path, default=None, help="Optional output metrics file path.")
+    args = parser.parse_args()
+
+    metrics = run_training_pipeline(args)
     print(json.dumps(metrics))
 
 

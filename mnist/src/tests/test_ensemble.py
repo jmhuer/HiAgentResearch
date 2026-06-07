@@ -3,6 +3,22 @@ import torch.nn as nn
 
 from model import EnsembleMnistCNN
 
+ENSEMBLE_PARAM_COUNT = 11_183_070
+
+
+def test_model_refactor_equivalence():
+    """Lock topology and seeded init: two builds under TRAINING_SEED must match."""
+    torch.manual_seed(0)
+    model_a = EnsembleMnistCNN(num_sub_networks=3, kwta_k=1)
+    torch.manual_seed(0)
+    model_b = EnsembleMnistCNN(num_sub_networks=3, kwta_k=1)
+
+    assert sum(parameter.numel() for parameter in model_a.parameters()) == ENSEMBLE_PARAM_COUNT
+
+    x = torch.randn(4, 1, 28, 28)
+    with torch.no_grad():
+        assert torch.allclose(model_a(x), model_b(x))
+
 def test_ensemble_output_shape():
     num_models = 3
     k = 1
