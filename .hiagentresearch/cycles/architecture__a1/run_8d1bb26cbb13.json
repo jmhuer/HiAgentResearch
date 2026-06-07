@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "run_id": "run_8d1bb26cbb13",
+  "group_id": "architecture__a1",
+  "branch": "research/architecture-a1",
+  "loop_index": 1,
+  "goal_id": "architecture__a1-g1",
+  "goal": "Add a third residual stage to deepen the shared trunk, using modest 192-channel width so inference stays within the 13ms latency budget.",
+  "planned_code_changes": [
+    "MnistEncoder: insert layer3 (192 channels, stride 2, 2 BasicBlocks) between layer2 and proj; proj becomes 192\u219264 stride 1 to preserve 64\u00d77\u00d77 decoder input.",
+    "ResNetTrunk: insert matching layer3 (192 ch) after layer2; former layer3 (256 ch) becomes layer4 with stride 2, output 256\u00d74\u00d74.",
+    "SharedLayer4MultiLinearHead: drop conv layer4; pool trunk output and apply multi-linear heads on 256-dim embedding.",
+    "EnsembleMnistCNN: wire four-stage trunk and simplified head; update test_ensemble.py param-count lock."
+  ],
+  "target_files": [
+    "mnist/src/model.py",
+    "mnist/src/tests/test_ensemble.py"
+  ],
+  "success_criteria": [
+    "Model constructs and forward-passes on 28\u00d728 input without shape errors.",
+    "Orchestrator eval accuracy > 0.873 inherited floor; latency_ms \u2264 13.0.",
+    "Accuracy improves over inherited 0.915 baseline if added depth yields better representations."
+  ],
+  "rollback_plan": "Revert mnist/src/model.py and test_ensemble.py to polish commit 8eee6a1 state (two-stage encoder, three-stage trunk, 512-channel shared layer4 head).",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "polish",
+  "lineage_anchor_sha": "8eee6a12aa93b2c5f8860bd8ce98998a82217abe",
+  "lineage_anchor_policy": "last_commit",
+  "lineage_parent_anchor_step": 3,
+  "lineage_anchor_source_group": "polish",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

@@ -53,13 +53,17 @@ class MnistEncoder(nn.Module):
         self.layer2, self.in_planes = _make_resnet_stage(
             block, self.in_planes, 128, 2, stride=2, activation="relu"
         )
-        self.proj = nn.Conv2d(128, 64, kernel_size=3, stride=2, padding=1, bias=False)
+        self.layer3, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 192, 2, stride=2, activation="relu"
+        )
+        self.proj = nn.Conv2d(192, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn_proj = nn.BatchNorm2d(64)
 
     def forward(self, x):
         out = self.relu1(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
+        out = self.layer3(out)
         return F.relu(self.bn_proj(self.proj(out)))
 
 
@@ -165,7 +169,7 @@ def ResNet18():
 
 
 class ResNetTrunk(nn.Module):
-    """Shared backbone through layer3 (256x7x7)."""
+    """Shared backbone through layer4 (256x4x4)."""
 
     def __init__(self, block, num_blocks) -> None:
         super().__init__()
@@ -180,14 +184,18 @@ class ResNetTrunk(nn.Module):
             block, self.in_planes, 128, num_blocks[1], stride=2, activation="relu"
         )
         self.layer3, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 256, num_blocks[2], stride=2, activation="relu"
+            block, self.in_planes, 192, num_blocks[2], stride=2, activation="relu"
+        )
+        self.layer4, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 256, num_blocks[3], stride=2, activation="relu"
         )
 
     def forward(self, x):
         out = self.relu1(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
-        return self.layer3(out)
+        out = self.layer3(out)
+        return self.layer4(out)
 
 
 class ResNetHead(nn.Module):
@@ -209,28 +217,21 @@ class ResNetHead(nn.Module):
 
 
 class SharedLayer4MultiLinearHead(nn.Module):
-    """Shared layer4 + pool; per-head linear classifiers for ensemble logits."""
+    """Pool trunk features; per-head linear classifiers for ensemble logits."""
 
     def __init__(
         self,
-        block,
-        num_blocks_layer4: int,
+        embed_dim: int,
         num_heads: int,
         num_classes: int = 10,
     ) -> None:
         super().__init__()
-        self.in_planes = 256
-        embed_dim = 512 * block.expansion
-        self.layer4, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 512, num_blocks_layer4, stride=2, activation="relu"
-        )
         self.linears = nn.ModuleList(
             [nn.Linear(embed_dim, num_classes) for _ in range(num_heads)]
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.layer4(x)
-        out = F.avg_pool2d(out, 4)
+        out = F.avg_pool2d(x, 4)
         out = out.view(out.size(0), -1)
         return torch.stack([linear(out) for linear in self.linears])
 
@@ -253,8 +254,8 @@ class EnsembleMnistCNN(nn.Module):
         super().__init__()
         block = BasicBlock
         num_blocks = [2, 2, 2, 2]
-        self.trunk = ResNetTrunk(block, num_blocks[:3])
-        self.head = SharedLayer4MultiLinearHead(block, 2, num_sub_networks)
+        self.trunk = ResNetTrunk(block, num_blocks)
+        self.head = SharedLayer4MultiLinearHead(256, num_sub_networks)
         self.kwta_k = kwta_k
 
     def load_encoder_weights(self, encoder_state: dict) -> None:
