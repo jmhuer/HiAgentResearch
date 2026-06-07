@@ -26,6 +26,42 @@ except ImportError:  # pragma: no cover - supports direct script/test execution.
 
 TRAINING_SEED = 42
 
+# Merged augmentation policy (a1 single-affine + a2 always-on CoarseDropout).
+# Loop-2 calibration: SSR p=0.75 restores ~75% affine coverage after removing
+# independent A.Rotate(p=0.5); scale_limit=0.08 is MNIST-calibrated (loop 1 at
+# 0.10 regressed to 0.921).
+AFFINE_SHIFT_LIMIT = 0.10
+AFFINE_SCALE_LIMIT = 0.08
+AFFINE_ROTATE_LIMIT = 15
+AFFINE_P = 0.75
+COARSE_DROPOUT_P = 0.15
+COARSE_DROPOUT_NUM_HOLES = (1, 1)
+COARSE_DROPOUT_HOLE_HEIGHT = (0.11, 0.21)
+COARSE_DROPOUT_HOLE_WIDTH = (0.11, 0.21)
+
+
+def build_train_augmentations() -> A.Compose:
+    """Return the merged train-time augmentation compose stack."""
+    return A.Compose(
+        [
+            A.ShiftScaleRotate(
+                shift_limit=AFFINE_SHIFT_LIMIT,
+                scale_limit=AFFINE_SCALE_LIMIT,
+                rotate_limit=AFFINE_ROTATE_LIMIT,
+                p=AFFINE_P,
+            ),
+            A.RandomBrightnessContrast(p=0.2),
+            A.CoarseDropout(
+                num_holes_range=COARSE_DROPOUT_NUM_HOLES,
+                hole_height_range=COARSE_DROPOUT_HOLE_HEIGHT,
+                hole_width_range=COARSE_DROPOUT_HOLE_WIDTH,
+                fill=0,
+                p=COARSE_DROPOUT_P,
+            ),
+            ToTensorV2(),
+        ]
+    )
+
 
 def set_training_seed(seed: int = TRAINING_SEED) -> None:
     """Fix Python, NumPy, and PyTorch RNGs for reproducible training runs."""
@@ -35,24 +71,7 @@ def set_training_seed(seed: int = TRAINING_SEED) -> None:
 
 class AlbumentationsTransform:
     def __init__(self) -> None:
-        self.aug = A.Compose(
-            [
-                # Single affine op (a1): no compound A.Rotate stack; p=0.75 restores
-                # ~75% coverage that independent A.Rotate(p=0.5)+SSR(p=0.5) provided.
-                A.ShiftScaleRotate(
-                    shift_limit=0.10, scale_limit=0.08, rotate_limit=15, p=0.75
-                ),
-                A.RandomBrightnessContrast(p=0.2),
-                A.CoarseDropout(
-                    num_holes_range=(1, 1),
-                    hole_height_range=(0.11, 0.21),
-                    hole_width_range=(0.11, 0.21),
-                    fill=0,
-                    p=0.15,
-                ),
-                ToTensorV2(),
-            ]
-        )
+        self.aug = build_train_augmentations()
 
     def __call__(self, img):
         img = np.array(img)

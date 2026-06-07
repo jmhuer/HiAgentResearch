@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "run_id": "run_c913066919b0",
+  "group_id": "augmentation__collapse",
+  "branch": "research/augmentation-collapse",
+  "loop_index": 3,
+  "goal_id": "augmentation__collapse-g1",
+  "goal": "Integrate augmentation__a1's single-affine augmentation fix (remove compound A.Rotate stack) while preserving augmentation__a2's always-on CoarseDropout that drives the 0.931 floor.",
+  "planned_code_changes": [
+    "Extract loop-2 winning augmentation hyperparameters into module-level named constants with a1/a2 provenance comments",
+    "Add build_train_augmentations() factory so the merged compose stack is explicit and testable",
+    "Wire AlbumentationsTransform through the factory without changing any hyperparameter values",
+    "Add test_augmentation_compose_policy in test_model_and_train.py asserting single SSR (no A.Rotate), CoarseDropout always-on at p=0.15, and loop-2 SSR bounds"
+  ],
+  "target_files": [
+    "mnist/src/train.py",
+    "mnist/src/tests/test_model_and_train.py"
+  ],
+  "success_criteria": [
+    "accuracy >= 0.931 (behavior-preserving refactor; no hyperparameter changes)",
+    "Augmentation compose still has exactly one affine op (A.ShiftScaleRotate), no A.Rotate",
+    "CoarseDropout preserved at p=0.15 with a2 hole ranges",
+    "SSR uses loop-2 proven values: p=0.75, scale_limit=0.08, rotate_limit=15, shift_limit=0.10",
+    "Smoke tests pass (transform constructs, structural test passes)"
+  ],
+  "rollback_plan": "If eval regresses below 0.931, revert the refactor and inline the compose list exactly as in 90eccd0; the winning hyperparameters are unchanged so any regression indicates an accidental behavioral drift in the factory wiring.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "augmentation__a2",
+  "lineage_anchor_sha": "3eeb30ab9f29632d5a61277c5be36fb3abed26dc",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 6,
+  "lineage_anchor_source_group": "augmentation__a2",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

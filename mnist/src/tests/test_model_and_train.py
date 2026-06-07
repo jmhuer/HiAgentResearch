@@ -1,9 +1,40 @@
+import albumentations as A
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from model import Autoencoder, Decoder, EnsembleMnistCNN, MnistCNN
-from train import evaluate_ensemble_loss, pretrain_autoencoder
+from train import (
+    AFFINE_P,
+    AFFINE_ROTATE_LIMIT,
+    AFFINE_SCALE_LIMIT,
+    AFFINE_SHIFT_LIMIT,
+    COARSE_DROPOUT_P,
+    AlbumentationsTransform,
+    build_train_augmentations,
+    evaluate_ensemble_loss,
+    pretrain_autoencoder,
+)
+
+
+def test_augmentation_compose_policy():
+    compose = build_train_augmentations()
+    transform_types = [type(t) for t in compose.transforms]
+
+    assert A.Rotate not in transform_types
+    assert transform_types.count(A.ShiftScaleRotate) == 1
+    assert transform_types.count(A.CoarseDropout) == 1
+
+    ssr = next(t for t in compose.transforms if isinstance(t, A.ShiftScaleRotate))
+    assert ssr.shift_limit_x == (-AFFINE_SHIFT_LIMIT, AFFINE_SHIFT_LIMIT)
+    assert ssr.scale_limit == (1 - AFFINE_SCALE_LIMIT, 1 + AFFINE_SCALE_LIMIT)
+    assert ssr.rotate_limit == (-AFFINE_ROTATE_LIMIT, AFFINE_ROTATE_LIMIT)
+    assert ssr.p == AFFINE_P
+
+    cutout = next(t for t in compose.transforms if isinstance(t, A.CoarseDropout))
+    assert cutout.p == COARSE_DROPOUT_P
+
+    AlbumentationsTransform()
 
 
 def test_mnist_cnn_architecture():
