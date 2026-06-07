@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "run_id": "run_1f7bc9d09d3d",
+  "group_id": "polish",
+  "branch": "research/polish",
+  "loop_index": 2,
+  "goal_id": "polish-g1",
+  "goal": "Repair loop-1 accuracy regression while preserving model.py refactor; advance foundation by restructuring train.py training loop into named helpers with reproducible seeding.",
+  "planned_code_changes": [
+    "Keep model.py loop-1 refactor unchanged (verified behavior-preserving)",
+    "Extract AlbumentationsTransform, build_mnist_dataloaders, evaluate_ensemble_loss, train_ensemble_with_early_stopping, save_ensemble_artifacts from train.py main()",
+    "Add set_training_seed() called at startup for reproducible training without changing hyperparameters or eval interface",
+    "Add unit test for extracted training helpers (evaluate loss path)"
+  ],
+  "target_files": [
+    "mnist/src/train.py",
+    "mnist/src/tests/test_model_and_train.py"
+  ],
+  "success_criteria": [
+    "model.py refactor retained; structural equivalence to baseline confirmed",
+    "train.py main() delegates to named helpers; checkpoint JSON schema unchanged",
+    "pytest mnist/src/tests passes",
+    "Smoke: EnsembleMnistCNN forward + quick train completes",
+    "accuracy guardrail: >= 0.915 baseline (stochastic training; seed stabilizes attribution)"
+  ],
+  "rollback_plan": "Revert mnist/src/train.py helper extraction and seed call; model.py remains as loop-1 refactor.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "baseline",
+  "lineage_parent_group_id": null,
+  "lineage_anchor_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+  "lineage_anchor_policy": null,
+  "lineage_parent_anchor_step": null,
+  "lineage_anchor_source_group": null,
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

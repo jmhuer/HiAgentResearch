@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from model import Autoencoder, Decoder, MnistCNN
-from train import pretrain_autoencoder
+from model import Autoencoder, Decoder, EnsembleMnistCNN, MnistCNN
+from train import evaluate_ensemble_loss, pretrain_autoencoder
 
 
 def test_mnist_cnn_architecture():
@@ -46,3 +46,17 @@ def test_pretrain_autoencoder_loss_decrease():
         current_loss = total_loss / len(dummy_loader)
         assert current_loss < initial_loss
         initial_loss = current_loss
+
+
+def test_evaluate_ensemble_loss():
+    loader = DataLoader(
+        TensorDataset(torch.randn(32, 1, 28, 28), torch.randint(0, 10, (32,))),
+        batch_size=16,
+    )
+    model = EnsembleMnistCNN(num_sub_networks=3, kwta_k=1)
+    device = torch.device("cpu")
+    criterion = nn.CrossEntropyLoss()
+
+    loss = evaluate_ensemble_loss(model, loader, device, criterion)
+
+    assert loss > 0.0
