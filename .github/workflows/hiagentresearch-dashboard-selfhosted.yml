@@ -92,7 +92,7 @@ jobs:
                   "--limit",
                   "100",
                   "--json",
-                  "databaseId,headBranch,headSha,createdAt",
+                  "databaseId,headBranch,headSha,createdAt,updatedAt",
               ],
               check=True,
               capture_output=True,
@@ -103,7 +103,13 @@ jobs:
               branch = str(row.get("headBranch", ""))
               sha = str(row.get("headSha", ""))
               created_at = str(row.get("createdAt", ""))
-              if session_started_at and created_at and not timestamp_at_or_after(created_at, session_started_at):
+              updated_at = str(row.get("updatedAt", ""))
+              in_session = True
+              if session_started_at:
+                  created_ok = bool(created_at and timestamp_at_or_after(created_at, session_started_at))
+                  updated_ok = bool(updated_at and timestamp_at_or_after(updated_at, session_started_at))
+                  in_session = created_ok or updated_ok
+              if not in_session:
                   continue
               if branch not in collectible_branches or not sha:
                   continue
