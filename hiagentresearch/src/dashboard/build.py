@@ -340,6 +340,18 @@ def _rewrite_index_cache_bust(output_dir: Path, cache_bust: str) -> None:
         return
     text = index.read_text(encoding="utf-8")
     text = re.sub(r'src="\./app\.js(?:\?v=[^"]*)?"', f'src="./app.js?v={cache_bust}"', text)
+    # Bust stylesheet cache too; otherwise GitHub Pages can keep an old CSS file while
+    # app.js updates, making the deployed visual theme look different from local preview.
+    text = re.sub(
+        r'href="\./styles\.css(?:\?v=[^"]*)?"',
+        f'href="./styles.css?v={cache_bust}"',
+        text,
+    )
+    text = re.sub(
+        r'href="\./theme-te\.css(?:\?v=[^"]*)?"',
+        f'href="./theme-te.css?v={cache_bust}"',
+        text,
+    )
     index.write_text(text, encoding="utf-8")
 
 
