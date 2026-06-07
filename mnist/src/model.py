@@ -54,7 +54,7 @@ class MnistEncoder(nn.Module):
             block, self.in_planes, 128, 2, stride=2, activation="relu"
         )
         self.layer3, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 192, 3, stride=2, activation="relu"
+            block, self.in_planes, 192, 2, stride=2, activation="relu"
         )
         self.proj = nn.Conv2d(192, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn_proj = nn.BatchNorm2d(64)
@@ -253,7 +253,7 @@ class EnsembleMnistCNN(nn.Module):
     def __init__(self, num_sub_networks: int, kwta_k: int) -> None:
         super().__init__()
         block = BasicBlock
-        num_blocks = [2, 2, 3, 2]
+        num_blocks = [2, 2, 2, 3]
         self.trunk = ResNetTrunk(block, num_blocks)
         self.head = SharedLayer4MultiLinearHead(256, num_sub_networks)
         self.kwta_k = kwta_k
