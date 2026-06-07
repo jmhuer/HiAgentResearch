@@ -4,7 +4,7 @@ Example project workspace for HiAgentControl hierarchical planning.
 
 ## Target Metrics
 
-Gate thresholds live in the root `config.yaml` so the framework has one source
+Gate thresholds live in the active config (default `configs/standard.yaml`) so the framework has one source
 of truth for research outcomes:
 
 - accuracy: 0.985

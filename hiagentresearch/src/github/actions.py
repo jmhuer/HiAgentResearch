@@ -22,8 +22,15 @@ class GitHubRun:
 
 
 class GitHubActionsService:
-    def __init__(self, repo_root: Path) -> None:
+    def __init__(self, repo_root: Path, *, repo: str | None = None) -> None:
         self.repo_root = repo_root.resolve()
+        # gh --repo target ([HOST/]OWNER/REPO). When set, every gh call acts on this
+        # repo explicitly, so the tool targets the configured remote regardless of how
+        # many git remotes exist locally. None => gh's own default-repo resolution.
+        self.repo = repo or None
+
+    def _repo_args(self) -> list[str]:
+        return ["--repo", self.repo] if self.repo else []
 
     def find_run_for_head(
         self,
@@ -106,7 +113,7 @@ class GitHubActionsService:
         deadline = time.monotonic() + max_wait_sec
         while time.monotonic() < deadline:
             proc = subprocess.run(
-                ["gh", "run", "view", run_id, "--json", "status,conclusion"],
+                ["gh", "run", "view", run_id, "--json", "status,conclusion", *self._repo_args()],
                 cwd=self.repo_root,
                 capture_output=True,
                 text=True,
@@ -138,7 +145,7 @@ class GitHubActionsService:
         last_error = ""
         for attempt in range(retries + 1):
             proc = subprocess.run(
-                ["gh", *args],
+                ["gh", *args, *self._repo_args()],
                 cwd=self.repo_root,
                 capture_output=True,
                 text=True,
@@ -174,6 +181,56 @@ def _is_transient_gh_error(stderr: str) -> bool:
     """True for network/server hiccups that are safe to retry (not bad-command/auth errors)."""
     lowered = stderr.lower()
     return any(marker in lowered for marker in _TRANSIENT_GH_ERROR_MARKERS)
+
+
+def gh_repo_slug(repo_root: Path, remote: str) -> str:
+    """Resolve the ``gh --repo`` target from a git remote's URL.
+
+    Returns ``OWNER/REPO`` for github.com or ``HOST/OWNER/REPO`` for GitHub
+    Enterprise (e.g. ``github.disney.com/InformationAdvantage-AIML/HiAgentResearch``),
+    so the tool acts on the configured repo no matter how many remotes exist. This
+    is for LOCAL orchestration; CI uses gh's own default repo (the configured remote
+    name does not exist in a CI checkout). Fails fast if the remote is unknown.
+    """
+    proc = subprocess.run(
+        ["git", "remote", "get-url", remote],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise GitHubActionsError(
+            f"git remote get-url {remote!r} failed (is github.remote configured and the "
+            f"remote added?): {proc.stderr.strip()}"
+        )
+    host, owner_repo = _parse_remote_url(proc.stdout.strip())
+    if not owner_repo:
+        raise GitHubActionsError(f"could not parse owner/repo from remote {remote!r} url")
+    if host in ("", "github.com"):
+        return owner_repo
+    return f"{host}/{owner_repo}"
+
+
+def _parse_remote_url(url: str) -> tuple[str, str]:
+    """Split a git remote URL into (host, owner/repo). Handles scp-style SSH,
+    ssh://, and https:// forms, with or without a trailing .git."""
+    u = url.strip()
+    if u.endswith(".git"):
+        u = u[:-4]
+    if u.startswith("git@"):  # scp-style: git@host:owner/repo
+        host, _, path = u[len("git@"):].partition(":")
+        return host, path.strip("/")
+    for scheme in ("ssh://", "https://", "http://"):
+        if u.startswith(scheme):
+            u = u[len(scheme):]
+            break
+    if u.startswith("git@"):  # ssh://git@host/owner/repo
+        u = u[len("git@"):]
+    if "@" in u.split("/", 1)[0]:  # user@host/owner/repo
+        u = u.split("@", 1)[1]
+    host, _, path = u.partition("/")
+    return host, path.strip("/")
 
 
 def load_run_meta(artifact_dir: Path) -> dict[str, Any]:

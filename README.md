@@ -5,7 +5,7 @@ Standalone Cursor-first research runtime with a thin Python control plane.
 ## Repository layout
 
 - `hiagentresearch/` package source, contracts, docs, and scripts
-- `config.yaml` root project contract for workdir, editable paths, eval, groups, artifacts, and policy modes
+- `configs/standard.yaml` default project contract for workdir, editable paths, eval, groups, artifacts, and policy modes
 - `mnist/` first workdir (agent-editable project code)
 - `.hiagentresearch/eval/` frozen evaluation entrypoints
 - `.hiagentresearch/runs/` per-run observability artifacts
@@ -28,5 +28,5 @@ hiagentresearch registry summary
 hiagentresearch dashboard build
 ```
 
-The runtime is config-first: project-specific paths and quality expectations belong in `config.yaml`, not in core Python prompts or workflows.
+The runtime is config-first: project-specific paths and quality expectations belong in `configs/*.yaml` (default `configs/standard.yaml`), not in core Python prompts or workflows.
 See `hiagentresearch/docs/registry.md` for registry inspection and dashboard commands.

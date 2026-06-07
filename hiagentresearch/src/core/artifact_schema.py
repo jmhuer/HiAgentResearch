@@ -10,6 +10,12 @@ class ArtifactParseError(ValueError):
     """Raised when eval output cannot be normalized."""
 
 
+# Top-level canonical-JSON keys that are control flags, not metrics.
+RESERVED_PAYLOAD_KEYS = frozenset(
+    {"passed", "execution_passed", "exit_code", "failure_class", "error", "research_outcome"}
+)
+
+
 @dataclass(slots=True)
 class NormalizedEvalResult:
     passed: bool
@@ -47,6 +53,10 @@ def classify_failure(exit_code: int, payload: dict[str, Any], metric_names: Iter
     if "error" in payload and "missing checkpoint" in str(payload.get("error", "")).lower():
         return "code_failure"
     names = set(metric_names)
+    # Frozen eval-adapter contract (intentional, not a crutch): exit code 2 means
+    # "the eval ran and emitted all metrics but they missed targets" — a research
+    # signal, not an execution failure — so it classifies as "none" when every
+    # expected metric is present. Exit code 2 without metrics is a real eval failure.
     if exit_code == 2 and names and names.issubset(payload):
         return "none"
     if exit_code == 2:
@@ -71,11 +81,16 @@ def normalize_eval(
     names = list(metric_names)
     payload = _extract_json(stdout)
     failure_class = classify_failure(exit_code, payload, names)
+    # Capture every numeric metric the eval reports (generic across projects), not
+    # just the configured targets. Targets still drive gating/classification; the
+    # dashboard selects which captured metrics to display. Control keys are skipped.
     metrics: dict[str, float] = {}
-    for name in names:
-        value = _as_float_or_none(payload.get(name))
-        if value is not None:
-            metrics[name] = value
+    for key, value in payload.items():
+        if key in RESERVED_PAYLOAD_KEYS:
+            continue
+        numeric = _as_float_or_none(value)
+        if numeric is not None:
+            metrics[str(key)] = numeric
     return NormalizedEvalResult(
         passed=bool(payload.get("passed", False)) and exit_code == 0,
         failure_class=failure_class,

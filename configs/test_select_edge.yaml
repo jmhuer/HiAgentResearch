@@ -1,0 +1,66 @@
+project_id: mnist
+workdir: mnist
+dependency_files:
+  - mnist/requirements.txt
+evaluation:
+  entrypoint: .hiagentresearch/eval/run_phase1_eval.py
+  command_template: "python {entrypoint} --workdir {workdir} --group-id {group_id} --quick"
+  targets:
+    accuracy:
+      min: 0.985
+    latency_ms:
+      max: 13.0
+hidden_paths: []
+generated_paths:
+  - data/
+  - src/checkpoints/
+policy_modes:
+  explore: "Try one bounded hypothesis and allow measured regressions with evidence."
+  exploit: "Prefer refinements to evidence-backed promising directions."
+github:
+  workflow_name: hiagentresearch-research-eval
+  remote: disney
+  run_lookup_attempts: 30
+  run_lookup_sleep_sec: 3
+orchestration:
+  baseline_ref: main
+agent:
+  model: composer-2.5
+  thinking: high
+dashboard:
+  enabled: false
+  title: HiAgentResearch (select-edge test)
+  metrics:
+    - accuracy
+    - latency_ms
+  output_dir: .hiagentresearch/dashboard
+agent_contract:
+  research_output_expectations:
+    - "Every cycle starts with concrete evidence and a written plan before code edits."
+    - "Every cycle leaves an auditable trail (planning artifacts, committed manifest, updated tactical intent); the orchestrator runs eval after the edit."
+    - "Research branches keep accumulating valid experiments; metric regressions are knowledge, not execution failures."
+
+# Minimal config to validate the inherit-from-SELECT-collapse edge: architecture is a select
+# collapse (combine:false → adopts the strongest leaf, no integration commit), and optimization
+# inherits it. The watch: does optimization land at L2 (continuing from architecture's adopted
+# result at L1) or collapse to L1 (the runtime resolve gap flagged in review)?
+research_groups:
+  - id: architecture
+    objective: Improve model architecture while preserving the latency budget.
+    policy_mode: explore
+    lineage:
+      mode: baseline
+    combine: false   # SELECT — adopt the single strongest architecture
+    approaches:
+      - Add a lightweight squeeze-and-excitation block to the existing stages.
+      - Widen the channels in the existing stages.
+
+  - id: optimization
+    objective: Improve optimization strategy and training dynamics.
+    policy_mode: exploit
+    lineage:
+      mode: inherit
+      inherit_from: architecture      # builds on architecture's SELECTED best
+      anchor_metric: accuracy
+    approaches:
+      - Cosine LR schedule with linear warmup.

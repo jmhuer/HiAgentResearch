@@ -1,0 +1,99 @@
+project_id: mnist
+workdir: mnist
+dependency_files:
+  - mnist/requirements.txt
+evaluation:
+  entrypoint: .hiagentresearch/eval/run_phase1_eval.py
+  command_template: "python {entrypoint} --workdir {workdir} --group-id {group_id} --quick"
+  targets:
+    accuracy:
+      min: 0.985
+    latency_ms:
+      max: 13.0
+hidden_paths: []
+generated_paths:
+  - data/
+  - src/checkpoints/
+policy_modes:
+  explore: "Try one bounded hypothesis and allow measured regressions with evidence."
+  exploit: "Prefer refinements to evidence-backed promising directions."
+github:
+  workflow_name: hiagentresearch-research-eval
+  remote: disney
+  run_lookup_attempts: 30
+  run_lookup_sleep_sec: 3
+orchestration:
+  baseline_ref: main
+  # No manual execution_waves / merge groups here: the load-time desugar derives the
+  # waves (topological over the area DAG) and the final merge automatically from the
+  # areas below.
+agent:
+  model: composer-2.5
+  thinking: high
+dashboard:
+  enabled: false
+  title: HiAgentResearch
+  metrics:
+    - accuracy
+    - latency_ms
+  output_dir: .hiagentresearch/dashboard
+agent_contract:
+  research_output_expectations:
+    - "Every cycle starts with concrete evidence and a written plan before code edits."
+    - "Every cycle leaves an auditable trail (planning artifacts, committed manifest, updated tactical intent); the orchestrator runs eval after the edit."
+    - "Research branches keep accumulating valid experiments; metric regressions are knowledge, not execution failures."
+
+# --- Hierarchical "areas" ---------------------------------------------------------------
+# Each area declares competing single-idea `approaches`. The desugar expands every area
+# into one leaf group per approach + a collapse node, auto-derives the execution waves,
+# and auto-merges the terminal areas. `combine: false` = select the strongest leaf
+# (strict competition, e.g. picking one architecture); `combine: true` (default) = merge
+# the leaves (compositional, e.g. stacking augmentations). Inheritance is area-level: a
+# downstream area branches from the upstream area's collapsed best.
+research_groups:
+  - id: architecture
+    objective: Improve model architecture while preserving the latency budget.
+    policy_mode: explore
+    lineage:
+      mode: baseline
+    combine: false   # strict competition — adopt the single strongest architecture
+    approaches:
+      - Add a third residual stage to deepen the trunk.
+      - Widen channels in the existing stages instead of deepening.
+      - Insert a lightweight squeeze-and-excitation block per stage.
+
+  - id: optimization
+    objective: Improve optimization strategy and training dynamics.
+    policy_mode: exploit
+    lineage:
+      mode: inherit
+      inherit_from: architecture      # builds on architecture's collapsed best
+      anchor_metric: accuracy
+    approaches:
+      - Cosine LR schedule with linear warmup.
+      - Higher weight decay paired with label smoothing.
+
+  - id: augmentation
+    objective: Improve robustness and accuracy using targeted augmentation.
+    policy_mode: explore
+    lineage:
+      mode: baseline                  # independent of architecture; merged at the end
+    combine: true                     # augmentations compose — merge the leaves
+    approaches:
+      - RandAugment with a mild magnitude.
+      - Mixup combined with CutMix.
+
+  - id: polish
+    objective: Improve code quality, structure, and maintainability.
+    policy_mode: exploit
+    task_kind: engineering
+    # Optional scope override (replaces the engineering default). Natural language, advisory.
+    change_scope: "Polish only — improve clarity and robustness in cohesive, reviewable steps; do not restructure public interfaces."
+    lineage:
+      mode: inherit
+      inherit_from: optimization      # polish the optimized model
+      anchor_metric: accuracy
+    # No approaches → a single engineering leaf (degenerate area = today's behavior).
+
+# Terminal areas (polish — the tip of architecture→optimization→polish — and augmentation)
+# auto-merge into a final result. Override with `combine_areas: [..]` if needed.

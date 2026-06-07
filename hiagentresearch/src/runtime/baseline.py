@@ -16,7 +16,7 @@ from pathlib import Path
 from hiagentresearch.src.core.config import HiAgentResearchConfig
 from hiagentresearch.src.core.outcomes import baseline_metrics_complete, required_baseline_metrics
 from hiagentresearch.src.git.service import GitService
-from hiagentresearch.src.github.actions import GitHubActionsService
+from hiagentresearch.src.github.actions import GitHubActionsService, gh_repo_slug
 from hiagentresearch.src.github.ingest import record_baseline_snapshot_from_metrics
 from hiagentresearch.src.paths import REPO_ROOT
 from hiagentresearch.src.registry.store import Registry
@@ -49,7 +49,9 @@ def ensure_baseline_snapshot(
     anchor_group = next((group.id for group in config.research_groups), "model_architecture")
     ref = config.orchestration.baseline_ref
     git_service = git or GitService(REPO_ROOT)
-    github_service = github or GitHubActionsService(REPO_ROOT)
+    github_service = github or GitHubActionsService(
+        REPO_ROOT, repo=gh_repo_slug(REPO_ROOT, config.github.remote)
+    )
     head_sha = git_service.resolve_ref(ref)
     known_run_ids = {
         run.database_id
@@ -87,6 +89,8 @@ def ensure_baseline_snapshot(
         if failure.get("failure_class") != "none":
             raise RuntimeError(f"baseline eval failed with {failure.get('failure_class')}: {run.database_id}")
         metrics = json.loads((artifact_dir / "metrics.json").read_text(encoding="utf-8"))
-        record_baseline_snapshot_from_metrics(registry, ref=ref, metrics=metrics, required=required)
+        record_baseline_snapshot_from_metrics(
+            registry, ref=ref, metrics=metrics, commit_sha=head_sha, required=required
+        )
     if not registry.baseline_snapshot():
         raise RuntimeError(f"baseline eval did not produce complete baseline metrics: {run.database_id}")

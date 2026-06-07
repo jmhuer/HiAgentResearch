@@ -14,6 +14,12 @@ from hiagentresearch.src.registry import schema
 
 SCHEMA_VERSION = 7
 
+# Reserved group id for the frozen L0 baseline run. It is intentionally empty so
+# the baseline run never attaches to a configured research group's series (the
+# dashboard only enumerates truthy group ids); the per-group L0 anchors shown on
+# the chart are still synthesized from baseline_snapshot().
+BASELINE_RUN_GROUP = ""
+
 
 class Registry:
     def __init__(self, state_dir: Path) -> None:
@@ -88,19 +94,19 @@ class Registry:
             ON research_outcomes(research_outcome, improved_baseline)
             """
         )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_experiments_group ON experiments(group_id, loop_index)")
-        experiment_columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(experiments)").fetchall()
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cycles_group ON cycles(group_id, loop_index)")
+        cycle_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(cycles)").fetchall()
         }
         for column, ddl in (
-            ("lineage_mode", "ALTER TABLE experiments ADD COLUMN lineage_mode TEXT"),
-            ("lineage_parent_group_id", "ALTER TABLE experiments ADD COLUMN lineage_parent_group_id TEXT"),
-            ("lineage_anchor_sha", "ALTER TABLE experiments ADD COLUMN lineage_anchor_sha TEXT"),
-            ("lineage_anchor_policy", "ALTER TABLE experiments ADD COLUMN lineage_anchor_policy TEXT"),
-            ("lineage_parent_anchor_step", "ALTER TABLE experiments ADD COLUMN lineage_parent_anchor_step INTEGER"),
-            ("lineage_anchor_source_group", "ALTER TABLE experiments ADD COLUMN lineage_anchor_source_group TEXT"),
+            ("lineage_mode", "ALTER TABLE cycles ADD COLUMN lineage_mode TEXT"),
+            ("lineage_parent_group_id", "ALTER TABLE cycles ADD COLUMN lineage_parent_group_id TEXT"),
+            ("lineage_anchor_sha", "ALTER TABLE cycles ADD COLUMN lineage_anchor_sha TEXT"),
+            ("lineage_anchor_policy", "ALTER TABLE cycles ADD COLUMN lineage_anchor_policy TEXT"),
+            ("lineage_parent_anchor_step", "ALTER TABLE cycles ADD COLUMN lineage_parent_anchor_step INTEGER"),
+            ("lineage_anchor_source_group", "ALTER TABLE cycles ADD COLUMN lineage_anchor_source_group TEXT"),
         ):
-            if column not in experiment_columns:
+            if column not in cycle_columns:
                 conn.execute(ddl)
         outcome_columns = {
             row[1] for row in conn.execute("PRAGMA table_info(research_outcomes)").fetchall()
@@ -128,10 +134,57 @@ class Registry:
             conn.close()
 
     def baseline_snapshot(self) -> dict[str, Any] | None:
-        return self._read_schema_meta_json("baseline_snapshot")
+        """Frozen L0 baseline, derived from its canonical run row.
+
+        The baseline is stored once, as a run row under the reserved
+        :data:`BASELINE_RUN_GROUP` sentinel (a group-agnostic L0 shared by every
+        baseline-mode branch). This accessor reprojects it into the historical
+        ``{ref, metrics, created_at}`` shape so lineage anchors and the dashboard
+        read it the same way they always have — a single source of truth in the
+        runs table rather than a parallel schema_meta blob.
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            run = conn.execute(
+                """
+                SELECT run_id, branch, commit_sha, created_at
+                FROM runs
+                WHERE group_id = ? AND failure_class = 'none'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (BASELINE_RUN_GROUP,),
+            ).fetchone()
+            if not run:
+                return None
+            metric_rows = conn.execute(
+                "SELECT metric_name, metric_value FROM metrics WHERE run_id = ?",
+                (str(run["run_id"]),),
+            ).fetchall()
+        finally:
+            conn.close()
+        metrics = {str(r["metric_name"]): float(r["metric_value"]) for r in metric_rows}
+        return {
+            "ref": str(run["branch"]),
+            "commit_sha": str(run["commit_sha"] or ""),
+            "metrics": metrics,
+            "created_at": str(run["created_at"]),
+        }
 
     def orchestration_session(self) -> dict[str, Any] | None:
         return self._read_schema_meta_json(SESSION_META_KEY)
+
+    def mark_session_complete(self) -> None:
+        """Stamp the orchestration session as finished.
+
+        The dashboard is a static snapshot, so it shows the run as live or complete
+        based on this stamp at build time: a build taken mid-run has no ``completed_at``
+        (the loop is still going), one taken after ``loops-all`` returns does. Preserves
+        ``started_at``."""
+        session = self.orchestration_session() or {}
+        session["completed_at"] = utc_now_iso()
+        self._write_schema_meta_json(SESSION_META_KEY, session)
 
     def orchestration_session_started_at(self) -> str | None:
         session = self.orchestration_session()
@@ -149,6 +202,21 @@ class Registry:
         if table == "runs":
             return " AND created_at >= ?", [cutoff]
         return f" AND {table}.created_at >= ?", [cutoff]
+
+    def _displayable_run_filter(self, *, alias: str = "r") -> tuple[str, list[Any]]:
+        """Restrict a run query to *displayable* runs: committed CI evals plus the
+        frozen baseline.
+
+        A research cycle records two run rows that share a ``correlation_id``: an
+        ephemeral local quick-eval (the loop's next-action probe — no commit) and
+        the authoritative, commit-bound GitHub Actions eval (``gh_*``). Only the
+        latter (and the baseline L0) belongs on the dashboard, so the trajectory
+        shows one point per cycle rather than a local/CI pair with diverging
+        numbers. Keyed on ``commit_sha`` (set on every CI eval) rather than the
+        run-id prefix, with the baseline sentinel admitted explicitly.
+        """
+        col = f"{alias}." if alias else ""
+        return f" AND ({col}commit_sha != '' OR {col}group_id = ?)", [BASELINE_RUN_GROUP]
 
     def lineage_winners(self) -> dict[str, Any]:
         payload = self._read_schema_meta_json("lineage_winners")
@@ -176,15 +244,32 @@ class Registry:
             return None
         return payload if isinstance(payload, dict) else None
 
-    def record_baseline_snapshot(self, *, ref: str, metrics: dict[str, float]) -> None:
+    def record_baseline_snapshot(
+        self, *, ref: str, metrics: dict[str, float], commit_sha: str = ""
+    ) -> None:
+        """Record the frozen L0 baseline as a first-class run row.
+
+        The baseline used to live in a bespoke schema_meta blob; it is now an
+        ordinary run (under the reserved :data:`BASELINE_RUN_GROUP` sentinel) so
+        the runs table is the single source of truth. ``commit_sha`` is the
+        resolved SHA of the baseline ref so L0 anchors to a real commit (like every
+        other run) and the dashboard can link it. The orchestration-session anchor
+        is written *first* so the baseline run's ``created_at`` lands on or after
+        the cutoff and is never filtered out of session-scoped reads.
+        """
         started_at = utc_now_iso()
-        payload = {
-            "ref": ref,
-            "metrics": {str(name): float(value) for name, value in metrics.items()},
-            "created_at": started_at,
-        }
-        self._write_schema_meta_json("baseline_snapshot", payload)
         self._write_schema_meta_json(SESSION_META_KEY, {"started_at": started_at})
+        self.record_run(
+            run_id=f"baseline:{ref}",
+            group_id=BASELINE_RUN_GROUP,
+            branch=ref,
+            status="finished",
+            failure_class="none",
+            metrics={str(name): float(value) for name, value in metrics.items()},
+            commit_sha=commit_sha,
+            correlation_id=f"baseline_{ref}",
+            created_at=started_at,
+        )
 
     def _write_schema_meta_json(self, key: str, payload: dict[str, Any]) -> None:
         conn = sqlite3.connect(self.db_path)
@@ -226,8 +311,9 @@ class Registry:
         commit_sha: str = "",
         workflow_run_id: str = "",
         correlation_id: str = "",
+        created_at: str | None = None,
     ) -> None:
-        now = utc_now_iso()
+        now = created_at or utc_now_iso()
         conn = sqlite3.connect(self.db_path)
         try:
             conn.execute(
@@ -305,7 +391,7 @@ class Registry:
             ),
         )
 
-    def record_experiment_manifest(
+    def record_cycle_manifest(
         self,
         *,
         run_id: str,
@@ -317,14 +403,14 @@ class Registry:
         try:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO experiments
+                INSERT OR REPLACE INTO cycles
                 (
                     run_id,
                     group_id,
                     branch,
                     loop_index,
-                    hypothesis_id,
-                    hypothesis,
+                    goal_id,
+                    goal,
                     target_files_json,
                     planned_code_changes_json,
                     manifest_path,
@@ -343,8 +429,8 @@ class Registry:
                     str(manifest.get("group_id", "")),
                     str(manifest.get("branch", "")),
                     as_int_or_none(manifest.get("loop_index")),
-                    str(manifest.get("hypothesis_id", "")),
-                    str(manifest.get("hypothesis", "")),
+                    str(manifest.get("goal_id", "")),
+                    str(manifest.get("goal", "")),
                     json.dumps(as_string_list(manifest.get("target_files")), sort_keys=True),
                     json.dumps(as_string_list(manifest.get("planned_code_changes")), sort_keys=True),
                     manifest_path,
@@ -466,6 +552,37 @@ class Registry:
         finally:
             conn.close()
 
+    def latest_loop_github_run(self, group_id: str) -> dict[str, Any] | None:
+        """Newest GitHub run on a group's trajectory, ordered by loop_index.
+
+        Unlike :meth:`last_github_run` (which orders by ``created_at``), this keys
+        on the cycle's ``loop_index`` so "the run we just finished" is the
+        highest accepted loop even when retries/parallel waves make wall-clock
+        order disagree with loop order. ``created_at`` breaks ties.
+        """
+        session_filter, session_params = self._session_run_filter(table="r")
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                f"""
+                SELECT r.*
+                FROM runs r
+                LEFT JOIN cycles e ON r.run_id = e.run_id
+                WHERE r.group_id = ?
+                  AND r.failure_class = 'none'
+                  AND r.commit_sha != ''
+                  AND r.run_id LIKE 'gh_%'
+                  {session_filter}
+                ORDER BY COALESCE(e.loop_index, -1) DESC, r.created_at DESC
+                LIMIT 1
+                """,
+                (group_id, *session_params),
+            ).fetchone()
+            return _row_to_dict(row) if row else None
+        finally:
+            conn.close()
+
     def github_runs_with_metric(self, group_id: str, metric_name: str) -> list[dict[str, Any]]:
         session_filter, session_params = self._session_run_filter(table="r")
         conn = sqlite3.connect(self.db_path)
@@ -490,14 +607,14 @@ class Registry:
         finally:
             conn.close()
 
-    def earliest_experiment(self, group_id: str) -> dict[str, Any] | None:
+    def earliest_cycle(self, group_id: str) -> dict[str, Any] | None:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
             row = conn.execute(
                 """
                 SELECT *
-                FROM experiments
+                FROM cycles
                 WHERE group_id = ?
                 ORDER BY COALESCE(loop_index, 999999) ASC, created_at ASC
                 LIMIT 1
@@ -506,7 +623,7 @@ class Registry:
             ).fetchone()
             if not row:
                 return None
-            return _experiment_row_to_dict(row)
+            return _cycle_row_to_dict(row)
         finally:
             conn.close()
 
@@ -590,17 +707,17 @@ class Registry:
         finally:
             conn.close()
 
-    def experiment_for_run(self, run_id: str) -> dict[str, Any] | None:
+    def cycle_for_run(self, run_id: str) -> dict[str, Any] | None:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
             row = conn.execute(
-                "SELECT * FROM experiments WHERE run_id = ?",
+                "SELECT * FROM cycles WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
             if not row:
                 return None
-            return _experiment_row_to_dict(row)
+            return _cycle_row_to_dict(row)
         finally:
             conn.close()
 
@@ -654,6 +771,20 @@ class Registry:
         finally:
             conn.close()
 
+    def _attach_run_metrics(
+        self, conn: sqlite3.Connection, rows: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Attach a generic ``metrics`` dict (all recorded metrics) to each summary
+        row, so consumers are not tied to any specific metric name."""
+        for row in rows:
+            run_id = str(row.get("run_id", ""))
+            metric_rows = conn.execute(
+                "SELECT metric_name, metric_value FROM metrics WHERE run_id = ?",
+                (run_id,),
+            ).fetchall()
+            row["metrics"] = {str(r[0]): float(r[1]) for r in metric_rows}
+        return rows
+
     def group_summary(self) -> list[dict[str, Any]]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -661,13 +792,14 @@ class Registry:
             rows = conn.execute(
                 f"{schema.GROUP_SUMMARY_SELECT}\nORDER BY latest.group_id"
             ).fetchall()
-            return [_row_to_dict(row) for row in rows]
+            return self._attach_run_metrics(conn, [_row_to_dict(row) for row in rows])
         finally:
             conn.close()
 
     def dashboard_snapshot(self) -> dict[str, Any]:
         session_filter, session_params = self._session_run_filter(table="r")
         runs_session_filter, _ = self._session_run_filter()
+        display_filter, display_params = self._displayable_run_filter(alias="r")
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
@@ -679,18 +811,18 @@ class Registry:
                            r.correlation_id, r.created_at, m.metric_name, m.metric_value
                     FROM runs r
                     JOIN metrics m ON r.run_id = m.run_id
-                    WHERE 1=1{session_filter}
+                    WHERE 1=1{session_filter}{display_filter}
                     ORDER BY r.group_id, r.created_at, m.metric_name
                     """,
-                    session_params,
+                    (*session_params, *display_params),
                 ).fetchall()
             ]
-            experiments = [
-                _experiment_row_to_dict(row)
+            cycles = [
+                _cycle_row_to_dict(row)
                 for row in conn.execute(
                     f"""
                     SELECT e.*
-                    FROM experiments e
+                    FROM cycles e
                     JOIN runs r ON r.run_id = e.run_id
                     WHERE 1=1{session_filter}
                     ORDER BY e.group_id, e.loop_index, e.created_at
@@ -700,42 +832,45 @@ class Registry:
             ]
             cutoff = self.orchestration_session_started_at()
             if cutoff:
+                inner_display_filter, _ = self._displayable_run_filter(alias="inner_r")
                 summary_rows = conn.execute(
                     f"""
                     WITH latest AS (
                         SELECT *
                         FROM runs r
                         WHERE r.created_at >= ?
+                          {display_filter}
                           AND r.created_at = (
                             SELECT MAX(inner_r.created_at)
                             FROM runs inner_r
                             WHERE inner_r.group_id = r.group_id
                               AND inner_r.created_at >= ?
+                              {inner_display_filter}
                           )
                     )
                     SELECT latest.*,
                            outcome.research_outcome,
                            outcome.improved_baseline,
-                           outcome.next_action,
-                           accuracy.metric_value AS accuracy,
-                           latency.metric_value AS latency_ms
+                           outcome.next_action
                     FROM latest
                     LEFT JOIN research_outcomes outcome ON latest.run_id = outcome.run_id
-                    LEFT JOIN metrics accuracy
-                        ON latest.run_id = accuracy.run_id AND accuracy.metric_name = 'accuracy'
-                    LEFT JOIN metrics latency
-                        ON latest.run_id = latency.run_id AND latency.metric_name = 'latency_ms'
                     ORDER BY latest.group_id
                     """,
-                    (cutoff, cutoff),
+                    (cutoff, *display_params, cutoff, *display_params),
                 ).fetchall()
             else:
                 summary_rows = conn.execute(
                     f"{schema.GROUP_SUMMARY_SELECT}\nORDER BY latest.group_id"
                 ).fetchall()
-            runs_sql = f"SELECT * FROM runs WHERE 1=1{runs_session_filter} ORDER BY created_at DESC LIMIT ?"
+            runs_display_filter, _ = self._displayable_run_filter(alias="")
+            runs_sql = (
+                f"SELECT * FROM runs WHERE 1=1{runs_session_filter}{runs_display_filter}"
+                " ORDER BY created_at DESC LIMIT ?"
+            )
             runs_params = [session_params[0]] if runs_session_filter else []
-            runs_rows = conn.execute(runs_sql, (*runs_params, 10_000)).fetchall()
+            runs_rows = conn.execute(
+                runs_sql, (*runs_params, *display_params, 10_000)
+            ).fetchall()
             outcomes_sql = f"""
                 SELECT o.*
                 FROM research_outcomes o
@@ -757,14 +892,19 @@ class Registry:
                 "export_schema_version": 1,
                 "registry_schema_version": self.schema_version(),
                 "orchestration_session": session,
-                "summary": [_row_to_dict(row) for row in summary_rows],
-                "runs": [_row_to_dict(row) for row in runs_rows],
+                # Exclude the frozen baseline sentinel run (BASELINE_RUN_GROUP) from
+                # group-facing lists; it surfaces as per-group L0 anchors, not a
+                # standalone "unknown" group card or run-detail entry.
+                "summary": self._attach_run_metrics(
+                    conn, [_row_to_dict(row) for row in summary_rows if str(row["group_id"])]
+                ),
+                "runs": [_row_to_dict(row) for row in runs_rows if str(row["group_id"])],
                 "metrics": metrics,
                 "metric_names": sorted({str(row["metric_name"]) for row in metrics}),
                 "research_outcomes": [
                     _row_to_dict(row) for row in conn.execute(outcomes_sql, session_params).fetchall()
                 ],
-                "experiments": experiments,
+                "cycles": cycles,
                 "artifacts": [
                     _row_to_dict(row) for row in conn.execute(artifacts_sql, session_params).fetchall()
                 ],
@@ -786,8 +926,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return payload
 
 
-def _experiment_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
-    """Parse a single ``experiments`` row, decoding its JSON list columns once."""
+def _cycle_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    """Parse a single ``cycles`` row, decoding its JSON list columns once."""
     payload = _row_to_dict(row)
     payload["target_files"] = json.loads(str(payload.pop("target_files_json")))
     payload["planned_code_changes"] = json.loads(str(payload.pop("planned_code_changes_json")))

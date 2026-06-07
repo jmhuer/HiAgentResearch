@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "comment": "Marks the dashboard's static JS as ES modules for Node's test runner (node --test tests/lineage_walk.test.mjs). The browser loads these via <script type=module> and ignores this file; it is not shipped into the built dashboard (excluded in build._copy_static_assets). No npm/build step — the frontend imports ECharts/sql.js from a CDN at runtime."
+}

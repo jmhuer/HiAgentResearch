@@ -18,6 +18,12 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR)
     build.add_argument("--output-dir", type=Path, default=None)
     build.add_argument("--require-sqlite-assets", action="store_true")
+    build.add_argument(
+        "--prefer-json",
+        action="store_true",
+        help="Render from the JSON snapshot (shows lineage stars) and skip the GitHub "
+        "baseline dispatch — use for offline local review.",
+    )
 
     artifacts = sub.add_parser("build-from-artifacts", help="Build a dashboard bundle from downloaded GitHub artifacts.")
     artifacts.add_argument("--artifact-root", type=Path, required=True)
@@ -35,6 +41,9 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=args.output_dir,
             config=config,
             require_sqlite_assets=args.require_sqlite_assets,
+            # github_artifacts source => frontend prefers the JSON snapshot and the
+            # build skips the baseline dispatch; ideal for offline local review.
+            source_label="github_artifacts:local" if args.prefer_json else "local_registry",
         )
     elif args.cmd == "build-from-artifacts":
         result = build_from_artifacts(

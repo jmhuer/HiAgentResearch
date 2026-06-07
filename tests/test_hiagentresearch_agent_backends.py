@@ -1,3 +1,4 @@
+import contextlib
 import json
 import sys
 import types
@@ -85,17 +86,22 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
     fake_module.CursorAgentError = FakeCursorAgentError
     fake_module.LocalAgentOptions = FakeLocalAgentOptions
     monkeypatch.setitem(sys.modules, "cursor_sdk", fake_module)
+
+    @contextlib.contextmanager
+    def fake_client(workspace, **kwargs):
+        yield object()
+
     monkeypatch.setattr(
         "hiagentresearch.src.agents.agent_backends.cursor_sdk_client",
-        lambda: object(),
+        fake_client,
     )
 
-    config = load_config(Path("config.yaml"))
+    config = load_config(Path("configs/standard.yaml"))
     group = config.research_groups_by_id()["model_architecture"]
     packet = IntentPacket(
         group_id=group.id,
-        active_hypothesis_id="h1",
-        hypothesis_text="test hypothesis",
+        active_goal_id="h1",
+        goal_text="test goal",
         attempt_count=0,
         last_failure_class="none",
         next_action="continue",
@@ -134,3 +140,79 @@ def test_retry_off_switch_forces_single_attempt(monkeypatch) -> None:
     monkeypatch.setenv("HIAGENTRESEARCH_CURSOR_STARTUP_RETRY", "0")
     monkeypatch.setenv("HIAGENTRESEARCH_CURSOR_STARTUP_ATTEMPTS", "5")
     assert _startup_retry_attempts_from_env() == 1
+
+
+def test_thinking_builds_model_selection(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CURSOR_API_KEY", "cursor_test")
+    fake_module = types.ModuleType("cursor_sdk")
+
+    class FakeCursorAgentError(Exception):
+        pass
+
+    class FakeLocalAgentOptions:
+        def __init__(self, *, cwd: str) -> None:
+            self.cwd = cwd
+
+    class FakeModelParameterValue:
+        def __init__(self, *, id: str, value: str) -> None:
+            self.id, self.value = id, value
+
+    class FakeModelSelection:
+        def __init__(self, *, id: str, params=()) -> None:
+            self.id, self.params = id, list(params)
+
+    class FakeRun:
+        id = "run_x"
+
+        def messages(self):
+            return iter(())
+
+        def wait(self):
+            return types.SimpleNamespace(id="r", agent_id="a", status="finished", result="ok", duration_ms=1, created_at="now", git=None)
+
+    class FakeAgent:
+        agent_id = "a"
+
+        @classmethod
+        def create(cls, **kwargs):
+            cls.kwargs = kwargs
+            return cls()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return None
+
+        def send(self, prompt):
+            return FakeRun()
+
+    fake_module.Agent = FakeAgent
+    fake_module.CursorAgentError = FakeCursorAgentError
+    fake_module.LocalAgentOptions = FakeLocalAgentOptions
+    fake_module.ModelSelection = FakeModelSelection
+    fake_module.ModelParameterValue = FakeModelParameterValue
+    monkeypatch.setitem(sys.modules, "cursor_sdk", fake_module)
+
+    @contextlib.contextmanager
+    def fake_client(workspace, **kwargs):
+        yield object()
+
+    monkeypatch.setattr("hiagentresearch.src.agents.agent_backends.cursor_sdk_client", fake_client)
+
+    config = load_config(Path("configs/standard.yaml"))
+    group = config.research_groups_by_id()["model_architecture"]
+    packet = IntentPacket(
+        group_id=group.id, active_goal_id="h1", goal_text="t",
+        attempt_count=0, last_failure_class="none", next_action="continue",
+    )
+    run_dir = tmp_path / "run_t"
+    run_dir.mkdir()
+    run_cursor_agent_cycle(
+        workdir=tmp_path, run_dir=run_dir, group=group, intent_packet=packet,
+        run_id="run_t", model="composer-2.5", thinking="high",
+    )
+    selection = FakeAgent.kwargs["model"]
+    assert isinstance(selection, FakeModelSelection)
+    assert selection.id == "composer-2.5"
+    assert [(p.id, p.value) for p in selection.params] == [("thinking", "high")]

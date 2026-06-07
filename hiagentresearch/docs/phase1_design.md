@@ -6,7 +6,7 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 
 ## Runtime flow
 
-1. Load the canonical project contract from root `config.yaml`.
+1. Load the canonical project contract from `configs/standard.yaml` (or another selected config file).
 2. Load current intent packet for group from SQLite (or seed first packet).
 3. Record agent actions to `agent_actions.jsonl` (traceability).
 4. Trigger evaluation command (`.hiagentresearch/eval/run_phase1_eval.py` for phase 1).
@@ -22,7 +22,7 @@ Deliver a production-grade minimum runtime for one research-group cycle on MNIST
 
 ## Config contract
 
-`config.yaml` is the stitch point between a project and the generic runtime. It owns:
+The active config file is the stitch point between a project and the generic runtime. It owns:
 
 - project id and workdir,
 - editable paths,
@@ -53,14 +53,14 @@ fields from the JSON; project-specific report quirks belong in the frozen
 adapter, not in core orchestration. There is no `parser` field — canonical JSON
 is the single eval contract.
 
-Project metric thresholds live in `config.yaml`. Project eval scripts may emit
+Project metric thresholds live in the active config file. Project eval scripts may emit
 raw metrics, but the frozen adapter is responsible for passing configured
 thresholds and writing run-local train metrics under the active run directory.
 
 ## Experiment Memory
 
-Each run has exactly one canonical hypothesis in `.hiagentresearch/runs/<run_id>/experiment_intent.json`.
-The loop controller copies the concise branch record to `.hiagentresearch/experiments/<group_id>/<run_id>.json`
+Each run has exactly one canonical goal in `.hiagentresearch/runs/<run_id>/cycle_intent.json`.
+The loop controller copies the concise branch record to `.hiagentresearch/cycles/<group_id>/<run_id>.json`
 before committing the experiment branch. Do not maintain accumulating Python lists for hypotheses or markers.
 
 ## Registry Inspection
@@ -76,7 +76,7 @@ separate Pages workflow build the static bundle.
 
 ## Evidence requirement
 
-Each cycle must include evidence references in `experiment_intent.json`:
+Each cycle must include evidence references in `cycle_intent.json`:
 
 - at least one `code` evidence item, and
 - optional `web` evidence items for external backing.

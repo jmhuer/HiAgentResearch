@@ -18,19 +18,22 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    # Baseline evals run on main (dispatched by ensure_baseline_snapshot) and are not
-    # dashboard inputs. Only rebuild after research-branch evals complete.
+    # Rebuild after any successful eval — including the baseline on main, which is now
+    # a first-class L0 run that should publish as the initial top commit. The
+    # artifact_count==0 guard below still prevents an empty deploy.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
         github.event_name == 'workflow_run' &&
-        github.event.workflow_run.conclusion == 'success' &&
-        startsWith(github.event.workflow_run.head_branch, 'research/')
+        github.event.workflow_run.conclusion == 'success'
       )
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      # Build the dashboard from the same config the run used (see the eval workflow).
+      HIAGENTRESEARCH_CONFIG: ${{ vars.HIAGENTRESEARCH_CONFIG || 'configs/standard.yaml' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,7 +86,10 @@ jobs:
 
           config = load_config()
           workflow = config.github.workflow_name
-          research_branches = {group.branch for group in config.research_groups}
+          baseline_ref = config.orchestration.baseline_ref
+          # Collect the baseline (main) run too — it carries the frozen L0 that should
+          # show before any research loop has run.
+          collectible_branches = {group.branch for group in config.research_groups} | {baseline_ref}
           session_started_at = resolve_github_session_started_at(config)
           if not session_started_at:
               print("artifact_count=0")
@@ -113,7 +119,7 @@ jobs:
               created_at = str(row.get("createdAt", ""))
               if session_started_at and created_at and not timestamp_at_or_after(created_at, session_started_at):
                   continue
-              if branch not in research_branches or not sha:
+              if branch not in collectible_branches or not sha:
                   continue
               live_ref = f"origin/{branch}"
               is_current_branch_history = subprocess.run(
@@ -121,6 +127,11 @@ jobs:
                   check=False,
               ).returncode == 0
               if not is_current_branch_history:
+                  # Fail loud rather than silently shrinking the published view: a
+                  # successful in-session run was dropped because its commit is no
+                  # longer in branch history (e.g. force-push/rebase).
+                  print(f"::warning::dropping run {row.get('databaseId')} on {branch} "
+                        f"({sha[:12]}): commit not in {live_ref} history")
                   continue
               run_id = str(row["databaseId"])
               subprocess.run(

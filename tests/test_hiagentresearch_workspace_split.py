@@ -10,24 +10,28 @@ from hiagentresearch.src.runtime import orchestrator
 
 
 def _group():
-    return load_config(Path("config.yaml")).research_groups_by_id()["model_architecture"]
+    return load_config(Path("configs/standard.yaml")).research_groups_by_id()["model_architecture"]
 
 
 def test_render_workspace_agents_includes_command_and_targets() -> None:
-    config = load_config(Path("config.yaml"))
+    config = load_config(Path("configs/standard.yaml"))
     doc = render_workspace_agents(config)
 
     assert "Workspace contract (mnist)" in doc
     assert "--workdir mnist" in doc
-    assert "`accuracy` >= 0.985" in doc
-    assert "`latency_ms` <= 13.0" in doc
+    # Metrics are shown by name + direction, NOT as an absolute bar (unreachable in
+    # quick-eval; would invite panic moves). The per-cycle scoreboard drives relative progress.
+    assert "`accuracy` — higher is better" in doc
+    assert "`latency_ms` — lower is better" in doc
+    assert "0.985" not in doc
+    assert "13.0" not in doc
     assert ".hiagentresearch/eval/" in doc
     assert "read-only" in doc.lower()
     assert "canonical JSON" in doc
 
 
 def test_required_baseline_metrics_derived_from_targets() -> None:
-    config = load_config(Path("config.yaml"))
+    config = load_config(Path("configs/standard.yaml"))
     required = required_baseline_metrics(config.evaluation.targets)
     assert set(required) == {"accuracy", "latency_ms"}
     assert baseline_metrics_complete({"accuracy": 0.99, "latency_ms": 5.0}, required) is True
@@ -88,7 +92,7 @@ def test_edit_boundary_requires_a_workspace_source_change(monkeypatch) -> None:
     monkeypatch.setattr(
         orchestrator,
         "_git_changed_files",
-        lambda workdir: {"mnist/data/MNIST/raw/x", ".hiagentresearch/runs/run_x/experiment_plan.md"},
+        lambda workdir: {"mnist/data/MNIST/raw/x", ".hiagentresearch/runs/run_x/cycle_plan.md"},
     )
     valid, error, _ = orchestrator._validate_edit_boundary(
         workdir=Path("."), group=group, run_id="run_x", before_changes=set()
@@ -102,10 +106,36 @@ def test_edit_boundary_allows_framework_experiment_artifacts(monkeypatch) -> Non
     monkeypatch.setattr(
         orchestrator,
         "_git_changed_files",
-        lambda workdir: {"mnist/src/model.py", ".hiagentresearch/experiments/model_architecture/run_x.json"},
+        lambda workdir: {"mnist/src/model.py", ".hiagentresearch/cycles/model_architecture/run_x.json"},
     )
     valid, error, changes = orchestrator._validate_edit_boundary(
         workdir=Path("."), group=group, run_id="run_x", before_changes=set()
     )
     assert valid is True, error
     assert "mnist/src/model.py" in changes
+
+
+def test_edit_boundary_tolerates_agent_created_root_lockfile(monkeypatch) -> None:
+    # A package manager (e.g. `uv`) the agent runs may drop uv.lock at the repo root — tool output,
+    # never committed (staging is workspace-scoped). It must not invalidate an otherwise-valid cycle.
+    group = _group()
+    monkeypatch.setattr(
+        orchestrator,
+        "_git_changed_files",
+        lambda workdir: {"mnist/src/model.py", "uv.lock"},
+    )
+    valid, error, changes = orchestrator._validate_edit_boundary(
+        workdir=Path("."), group=group, run_id="run_x", before_changes=set()
+    )
+    assert valid is True, error
+    assert "mnist/src/model.py" in changes
+    # A real out-of-workspace SOURCE edit alongside the lockfile is still rejected.
+    monkeypatch.setattr(
+        orchestrator,
+        "_git_changed_files",
+        lambda workdir: {"mnist/src/model.py", "uv.lock", "hiagentresearch/src/core/config.py"},
+    )
+    valid, error, _ = orchestrator._validate_edit_boundary(
+        workdir=Path("."), group=group, run_id="run_x", before_changes=set()
+    )
+    assert valid is False and "outside workspace" in error and "config.py" in error

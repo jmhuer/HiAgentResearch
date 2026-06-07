@@ -32,8 +32,15 @@ concurrency:
 
 jobs:
   evaluate-and-ingest:
+    # Default to public GitHub-hosted runners.
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # CI must load the SAME config the orchestrator ran with, or group_by_id fails for any
+      # non-default config (e.g. the fan-out areas). Push-triggered evals carry no dispatch
+      # inputs, so the active config is read from a repo/org variable: set HIAGENTRESEARCH_CONFIG
+      # (e.g. configs/fanout.yaml) to switch the live config. Defaults to the standard config.
+      HIAGENTRESEARCH_CONFIG: ${{ vars.HIAGENTRESEARCH_CONFIG || 'configs/standard.yaml' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,12 +151,12 @@ jobs:
           )
           manifest_path = (
               Path(".hiagentresearch")
-              / "experiments"
+              / "cycles"
               / "${{ steps.group.outputs.group_id }}"
               / "${{ steps.group.outputs.correlation_id }}.json"
           )
           if manifest_path.exists():
-              shutil.copyfile(manifest_path, "experiment_manifest.json")
+              shutil.copyfile(manifest_path, "cycle_manifest.json")
           PY
 
       - name: Ingest into phase-1 registry
@@ -161,9 +168,11 @@ jobs:
             --branch "${{ github.ref_name }}" \
             --artifact-dir "."
 
-      # Eval bundle filenames: hiagentresearch.src.core.artifacts.EVAL_NODE_INDEX + EXPERIMENT_MANIFEST
+      # Eval bundle filenames: hiagentresearch.src.core.artifacts.EVAL_NODE_INDEX + CYCLE_MANIFEST
+      # NOTE: pinned to @v3 because the v4 artifact backend is not supported on GitHub
+      # Enterprise Server (GHES). v3 works on both GHES and github.com.
       - name: Upload observability artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: hiagentresearch-${{ github.run_id }}
           path: |
@@ -174,7 +183,7 @@ jobs:
             stdout.txt
             stderr.txt
             parsed_eval.json
-            experiment_manifest.json
+            cycle_manifest.json
             orchestration_session.json
             .hiagentresearch/state/evals.db
 

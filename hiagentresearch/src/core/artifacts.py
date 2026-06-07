@@ -28,11 +28,11 @@ EVAL_NODE_INDEX = INGEST_REQUIRED + (
 
 RUN_CYCLE_INDEX = (
     "agent_actions.jsonl",
-    "experiment_intent.json",
-    "experiment_plan.md",
+    "cycle_intent.json",
+    "cycle_plan.md",
 )
 
-EXPERIMENT_MANIFEST = "experiment_manifest.json"
+CYCLE_MANIFEST = "cycle_manifest.json"
 
 
 def ingest_required_names() -> tuple[str, ...]:

@@ -3,7 +3,7 @@
 The workspace AGENTS.md is the single, honest description of the agent's
 contract for a project: the workspace is theirs, the eval zone is read-only, and
 they are told the exact command and targets that will judge them. It is derived
-from `config.yaml` so it stays correct when targets or the eval command change.
+from the active config file so it stays correct when targets or the eval command change.
 """
 
 from __future__ import annotations
@@ -26,16 +26,15 @@ def _display_eval_command(config: HiAgentResearchConfig) -> str:
 
 
 def _targets_lines(config: HiAgentResearchConfig) -> list[str]:
+    # Show each scored metric and its DIRECTION only — deliberately not the absolute
+    # pass/fail bound. In the quick-eval regime the absolute target is unreachable, and
+    # handing it to the agent invites panic moves; the per-cycle scoreboard already drives
+    # relative progress (beat your best / hold the floor).
     lines: list[str] = []
-    for name, expectation in config.evaluation.targets.items():
-        bounds: list[str] = []
-        if expectation.min is not None:
-            bounds.append(f">= {expectation.min}")
-        if expectation.max is not None:
-            bounds.append(f"<= {expectation.max}")
-        suffix = " and ".join(bounds) if bounds else "(no bound configured)"
-        lines.append(f"- `{name}` {suffix}")
-    return lines or ["- (no targets configured)"]
+    for name in config.evaluation.targets:
+        direction = "lower is better" if config.evaluation.metric_minimizes(name) else "higher is better"
+        lines.append(f"- `{name}` — {direction}")
+    return lines or ["- (no metrics configured)"]
 
 
 def render_workspace_agents(config: HiAgentResearchConfig) -> str:
@@ -46,12 +45,12 @@ def render_workspace_agents(config: HiAgentResearchConfig) -> str:
     command = _display_eval_command(config)
     return f"""# Workspace contract ({workdir})
 
-<!-- Generated from config.yaml by `hiagentresearch render-workspace-docs`. Do not edit by hand. -->
+<!-- Generated from the active config by `hiagentresearch render-workspace-docs`. Do not edit by hand. -->
 
 This workspace (`{workdir}/`) is yours. You may add, modify, restructure, and
 delete files anywhere under it: add modules, add tests under `{workdir}/src/tests/`
 or `{workdir}/tests/`, add dependencies to the requirements file, and reorganize
-code to support your hypothesis.
+code to support your change.
 
 ## How you are evaluated
 
@@ -61,13 +60,15 @@ After your cycle, the orchestrator (and GitHub eval node) runs this exact comman
 {command}
 ```
 
-It prints a canonical JSON report to stdout and you are scored on these target
-fields ({metric_fields}):
+It prints a canonical JSON report to stdout and you are scored on these metrics
+({metric_fields}):
 
 {targets_block}
 
-The eval reads `passed` / `execution_passed` health flags plus those metric keys
-from the JSON report. You do not need to call the parser yourself.
+Optimize for relative progress (improve over the current best; for engineering and
+merge work, hold the metric where it is) — there is no absolute bar to hit per cycle.
+The eval reads `passed` / `execution_passed` health flags plus those metric keys from
+the JSON report. You do not need to call the parser yourself.
 
 ## The eval zone is read-only
 
@@ -80,12 +81,8 @@ preprocessing is applied at inference, and how each metric is computed. Never
 edit or run them: the orchestrator runs the eval after your cycle and that result
 is authoritative. Editing the eval zone is rejected as an invalid cycle.
 
-## Feedback loop
-
-- Write and run your own quick unit/smoke tests for fast feedback before the
-  authoritative eval.
-- Keep your own feedback cheap and CPU-bounded; do not launch long training runs.
-- Treat metric regressions as research evidence, not execution failures.
+For how to work a cycle (planning, self-review, smoke tests, what counts as a
+regression, git boundaries), follow the framework contract in `hiagentresearch/AGENTS.md`.
 """
 
 

@@ -36,7 +36,7 @@ def test_stage_research_commit_excludes_generated_artifacts(tmp_path: Path) -> N
     cache_dir.mkdir(parents=True)
     (cache_dir / "model.cpython-312.pyc").write_bytes(b"compiled")
 
-    manifest = ".hiagentresearch/experiments/model_architecture/run_test.json"
+    manifest = ".hiagentresearch/cycles/model_architecture/run_test.json"
     (tmp_path / manifest).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / manifest).write_text('{"run_id": "run_test"}\n', encoding="utf-8")
 
@@ -67,6 +67,6 @@ def test_stage_research_commit_rejects_force_staged_artifacts(tmp_path: Path) ->
     with pytest.raises(GitServiceError, match="generated or read-only"):
         service.stage_research_commit(
             workdir="mnist",
-            manifest_path=".hiagentresearch/experiments/model_architecture/run_x.json",
+            manifest_path=".hiagentresearch/cycles/model_architecture/run_x.json",
             excluded_paths=excluded,
         )

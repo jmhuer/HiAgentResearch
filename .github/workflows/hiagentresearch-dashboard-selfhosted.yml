@@ -1,0 +1,166 @@
+name: hiagentresearch-dashboard-selfhosted
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: hiagentresearch-dashboard-selfhosted
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    # Backup workflow for self-hosted runners. Keep the public workflow as default.
+    runs-on: self-hosted
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      HIAGENTRESEARCH_CONFIG: ${{ vars.HIAGENTRESEARCH_CONFIG || 'configs/standard.yaml' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev]
+          python - <<'PY'
+          import subprocess
+          import sys
+          from hiagentresearch.src.core.config import load_config
+
+          for dependency_file in load_config().dependency_file_paths():
+              subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(dependency_file)], check=True)
+          PY
+
+      - name: Check dashboard config
+        id: dashboard_config
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from hiagentresearch.src.core.config import load_config
+
+          config = load_config()
+          print(f"enabled={str(config.dashboard.enabled).lower()}")
+          print(f"output_dir={config.dashboard.output_dir}")
+          PY
+
+      - name: Collect research artifacts
+        id: collect_artifacts
+        if: steps.dashboard_config.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dashboard-artifacts
+          git fetch --no-tags --prune origin '+refs/heads/research/*:refs/remotes/origin/research/*'
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import subprocess
+          from pathlib import Path
+
+          from hiagentresearch.src.core.config import load_config
+          from hiagentresearch.src.github.session import resolve_github_session_started_at
+          from hiagentresearch.src.orchestration.session import timestamp_at_or_after
+
+          config = load_config()
+          workflow = config.github.workflow_name
+          baseline_ref = config.orchestration.baseline_ref
+          collectible_branches = {group.branch for group in config.research_groups} | {baseline_ref}
+          session_started_at = resolve_github_session_started_at(config)
+          if not session_started_at:
+              print("artifact_count=0")
+              raise SystemExit(0)
+          result = subprocess.run(
+              [
+                  "gh",
+                  "run",
+                  "list",
+                  "--workflow",
+                  workflow,
+                  "--status",
+                  "completed",
+                  "--limit",
+                  "100",
+                  "--json",
+                  "databaseId,headBranch,headSha,createdAt",
+              ],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          target = Path("dashboard-artifacts")
+          for row in json.loads(result.stdout):
+              branch = str(row.get("headBranch", ""))
+              sha = str(row.get("headSha", ""))
+              created_at = str(row.get("createdAt", ""))
+              if session_started_at and created_at and not timestamp_at_or_after(created_at, session_started_at):
+                  continue
+              if branch not in collectible_branches or not sha:
+                  continue
+              live_ref = f"origin/{branch}"
+              is_current_branch_history = subprocess.run(
+                  ["git", "merge-base", "--is-ancestor", sha, live_ref],
+                  check=False,
+              ).returncode == 0
+              if not is_current_branch_history:
+                  print(f"::warning::dropping run {row.get('databaseId')} on {branch} "
+                        f"({sha[:12]}): commit not in {live_ref} history")
+                  continue
+              run_id = str(row["databaseId"])
+              subprocess.run(
+                  [
+                      "gh",
+                      "run",
+                      "download",
+                      run_id,
+                      "--pattern",
+                      "hiagentresearch-*",
+                      "--dir",
+                      str(target / run_id),
+                  ],
+                  check=False,
+              )
+          ingested = sum(1 for _ in target.rglob("metrics.json"))
+          print(f"artifact_count={ingested}")
+          PY
+
+      - name: Build dashboard
+        if: >-
+          steps.dashboard_config.outputs.enabled == 'true' &&
+          steps.collect_artifacts.outputs.artifact_count != '0'
+        run: |
+          hiagentresearch dashboard build-from-artifacts \
+            --artifact-root dashboard-artifacts \
+            --output-dir _site \
+            --require-sqlite-assets
+
+      - name: Configure Pages
+        if: >-
+          steps.dashboard_config.outputs.enabled == 'true' &&
+          steps.collect_artifacts.outputs.artifact_count != '0'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: >-
+          steps.dashboard_config.outputs.enabled == 'true' &&
+          steps.collect_artifacts.outputs.artifact_count != '0'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy Pages
+        if: >-
+          steps.dashboard_config.outputs.enabled == 'true' &&
+          steps.collect_artifacts.outputs.artifact_count != '0'
+        id: deployment
+        uses: actions/deploy-pages@v4

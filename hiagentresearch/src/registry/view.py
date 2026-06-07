@@ -27,7 +27,7 @@ def show(*, registry: Registry, run_id: str, as_json: bool) -> int:
         "run": run,
         "metrics": registry.metrics_for_run(run_id),
         "outcome": registry.outcome_for_run(run_id),
-        "experiment": registry.experiment_for_run(run_id),
+        "cycle": registry.cycle_for_run(run_id),
         "artifacts": registry.artifacts_for_run(run_id),
     }
     _emit(payload, as_json=as_json, text_formatter=_format_show)
@@ -66,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     runs_parser.add_argument("--limit", type=int, default=20)
     _add_json_flag(runs_parser)
 
-    show_parser = sub.add_parser("show", help="Show one run with metrics, outcome, experiment, and artifacts.")
+    show_parser = sub.add_parser("show", help="Show one run with metrics, outcome, cycle, and artifacts.")
     show_parser.add_argument("--run-id", required=True)
     _add_json_flag(show_parser)
 
@@ -119,6 +119,8 @@ def _format_summary(rows: list[dict[str, Any]]) -> str:
         return "No registry runs found."
     lines = []
     for row in rows:
+        metrics = row.get("metrics") or {}
+        metric_text = ", ".join(f"{name}={value}" for name, value in sorted(metrics.items())) or "no metrics"
         lines.append(
             " | ".join(
                 [
@@ -126,8 +128,7 @@ def _format_summary(rows: list[dict[str, Any]]) -> str:
                     str(row.get("run_id", "")),
                     str(row.get("failure_class", "")),
                     str(row.get("research_outcome", "unknown")),
-                    f"accuracy={row.get('accuracy')}",
-                    f"latency_ms={row.get('latency_ms')}",
+                    metric_text,
                     str(row.get("branch", "")),
                 ]
             )

@@ -56,6 +56,14 @@ class GitService:
         self._run(["reset", "--hard", target])
         return True
 
+    def discard_worktree_changes(self) -> None:
+        """Restore the working tree to HEAD: revert tracked modifications and remove
+        untracked files. Ignored paths (e.g. generated data/checkpoints) are preserved
+        (`clean` without `-x`). Used to get a clean slate before retrying a cycle whose
+        agent run failed transiently and may have left a partial edit behind."""
+        self._run(["reset", "--hard", "HEAD"])
+        self._run(["clean", "-fd"])
+
     def resolve_ref(self, ref: str) -> str:
         return self._run(["rev-parse", ref]).stdout.strip()
 
@@ -101,7 +109,7 @@ class GitService:
         manifest_path: str,
         excluded_paths: list[str],
     ) -> None:
-        """Stage workspace edits and the experiment manifest without generated artifacts.
+        """Stage workspace edits and the cycle manifest without generated artifacts.
 
         Unstages config-derived excluded prefixes, stages tracked updates and
         untracked files that respect ``.gitignore``, then adds the manifest.

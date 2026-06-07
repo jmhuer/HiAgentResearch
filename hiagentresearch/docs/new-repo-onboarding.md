@@ -1,11 +1,11 @@
 # New Repo Onboarding
 
-HiAgentResearch uses one small root `config.yaml` with two zones: an agent-owned **workspace** (`workdir`) and a read-only **evaluation zone** derived from `evaluation.entrypoint` (the entrypoint file and its parent directory, e.g. `.hiagentresearch/eval/`). The Python control plane stays generic; project-specific behavior belongs in config, the workspace, and the frozen eval adapter.
+HiAgentResearch uses one config file (default `configs/standard.yaml`) with two zones: an agent-owned **workspace** (`workdir`) and a read-only **evaluation zone** derived from `evaluation.entrypoint` (the entrypoint file and its parent directory, e.g. `.hiagentresearch/eval/`). The Python control plane stays generic; project-specific behavior belongs in config, the workspace, and the frozen eval adapter.
 
 ## 15-Minute Path
 
 1. Put project code under the configured `workdir` (the agent owns this whole folder).
-2. Create or update root `config.yaml` with the core fields:
+2. Create or update a config file (normally `configs/standard.yaml`) with the core fields:
    - `project_id`
    - `workdir` — agent-owned workspace (full read/write/create)
    - `evaluation` — `entrypoint`, `command_template`, and `targets` (the entrypoint’s directory is the read-only eval zone automatically)
@@ -49,8 +49,8 @@ hiagentresearch status --group-id model_architecture
 Artifact filenames are fixed in `hiagentresearch/src/core/artifacts.py` (not in config):
 
 - **Eval node** (flat dir after eval or GitHub artifact root): four canonical JSON files (`metrics.json`, `failure_class.json`, `research_outcome.json`, `run_meta.json`) plus optional `stdout.txt`, `stderr.txt`, and `parsed_eval.json`. Metric keys come from `evaluation.targets`; the frozen adapter shapes stdout JSON.
-- **Run cycle** (`.hiagentresearch/runs/<run_id>/`): `experiment_intent.json`, `experiment_plan.md`, `agent_actions.jsonl`.
-- **Experiment manifest** (when present): copied to the GH bundle as `experiment_manifest.json`.
+- **Run cycle** (`.hiagentresearch/runs/<run_id>/`): `cycle_intent.json`, `cycle_plan.md`, `agent_actions.jsonl`.
+- **Cycle manifest** (when present): copied to the GH bundle as `cycle_manifest.json`.
 
 ## Contract Boundaries
 
@@ -63,12 +63,12 @@ Artifact filenames are fixed in `hiagentresearch/src/core/artifacts.py` (not in 
 
 ## Quality Retry Policy
 
-Research groups keep cycling until configured output expectations and metric bounds are met, or until a configured stop condition blocks the group with a clear reason. Retries should use the persisted intent packet:
+Research groups keep cycling until configured output expectations and metric bounds are met, or until the loop budget is spent (or a cycle is blocked with a clear reason). The orchestrator sets the persisted intent packet's `next_action` each cycle:
 
-- `repair` for deterministic code failures,
-- `pivot` for underperforming hypotheses,
-- `reset` when a rollback anchor is required,
-- `continue` when evidence supports another iteration.
+- `repair` when a change regressed a metric or hit a deterministic code failure — the next cycle is steered to fix it;
+- `continue` otherwise — keep refining toward the objective.
+
+There is no agent-driven `pivot`/`reset`: persisting on one direction is depth, and exploring an alternative is structural (a separate fan-out leaf), not an in-lineage mode switch.
 
 Do not patch around failures with special-case guardrails. If a boundary is missing, fix the canonical contract: config schema, eval adapter, registry invariant, or operator command.
 

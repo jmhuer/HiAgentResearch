@@ -1,0 +1,126 @@
+project_id: mnist
+workdir: mnist
+dependency_files:
+  - mnist/requirements.txt
+evaluation:
+  entrypoint: .hiagentresearch/eval/run_phase1_eval.py
+  command_template: "python {entrypoint} --workdir {workdir} --group-id {group_id} --quick"
+  targets:
+    accuracy:
+      min: 0.985
+    latency_ms:
+      max: 13.0
+hidden_paths: []
+generated_paths:
+  - data/
+  - src/checkpoints/
+policy_modes:
+  explore: "Try one bounded hypothesis and allow measured regressions with evidence."
+  exploit: "Prefer refinements to evidence-backed promising directions."
+github:
+  workflow_name: hiagentresearch-research-eval
+  remote: disney
+  run_lookup_attempts: 30
+  run_lookup_sleep_sec: 3
+orchestration:
+  baseline_ref: main
+  # Three self-hosted runners are available — let the widest wave fan out across all of them.
+  max_parallel_groups: 3
+agent:
+  model: composer-2.5
+  thinking: high
+dashboard:
+  enabled: false
+  title: HiAgentResearch Dashboard
+  metrics:
+    - accuracy
+    - latency_ms
+  output_dir: .hiagentresearch/dashboard
+agent_contract:
+  research_output_expectations:
+    - "Every cycle starts with concrete evidence and a written plan before code edits."
+    - "Every cycle leaves an auditable trail (planning artifacts, committed manifest, updated tactical intent); the orchestrator runs eval after the edit."
+    - "Research branches keep accumulating valid experiments; metric regressions are knowledge, not execution failures."
+
+# --- A full diamond pipeline ------------------------------------------------------------
+# A clean foundation (polish) that everything builds on, a three-area linear chain that
+# drives accuracy (architecture -> optimization -> hyperparameters), and an independent
+# augmentation lineage running in parallel. Terminal areas (hyperparameters, augmentation)
+# auto-merge into the final result.
+#
+#   polish ─┬─> architecture ─> optimization ─> hyperparameters ─┐
+#           └─> augmentation ───────────────────────────────────┴─> (auto final merge)
+#
+# Feature coverage: engineering chain-root (preserve metrics, carry the latest clean code
+# forward); SELECT collapses (architecture, hyperparameters — adopt the single strongest
+# leaf) and MERGE collapses (optimization, augmentation — integrate composable leaves);
+# inherit_policy=last_commit when building on the engineering foundation; a parallel
+# lineage; and an auto final merge of the terminal areas.
+research_groups:
+  # --- Chain root: a clean foundation everything builds on (no metric change) -------------
+  - id: polish
+    objective: Engineer a clean, well-structured foundation everything else builds on — without changing behavior or metrics.
+    policy_mode: exploit
+    task_kind: engineering
+    change_scope: "Engineer the codebase toward a genuinely clean foundation. Take on SUBSTANTIVE structural work where the real complexity and debt live — the model/ensemble (mnist/src/model.py) and the training loop (mnist/src/train.py) — not just the easiest file: clarify tangled logic, factor out duplication, improve modularity and naming, tighten types and docs. Be bold but STRICTLY behavior-preserving (no metric-driving modeling changes), and prove each change safe with the required smoke check + tests. Spread coverage across cycles — advance the foundation by tackling a different high-value area each loop; do not re-polish the same module you already cleaned."
+    lineage:
+      mode: baseline      # the root of the pipeline
+    # No approaches -> a single engineering leaf. Engineering auto-uses last_commit, so the
+    # latest polished code (not a metric peak) is what downstream areas inherit.
+
+  # --- Main accuracy chain: architecture -> optimization -> hyperparameters ---------------
+  - id: architecture
+    objective: Raise accuracy by improving the model architecture while keeping latency within the 13ms budget.
+    policy_mode: explore
+    combine: false   # SELECT — adopt the single strongest architecture
+    lineage:
+      mode: inherit
+      inherit_from: polish
+      inherit_policy: last_commit   # build on polish's latest clean code, not a metric peak
+      anchor_metric: accuracy
+    approaches:
+      - Add a third residual stage to deepen the trunk, keeping channel widths modest so inference stays within the latency budget.
+      - Widen the channels of the existing residual stages instead of deepening, trading a little latency for representational capacity.
+      - Replace the KWTA stage activations with ReLU after BatchNorm to stabilize training and improve accuracy at equal depth.
+
+  - id: optimization
+    objective: Raise accuracy by improving optimization and training dynamics, preserving the latency budget.
+    policy_mode: exploit
+    combine: true    # MERGE — stack the optimization improvements that compose
+    lineage:
+      mode: inherit
+      inherit_from: architecture
+      anchor_metric: accuracy
+    approaches:
+      - Cosine learning-rate schedule with a short linear warmup over the first epoch.
+      - Switch to AdamW with decoupled weight decay and add mild label smoothing to the classification loss.
+
+  - id: hyperparameters
+    objective: Raise accuracy by tuning training hyperparameters within the latency budget.
+    policy_mode: exploit
+    combine: false   # SELECT — adopt the single best hyperparameter configuration
+    lineage:
+      mode: inherit
+      inherit_from: optimization
+      anchor_metric: accuracy
+    approaches:
+      - Increase the number of training epochs with early stopping on validation accuracy (patience-bounded).
+      - Jointly tune batch size and base learning rate for the chosen optimizer.
+      - Tune the ensemble size (num-sub-networks) and KWTA k for the best accuracy-within-latency trade-off.
+
+  # --- Parallel independent lineage, auto-merged at the end -------------------------------
+  - id: augmentation
+    objective: Raise accuracy and robustness with targeted data augmentation, preserving the latency budget.
+    policy_mode: explore
+    combine: true    # MERGE — augmentations compose
+    lineage:
+      mode: inherit
+      inherit_from: polish            # same clean foundation; runs in parallel with the main chain
+      inherit_policy: last_commit
+      anchor_metric: accuracy
+    approaches:
+      - Tune the affine augmentation magnitudes (rotation, shift, scale) to match MNIST digit variation without over-distorting.
+      - Add mild random erasing / cutout to improve robustness to occlusion.
+
+# Terminal areas (hyperparameters — the tip of the main chain — and augmentation) auto-merge
+# into the final result; the load-time desugar derives the execution waves and the final merge.

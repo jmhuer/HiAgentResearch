@@ -49,7 +49,7 @@ def test_inherited_group_offsets_by_parent_anchor_loop_index() -> None:
 
 
 def test_parent_anchor_loop_index_resolves_from_parent_runs() -> None:
-    experiments = [
+    cycles = [
         {"group_id": "model_architecture", "run_id": "gh_1", "loop_index": 1},
         {"group_id": "model_architecture", "run_id": "gh_2", "loop_index": 2},
         {
@@ -70,7 +70,7 @@ def test_parent_anchor_loop_index_resolves_from_parent_runs() -> None:
         parent_anchor_loop_index(
             parent_group_id="model_architecture",
             commit_sha="sha_loop2",
-            experiments=experiments,
+            cycles=cycles,
             runs=runs,
         )
         == 2

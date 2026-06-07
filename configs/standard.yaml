@@ -17,10 +17,9 @@ generated_paths:
 policy_modes:
   explore: "Try one bounded hypothesis and allow measured regressions with evidence."
   exploit: "Prefer refinements to evidence-backed promising directions."
-  reset: "Start a new hypothesis track from a rollback anchor."
 github:
   workflow_name: hiagentresearch-research-eval
-  remote: origin
+  remote: disney   # git push + gh --repo target; derived from this remote's URL
   run_lookup_attempts: 30
   run_lookup_sleep_sec: 3
 orchestration:
@@ -30,8 +29,12 @@ orchestration:
     - [optimization_strategy]
     - [hyperparameter_optimization]
     - [polish_code]
+    - [merge_best]   # final wave: merge the strongest commit of every lineage
+agent:
+  model: composer-2.5
+  thinking: high   # strongest reasoning mode, applied to every research group
 dashboard:
-  enabled: true
+  enabled: false   # CI Pages publish off; build locally with `hiagentresearch dashboard build`
   title: HiAgentResearch
   metrics:
     - accuracy
@@ -40,12 +43,8 @@ dashboard:
 agent_contract:
   research_output_expectations:
     - "Every cycle starts with concrete evidence and a written plan before code edits."
-    - "Every cycle applies at least one bounded edit to a workspace source file."
     - "Every cycle leaves an auditable trail (planning artifacts, committed manifest, updated tactical intent); the orchestrator runs eval after the edit."
     - "Research branches keep accumulating valid experiments; metric regressions are knowledge, not execution failures."
-  retry_policy:
-    max_repair_attempts: 1
-    max_loops_without_quality_output: 3
 research_groups:
   - id: model_architecture
     branch: research/model-architecture
@@ -60,7 +59,7 @@ research_groups:
     lineage:
       mode: inherit
       inherit_from: optimization_strategy
-      anchor_policy: best_commit
+      inherit_policy: best_commit
       anchor_metric: accuracy
   - id: data_augmentation
     branch: research/data-augmentation
@@ -75,7 +74,7 @@ research_groups:
     lineage:
       mode: inherit
       inherit_from: model_architecture
-      anchor_policy: best_commit
+      inherit_policy: best_commit
       anchor_metric: accuracy
   - id: polish_code
     branch: research/polish-code
@@ -85,5 +84,19 @@ research_groups:
     lineage:
       mode: inherit
       inherit_from: hyperparameter_optimization
-      anchor_policy: last_commit
+      inherit_policy: best_commit      # branch from the BEST hyperparam commit
+      top_commit_policy: last_commit   # latest polish run is always the top commit
       anchor_metric: accuracy
+  # Cross-lineage merge (build task). Combines the strongest commit of every lineage.
+  # Near-zero config: objective, base (inherit_from), and draw_from are auto-resolved
+  # after the source lineages finish — the orchestrator ranks the lineage winners,
+  # starts from the strongest, and integrates the rest best->worst. Runs in the final
+  # execution wave above.
+  - id: merge_best
+    branch: research/merge-best
+    policy_mode: exploit
+    task_kind: merge
+    lineage:
+      mode: inherit                  # base = strongest lineage winner (auto)
+      top_commit_policy: best_commit # keeps the star >= base if a merge cycle fails
+      anchor_metric: accuracy        # ranks lineages + drives the merge order

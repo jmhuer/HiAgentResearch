@@ -1,8 +1,8 @@
-"""Framework guidance documents for phase-1 research agents.
+"""Framework guidance documents for research-cycle agents.
 
 Paths are fixed in code; projects do not list them in config.yaml. The workspace
 ``AGENTS.md`` (derived from ``workdir`` and ``evaluation``) is prepended at prompt
-build time — see ``agents.prompts.build_phase1_prompt``.
+build time — see ``agents.prompts.build_research_cycle_prompt``.
 """
 
 from __future__ import annotations

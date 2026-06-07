@@ -32,9 +32,10 @@ def normalize_eval_node(
     normalized = normalize_eval(
         stdout=stdout, stderr=stderr, exit_code=exit_code, metric_names=metric_names
     )
+    # normalize_eval already captures every numeric metric the eval emits, so any
+    # project metric (duration_sec, f1, throughput, …) flows through without a
+    # per-metric special case here.
     metrics = normalized.to_metrics()
-    if normalized.raw.get("duration_sec") is not None:
-        metrics["duration_sec"] = float(normalized.raw["duration_sec"])
     outcome = classify_research_outcome(
         execution_failure_class=normalized.failure_class,
         eval_passed=normalized.passed,

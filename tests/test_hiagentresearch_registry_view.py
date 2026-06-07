@@ -14,6 +14,7 @@ def test_registry_view_summary_and_show_json(tmp_path, capsys) -> None:
         status="finished",
         failure_class="none",
         metrics={"accuracy": 0.99, "latency_ms": 12.1},
+        commit_sha="run_abc_commit",
         correlation_id="run_abc",
     )
     registry.record_research_outcome(
@@ -24,15 +25,15 @@ def test_registry_view_summary_and_show_json(tmp_path, capsys) -> None:
             "reason": "ok",
         },
     )
-    registry.record_experiment_manifest(
+    registry.record_cycle_manifest(
         run_id="run_abc",
-        manifest_path=".hiagentresearch/experiments/model_architecture/run_abc.json",
+        manifest_path=".hiagentresearch/cycles/model_architecture/run_abc.json",
         manifest={
             "group_id": "model_architecture",
             "branch": "research/model-architecture",
             "loop_index": 1,
-            "hypothesis_id": "h1",
-            "hypothesis": "Try a model change.",
+            "goal_id": "h1",
+            "goal": "Try a model change.",
             "target_files": ["mnist/src/model.py"],
             "planned_code_changes": ["Edit model.py"],
         },
@@ -45,13 +46,13 @@ def test_registry_view_summary_and_show_json(tmp_path, capsys) -> None:
     assert main(["--state-dir", str(tmp_path), "show", "--run-id", "run_abc", "--json"]) == 0
     detail = json.loads(capsys.readouterr().out)
     assert detail["metrics"]["accuracy"] == 0.99
-    assert detail["experiment"]["hypothesis_id"] == "h1"
+    assert detail["cycle"]["goal_id"] == "h1"
 
     assert main(["--state-dir", str(tmp_path), "export"]) == 0
     exported = json.loads(capsys.readouterr().out)
     assert exported["export_schema_version"] == 1
     assert exported["metrics"][0]["metric_name"] == "accuracy"
-    assert exported["experiments"][0]["hypothesis_id"] == "h1"
+    assert exported["cycles"][0]["goal_id"] == "h1"
 
 
 def test_registry_view_metrics_text(tmp_path, capsys) -> None:

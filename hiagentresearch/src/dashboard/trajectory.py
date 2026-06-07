@@ -65,7 +65,7 @@ def baseline_metric_points(
             "trajectory_x": 0,
             "is_baseline_anchor": True,
             "research_outcome": "baseline",
-            "hypothesis": f"Frozen eval anchor ({ref})",
+            "goal": f"Frozen eval anchor ({ref})",
         }
         for group_id in group_ids
     ]
@@ -75,7 +75,7 @@ def parent_anchor_loop_index(
     *,
     parent_group_id: str,
     commit_sha: str,
-    experiments: list[dict[str, Any]],
+    cycles: list[dict[str, Any]],
     runs: list[dict[str, Any]],
 ) -> int:
     target = commit_sha.strip().lower()
@@ -83,20 +83,27 @@ def parent_anchor_loop_index(
         return 0
     runs_by_id = {str(row["run_id"]): row for row in runs}
     matched = 0
-    for experiment in experiments:
-        if str(experiment.get("group_id", "")) != parent_group_id:
+    for cycle in cycles:
+        if str(cycle.get("group_id", "")) != parent_group_id:
             continue
-        run_id = str(experiment.get("run_id", ""))
+        run_id = str(cycle.get("run_id", ""))
         run_sha = str(runs_by_id.get(run_id, {}).get("commit_sha", "") or "").strip().lower()
-        if not run_sha or not _sha_matches(run_sha, target):
+        if not run_sha or not _sha_match(run_sha, target):
             continue
-        loop_index = _loop_index(experiment)
+        loop_index = _loop_index(cycle)
         if loop_index is not None:
             matched = max(matched, loop_index)
     return matched
 
 
-def _sha_matches(left: str, right: str) -> bool:
+def _sha_match(left: str, right: str) -> bool:
+    """True when two commit shas refer to the same commit, tolerating short/long forms.
+
+    The single sha-equality helper shared across the dashboard (also imported by build.py).
+    Empty/None on either side is never a match.
+    """
+    if not left or not right:
+        return False
     return left == right or left.startswith(right) or right.startswith(left)
 
 

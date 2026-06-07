@@ -20,10 +20,11 @@ from hiagentresearch.src.core.coerce import as_string_list
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
 from hiagentresearch.src.github.ingest import ingest
 from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
+from hiagentresearch.src.agents.task_contract import task_contract
 from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.git.worktree import WorktreeManager
 from hiagentresearch.src.lineage.resolve import BranchBootstrap, resolve_branch_bootstrap
-from hiagentresearch.src.github.actions import GitHubActionsService, load_run_meta
+from hiagentresearch.src.github.actions import GitHubActionsService, gh_repo_slug, load_run_meta
 from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot, install_dependency_files
 from hiagentresearch.src.paths import (
     REPO_ROOT,
@@ -40,6 +41,23 @@ from hiagentresearch.src.core.outcomes import (
     required_baseline_metrics,
 )
 from hiagentresearch.src.registry.store import Registry
+from hiagentresearch.src.core.models import utc_now_iso
+
+
+# A cycle whose Cursor agent run fails TRANSIENTLY (the SDK run terminates with status=error —
+# infra flakiness, not a research signal) is retried from a clean worktree this many times total,
+# so one hiccup does not abort the leaf and cascade into aborting the whole parallel wave. Genuine
+# blocks (agent_moved_head, deterministic invalid cycles) are never retried. Env-overridable.
+_CYCLE_TRANSIENT_RETRIES = max(1, int(os.environ.get("HIAGENTRESEARCH_CYCLE_TRANSIENT_RETRIES", "3")))
+
+
+def _is_transient_cycle_failure(local: dict) -> bool:
+    """A transient agent-infra failure worth retrying: the Cursor SDK run finished with
+    status=error (not a research signal), as opposed to a deterministic block."""
+    return (
+        str(local.get("failure_class", "")) == "invalid_cycle"
+        and str(local.get("cursor_run_status", "")).strip().lower() == "error"
+    )
 
 
 class GitLike(Protocol):
@@ -115,13 +133,13 @@ class LoopSummary:
 
 RunGroupCallable = Callable[..., int]
 IngestCallable = Callable[[str, str, str, Path], int]
-EXPERIMENT_MANIFEST_ROOT = Path(".hiagentresearch") / "experiments"
+CYCLE_MANIFEST_ROOT = Path(".hiagentresearch") / "cycles"
 FAILED_RUNS_ROOT = Path(".hiagentresearch") / "failed-runs"
-EXPERIMENT_MANIFEST_SCHEMA_VERSION = 1
+CYCLE_MANIFEST_SCHEMA_VERSION = 1
 
 
 @dataclass(slots=True)
-class ExperimentManifest:
+class CycleManifest:
     """The per-cycle manifest committed to a research branch and ingested by the registry.
 
     This is the single source of truth for manifest field names; both the file on
@@ -132,8 +150,8 @@ class ExperimentManifest:
     group_id: str
     branch: str
     loop_index: int
-    hypothesis_id: str
-    hypothesis: str
+    goal_id: str
+    goal: str
     planned_code_changes: list[str]
     target_files: list[str]
     success_criteria: list[str]
@@ -148,7 +166,7 @@ class ExperimentManifest:
     lineage_parent_anchor_step: int | None
     lineage_anchor_source_group: str | None
     lineage_baseline_snapshot: dict | None = None
-    schema_version: int = EXPERIMENT_MANIFEST_SCHEMA_VERSION
+    schema_version: int = CYCLE_MANIFEST_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
         payload = {
@@ -157,8 +175,8 @@ class ExperimentManifest:
             "group_id": self.group_id,
             "branch": self.branch,
             "loop_index": self.loop_index,
-            "hypothesis_id": self.hypothesis_id,
-            "hypothesis": self.hypothesis,
+            "goal_id": self.goal_id,
+            "goal": self.goal,
             "planned_code_changes": list(self.planned_code_changes),
             "target_files": list(self.target_files),
             "success_criteria": list(self.success_criteria),
@@ -194,10 +212,15 @@ def run_loops(
 ) -> LoopSummary:
     loaded_config = config or load_config()
     group_config = loaded_config.group_by_id(group_id)
+    # A group may override the run's loop budget (the area desugar sets a select collapse
+    # to 0 — adopt the strongest leaf with no agent cycles).
+    effective_loops = group_config.loops if group_config.loops is not None else loops
     target_branch = branch or group_config.branch
     git_root = resolve_execution_root(workdir)
     git_service = git or GitService(git_root)
-    github_service = github or GitHubActionsService(REPO_ROOT)
+    github_service = github or GitHubActionsService(
+        REPO_ROOT, repo=gh_repo_slug(REPO_ROOT, loaded_config.github.remote)
+    )
 
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         install_dependency_files(loaded_config)
@@ -217,15 +240,59 @@ def run_loops(
             sync_to_ref=bootstrap.mode == "inherit",
         )
 
-    cycles: list[CycleResult] = []
-    for loop_index in range(1, loops + 1):
-        local = _run_group_capture(
-            run_group_func,
-            group_id=group_id,
-            workdir=git_root,
-            agent_model=agent_model,
-            lineage_bootstrap=bootstrap,
+    if effective_loops == 0:
+        # Select collapse: no agent cycles. The branch points at the adopted result (the
+        # strongest leaf's commit, or the baseline when no leaf beat it). Record that adopted
+        # point as a first-class trajectory node so a downstream inherit resolves THROUGH the
+        # collapse to the real commit/step/owner — otherwise the collapse is a ghost with no
+        # registry trace and inherit falls back to baseline regardless of what was adopted.
+        registry.record_cycle_manifest(
+            run_id=f"collapse_{group_id}",
+            manifest_path="",
+            manifest={
+                "group_id": group_id,
+                "branch": target_branch,
+                "loop_index": 0,
+                "goal_id": f"{group_id}-adopt",
+                "goal": "select collapse: adopted strongest leaf",
+                "target_files": [],
+                "planned_code_changes": [],
+                "lineage_mode": "inherit",
+                "lineage_parent_group_id": bootstrap.parent_group_id,
+                "lineage_anchor_sha": bootstrap.start_ref,
+                "lineage_anchor_policy": bootstrap.anchor_policy,
+                "lineage_parent_anchor_step": bootstrap.parent_anchor_step,
+                "lineage_anchor_source_group": bootstrap.anchor_source_group_id,
+            },
         )
+        return LoopSummary(
+            ok=True,
+            group_id=group_id,
+            branch=target_branch,
+            cycles=[],
+            reason="select collapse: adopted strongest leaf (zero integration loops)",
+        )
+
+    cycles: list[CycleResult] = []
+    for loop_index in range(1, effective_loops + 1):
+        # Retry a transient agent-infra failure from a clean worktree before giving up — a
+        # single Cursor SDK hiccup must not abort the leaf and cascade into a wave abort.
+        for attempt in range(1, _CYCLE_TRANSIENT_RETRIES + 1):
+            local = _run_group_capture(
+                run_group_func,
+                group_id=group_id,
+                workdir=git_root,
+                agent_model=agent_model,
+                lineage_bootstrap=bootstrap,
+                loop_index=loop_index,
+                loops=loops,
+            )
+            if not _is_transient_cycle_failure(local) or attempt >= _CYCLE_TRANSIENT_RETRIES:
+                break
+            # The failed attempt may have left a partial edit; reset to HEAD (the loop's start,
+            # since a blocked cycle does not commit) so the retry runs on a clean slate.
+            with contextlib.suppress(Exception):
+                git_service.discard_worktree_changes()
         local_run_id = str(local.get("run_id", ""))
         local_failure = str(local.get("failure_class", "invalid_cycle"))
         if not local_run_id:
@@ -244,7 +311,7 @@ def run_loops(
                 cycles=cycles,
                 reason="could not parse run_group output",
             )
-        if local_failure in {"invalid_cycle", "infra_failure"}:
+        if local_failure in {"invalid_cycle", "infra_failure", "agent_moved_head"}:
             detail = str(local.get("error", "")).strip()
             reason = f"local cycle blocked with {local_failure}"
             if detail:
@@ -257,7 +324,7 @@ def run_loops(
                 reason=reason,
             )
 
-        manifest_path, manifest = _write_experiment_manifest(
+        manifest_path, manifest = _write_cycle_manifest(
             group_id=group_id,
             branch=target_branch,
             loop_index=loop_index,
@@ -268,7 +335,7 @@ def run_loops(
             baseline_snapshot=registry.baseline_snapshot(),
             required_metrics=required_baseline_metrics(loaded_config.evaluation.targets),
         )
-        registry.record_experiment_manifest(
+        registry.record_cycle_manifest(
             run_id=local_run_id,
             manifest_path=manifest_path,
             manifest=manifest,
@@ -332,6 +399,10 @@ def run_loops(
 
             failure = json.loads((artifact_dir / "failure_class.json").read_text(encoding="utf-8"))
             outcome = json.loads((artifact_dir / "research_outcome.json").read_text(encoding="utf-8"))
+            try:
+                ci_metrics = json.loads((artifact_dir / "metrics.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                ci_metrics = {}
             artifact_ref = f"github_actions:{gh_run.database_id}"
         github_failure = str(failure.get("failure_class", "infra_failure"))
         github_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
@@ -342,6 +413,32 @@ def run_loops(
                 "done" if met_targets else ("repair" if github_failure == "code_failure" else "continue"),
             )
         )
+        # Engineering tasks must PRESERVE the metrics they inherited (the score is a
+        # guardrail, not the goal). If this commit dropped a metric below that floor it
+        # is a regression: not a hard failure (the loop continues so a later cycle can
+        # fix it), but we steer the next cycle to repair it with a specific note.
+        regression_note = ""
+        if task_contract(group_config.task_kind).preserve_metrics:
+            regression_note = _metric_regression_note(
+                registry=registry,
+                bootstrap=bootstrap,
+                metric=group_config.lineage.anchor_metric,
+                current=ci_metrics.get(group_config.lineage.anchor_metric),
+                minimize=loaded_config.evaluation.metric_minimizes(group_config.lineage.anchor_metric),
+            )
+            if regression_note:
+                decision = "repair"
+        # Feed the authoritative CI outcome back into the intent packet so the next
+        # cycle's agent prompt reflects how this change actually scored (last failure
+        # class, next action, and any regression to repair). The local cycle no longer
+        # runs an eval, so CI is the only source of this feedback.
+        intent = registry.read_intent_packet(group_id)
+        if intent is not None:
+            intent.last_failure_class = github_failure
+            intent.next_action = decision
+            intent.last_note = regression_note
+            intent.updated_at = utc_now_iso()
+            registry.write_intent_packet(intent)
         cycles.append(
             CycleResult(
                 loop_index=loop_index,
@@ -358,8 +455,14 @@ def run_loops(
         if stop_on_success and met_targets:
             return LoopSummary(ok=True, group_id=group_id, branch=target_branch, cycles=cycles, reason="targets met")
 
-    ok = bool(cycles) and all(cycle.github_failure_class == "none" for cycle in cycles)
-    reason = "requested loops completed" if ok else "max loops reached with execution blockers"
+    # A group succeeds if it produced at least one clean, committable result. A
+    # code_failure cycle is a discarded attempt (no metric, already excluded from lineage
+    # by the registry's failure_class filter) that the next loop is steered to repair —
+    # the same non-terminal treatment a metric regression already gets. Only an all-failure
+    # group (no clean result left to inherit or merge) is a genuine dead-end that fails the
+    # group and aborts the wave.
+    ok = any(cycle.github_failure_class == "none" for cycle in cycles)
+    reason = "requested loops completed" if ok else "max loops reached without a clean result"
     return LoopSummary(ok=ok, group_id=group_id, branch=target_branch, cycles=cycles, reason=reason)
 
 
@@ -379,6 +482,39 @@ def _extract_last_json_object(text: str) -> dict | None:
             return obj
         idx -= 1
     return None
+
+
+def _metric_regression_note(
+    *,
+    registry: Registry,
+    bootstrap: BranchBootstrap,
+    metric: str,
+    current: object,
+    minimize: bool,
+) -> str:
+    """Return a repair note if ``current`` regressed below the inherited floor, else "".
+
+    The floor an engineering group must preserve is the metric value of the commit it
+    branched from: the inherited anchor for an inherit group, else the frozen baseline.
+    """
+    if not isinstance(current, (int, float)):
+        return ""
+    floor = None
+    if bootstrap.mode == "inherit" and bootstrap.anchor_source_group_id and bootstrap.start_ref:
+        floor = registry.metric_for_group_commit(
+            bootstrap.anchor_source_group_id, bootstrap.start_ref, metric
+        )
+    if floor is None:
+        floor = ((registry.baseline_snapshot() or {}).get("metrics") or {}).get(metric)
+    if floor is None:
+        return ""
+    regressed = float(current) > float(floor) if minimize else float(current) < float(floor)
+    if not regressed:
+        return ""
+    return (
+        f"Your last change regressed {metric} ({float(floor):g} → {float(current):g}); this metric "
+        "must be preserved. Restore it (revert or fix the offending change) while keeping the quality improvement."
+    )
 
 
 def _run_group_capture(run_group_func: RunGroupCallable, **kwargs) -> dict:
@@ -401,7 +537,7 @@ def _run_group_capture(run_group_func: RunGroupCallable, **kwargs) -> dict:
     return payload
 
 
-def _write_experiment_manifest(
+def _write_cycle_manifest(
     *,
     group_id: str,
     branch: str,
@@ -414,22 +550,23 @@ def _write_experiment_manifest(
     required_metrics: tuple[str, ...] = (),
 ) -> tuple[str, dict]:
     run_dir = resolve_runs_dir(checkout_root) / local_run_id
-    intent = _read_json(run_dir / "experiment_intent.json")
+    intent = _read_json(run_dir / "cycle_intent.json")
     baseline_metrics = ((baseline_snapshot or {}).get("metrics") or {})
     required = required_metrics or required_baseline_metrics(None)
     lineage_baseline_snapshot = None
     if baseline_metrics_complete(baseline_metrics, required):
         lineage_baseline_snapshot = {
             "ref": str((baseline_snapshot or {}).get("ref") or "main"),
+            "commit_sha": str((baseline_snapshot or {}).get("commit_sha") or ""),
             "metrics": {str(name): float(value) for name, value in baseline_metrics.items()},
         }
-    manifest = ExperimentManifest(
+    manifest = CycleManifest(
         run_id=local_run_id,
         group_id=group_id,
         branch=branch,
         loop_index=loop_index,
-        hypothesis_id=intent.get("hypothesis_id", ""),
-        hypothesis=intent.get("hypothesis", ""),
+        goal_id=intent.get("goal_id", ""),
+        goal=intent.get("goal", ""),
         planned_code_changes=as_string_list(intent.get("planned_code_changes")),
         target_files=as_string_list(intent.get("target_files")),
         success_criteria=as_string_list(intent.get("success_criteria")),
@@ -447,7 +584,7 @@ def _write_experiment_manifest(
         lineage_anchor_source_group=bootstrap.anchor_source_group_id,
         lineage_baseline_snapshot=lineage_baseline_snapshot,
     ).to_dict()
-    path = EXPERIMENT_MANIFEST_ROOT / group_id / f"{local_run_id}.json"
+    path = CYCLE_MANIFEST_ROOT / group_id / f"{local_run_id}.json"
     absolute_path = checkout_root / path
     absolute_path.parent.mkdir(parents=True, exist_ok=True)
     absolute_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -455,6 +592,10 @@ def _write_experiment_manifest(
 
 
 def _read_json(path: Path) -> dict:
+    # Soft read for already-validated manifest metadata: the agent intent contract
+    # (_validate_agent_intent_contract) runs and blocks the cycle before this point,
+    # so a missing/corrupt file here only degrades optional manifest fields rather
+    # than masking an unvalidated failure. Kept intentionally (not a silent crutch).
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
@@ -469,9 +610,9 @@ def _commit_subject(*, loop_index: int, manifest: dict) -> str:
 
 def _commit_body(*, local_run_id: str, manifest_path: str, manifest: dict) -> str:
     lines = [f"HiAgentResearch-Run-ID: {local_run_id}", f"Experiment-Manifest: {manifest_path}"]
-    hypothesis_id = str(manifest.get("hypothesis_id", "")).strip()
-    if hypothesis_id:
-        lines.append(f"Hypothesis-ID: {hypothesis_id}")
+    goal_id = str(manifest.get("goal_id", "")).strip()
+    if goal_id:
+        lines.append(f"Goal-ID: {goal_id}")
     return "\n".join(lines)
 
 
@@ -480,12 +621,12 @@ def _manifest_summary(manifest: dict) -> str:
     if isinstance(planned, list) and planned:
         text = str(planned[0])
     else:
-        text = str(manifest.get("hypothesis_id") or manifest.get("hypothesis") or "experiment update")
+        text = str(manifest.get("goal_id") or manifest.get("goal") or "cycle update")
     text = re.sub(r"\s+", " ", text).strip().rstrip(".")
     text = re.sub(r"^in\s+[^:]+:\s*", "", text, flags=re.IGNORECASE)
     if len(text) > 72:
         text = text[:69].rstrip() + "..."
-    return text or "experiment update"
+    return text or "cycle update"
 
 
 def run_loops_all(
@@ -538,6 +679,10 @@ def run_loops_all(
     finally:
         if parallel:
             worktrees.remove_all()
+        # The loops-all command has returned (success, early-exit, or error): the
+        # research session is no longer live. Stamp it so the dashboard renders the
+        # run as complete rather than in-progress.
+        registry.mark_session_complete()
     print(json.dumps({"ok": True, "summaries": [item.to_dict() for item in summaries]}, indent=2))
     return 0
 
@@ -611,27 +756,38 @@ def _run_wave_parallel(
     for thread in reader_threads:
         thread.join(timeout=1)
 
-    first_failure = 0
+    failed_groups: list[str] = []
     for group_id, proc in processes:
         returncode = proc.wait()
-        if returncode != 0 and first_failure == 0:
-            first_failure = returncode or 1
+        if returncode != 0:
+            failed_groups.append(group_id)
             print(f"[{group_id}] failed with exit {returncode}", flush=True)
-    if first_failure:
-        preserved = _preserve_parallel_failure_artifacts(wave, worktrees)
-        if preserved:
-            print(
-                json.dumps(
-                    {
-                        "ok": False,
-                        "reason": "preserved failed parallel run artifacts",
-                        "artifacts": preserved,
-                    },
-                    indent=2,
-                ),
-                flush=True,
-            )
-        return first_failure
+    if failed_groups:
+        # A failed leaf just drops out of its area's competition — the surviving leaves' results
+        # stay in the registry and the collapse adopts from them (lineage resolution already
+        # tolerates a missing leaf). So preserve ONLY the failed leaves' artifacts and keep going,
+        # rather than discarding the whole wave's work and aborting the run. Abort only when EVERY
+        # group in the wave failed, leaving the area with nothing for downstream to build on.
+        preserved = _preserve_parallel_failure_artifacts(failed_groups, worktrees)
+        all_failed = len(failed_groups) == len(processes)
+        print(
+            json.dumps(
+                {
+                    "ok": not all_failed,
+                    "reason": (
+                        "entire parallel wave failed"
+                        if all_failed
+                        else "continued past failed leaves; preserved their artifacts"
+                    ),
+                    "failed_groups": failed_groups,
+                    "artifacts": preserved,
+                },
+                indent=2,
+            ),
+            flush=True,
+        )
+        if all_failed:
+            return 1
     return 0
 
 
@@ -689,7 +845,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--branch", default=None)
     parser.add_argument("--loops", type=int, default=3)
     parser.add_argument("--workdir", type=Path, default=REPO_ROOT)
-    parser.add_argument("--agent-model", default="composer-2.5")
+    parser.add_argument("--agent-model", default="", help="Override config.agent.model; empty uses config.")
     parser.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
     return parser
 

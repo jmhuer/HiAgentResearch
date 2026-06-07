@@ -8,7 +8,7 @@ from pathlib import Path
 from collections.abc import Iterable
 
 from hiagentresearch.src.core.artifacts import (
-    EXPERIMENT_MANIFEST,
+    CYCLE_MANIFEST,
     eval_node_index_names,
     ingest_required_names,
     validate_ingest_bundle,
@@ -81,28 +81,29 @@ def ingest(run_id: str, group_id: str, branch: str, artifact_dir: Path) -> int:
             registry,
             ref=str(meta.get("baseline_ref") or meta.get("branch") or "main"),
             metrics=metrics,
+            commit_sha=str(meta.get("commit_sha", "")),
             required=required,
         )
         started = registry.orchestration_session_started_at()
         if started:
             write_session_artifact(artifact_dir, started_at=started)
-    manifest_path = artifact_dir / EXPERIMENT_MANIFEST
+    manifest_path = artifact_dir / CYCLE_MANIFEST
     if manifest_path.exists():
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            print(json.dumps({"ok": False, "error": f"malformed experiment manifest: {exc}"}, indent=2))
+            print(json.dumps({"ok": False, "error": f"malformed cycle manifest: {exc}"}, indent=2))
             return 1
-        manifest_source = EXPERIMENT_MANIFEST
+        manifest_source = CYCLE_MANIFEST
     else:
-        manifest = build_synthetic_experiment_manifest(
+        manifest = build_synthetic_cycle_manifest(
             run_id=run_id,
             group_id=group_id,
             branch=branch,
             meta=meta,
         )
-        manifest_source = "(synthetic:missing experiment_manifest.json)"
-    registry.record_experiment_manifest(
+        manifest_source = "(synthetic:missing cycle_manifest.json)"
+    registry.record_cycle_manifest(
         run_id=run_id,
         manifest_path=manifest_source,
         manifest=manifest,
@@ -151,7 +152,11 @@ def record_baseline_snapshot_from_manifest(
     if existing and baseline_metrics_complete((existing.get("metrics") or {}), required):
         return
     record_baseline_snapshot_from_metrics(
-        registry, ref=str(snapshot.get("ref") or "main"), metrics=normalized, required=required
+        registry,
+        ref=str(snapshot.get("ref") or "main"),
+        metrics=normalized,
+        commit_sha=str(snapshot.get("commit_sha", "")),
+        required=required,
     )
 
 
@@ -160,6 +165,7 @@ def record_baseline_snapshot_from_metrics(
     *,
     ref: str,
     metrics: dict,
+    commit_sha: str = "",
     required: Iterable[str] = BASELINE_REQUIRED_METRICS,
 ) -> None:
     normalized: dict[str, float] = {}
@@ -173,10 +179,10 @@ def record_baseline_snapshot_from_metrics(
     existing = registry.baseline_snapshot()
     if existing and baseline_metrics_complete((existing.get("metrics") or {}), required):
         return
-    registry.record_baseline_snapshot(ref=ref, metrics=normalized)
+    registry.record_baseline_snapshot(ref=ref, metrics=normalized, commit_sha=commit_sha)
 
 
-def build_synthetic_experiment_manifest(
+def build_synthetic_cycle_manifest(
     *,
     run_id: str,
     group_id: str,
@@ -190,14 +196,14 @@ def build_synthetic_experiment_manifest(
         "group_id": group_id,
         "branch": branch,
         "loop_index": meta.get("loop_index"),
-        "hypothesis_id": f"{group_id}-direct-eval",
-        "hypothesis": (
-            "Direct branch evaluation fallback (experiment_manifest.json missing); "
+        "goal_id": f"{group_id}-direct-eval",
+        "goal": (
+            "Direct branch evaluation fallback (cycle_manifest.json missing); "
             f"correlation {correlation_id}, commit {short_sha}."
         ),
         "target_files": [],
         "planned_code_changes": [
-            "Direct eval fallback: no experiment_manifest.json was uploaded with artifacts."
+            "Direct eval fallback: no cycle_manifest.json was uploaded with artifacts."
         ],
         "lineage_mode": meta.get("lineage_mode"),
         "lineage_parent_group_id": meta.get("lineage_parent_group_id"),

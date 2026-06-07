@@ -1,6 +1,53 @@
 import subprocess
 
-from hiagentresearch.src.github.actions import GitHubActionsError, GitHubActionsService
+import pytest
+
+from hiagentresearch.src.github.actions import (
+    GitHubActionsError,
+    GitHubActionsService,
+    _parse_remote_url,
+    gh_repo_slug,
+)
+
+
+def test_parse_remote_url_handles_ssh_https_and_enterprise() -> None:
+    assert _parse_remote_url("git@github.disney.com:Org/Repo.git") == ("github.disney.com", "Org/Repo")
+    assert _parse_remote_url("https://github.com/owner/repo.git") == ("github.com", "owner/repo")
+    assert _parse_remote_url("ssh://git@github.disney.com/Org/Repo") == ("github.disney.com", "Org/Repo")
+
+
+def test_gh_repo_slug_targets_configured_remote(monkeypatch, tmp_path) -> None:
+    def fake_run(args, **kwargs):
+        if args[:3] == ["git", "remote", "get-url"]:
+            url = "git@github.disney.com:Org/Repo.git" if args[3] == "disney" else "https://github.com/owner/repo.git"
+            return subprocess.CompletedProcess(args, 0, url + "\n", "")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    # Enterprise host => HOST/OWNER/REPO; github.com => OWNER/REPO.
+    assert gh_repo_slug(tmp_path, "disney") == "github.disney.com/Org/Repo"
+    assert gh_repo_slug(tmp_path, "origin") == "owner/repo"
+
+
+def test_gh_repo_slug_fails_fast_on_unknown_remote(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        subprocess, "run", lambda args, **k: subprocess.CompletedProcess(args, 2, "", "No such remote 'disney'")
+    )
+    with pytest.raises(GitHubActionsError, match="get-url"):
+        gh_repo_slug(tmp_path, "disney")
+
+
+def test_service_injects_repo_flag_into_gh_calls(monkeypatch, tmp_path) -> None:
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        return subprocess.CompletedProcess(args, 0, "[]", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    service = GitHubActionsService(tmp_path, repo="github.disney.com/Org/Repo")
+    service.list_runs(branch="research/x")
+    assert "--repo" in seen["args"] and "github.disney.com/Org/Repo" in seen["args"]
 
 
 def test_github_actions_retries_transient_network_errors(monkeypatch, tmp_path) -> None:

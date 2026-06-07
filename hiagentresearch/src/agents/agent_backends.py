@@ -9,8 +9,8 @@ from typing import Any
 
 from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
 from hiagentresearch.src.agents.cursor_client import cursor_sdk_client
-from hiagentresearch.src.agents.prompts import build_phase1_prompt
-from hiagentresearch.src.core.models import FailureClass, IntentPacket, ResearchGroup, utc_now_iso
+from hiagentresearch.src.agents.prompts import build_research_cycle_prompt
+from hiagentresearch.src.core.models import FailureClass, IntentPacket, ResearchGroup, ScoreContext, utc_now_iso
 from hiagentresearch.src.lineage.resolve import BranchBootstrap
 
 
@@ -41,7 +41,7 @@ class AgentExecutionRecord:
 
 
 def failure_class_for_cursor_run_status(run_status: str) -> FailureClass:
-    """Map terminal Cursor run status to phase-1 execution failure classes."""
+    """Map terminal Cursor run status to execution failure classes."""
     normalized = run_status.strip().lower()
     if normalized == "finished":
         return "none"
@@ -57,13 +57,13 @@ def failure_class_for_cursor_agent_error() -> FailureClass:
     return "infra_failure"
 
 
-def _startup_retry_attempts_from_env() -> int:
+def _startup_retry_attempts_from_env(default: int = 2) -> int:
     raw = os.environ.get("HIAGENTRESEARCH_CURSOR_STARTUP_RETRY", "").strip().lower()
     if raw in {"0", "false", "off", "no"}:
         return 1
     attempts_raw = os.environ.get("HIAGENTRESEARCH_CURSOR_STARTUP_ATTEMPTS", "").strip()
     if not attempts_raw:
-        return 2
+        return default
     try:
         attempts = int(attempts_raw)
     except ValueError as exc:
@@ -75,10 +75,10 @@ def _startup_retry_attempts_from_env() -> int:
     return attempts
 
 
-def _startup_retry_backoff_sec_from_env() -> float:
+def _startup_retry_backoff_sec_from_env(default: float = 2.0) -> float:
     raw = os.environ.get("HIAGENTRESEARCH_CURSOR_STARTUP_RETRY_BACKOFF_SEC", "").strip()
     if not raw:
-        return 2.0
+        return default
     try:
         value = float(raw)
     except ValueError as exc:
@@ -98,7 +98,13 @@ def run_cursor_agent_cycle(
     intent_packet: IntentPacket,
     run_id: str,
     model: str = "composer-2.5",
+    thinking: str = "",
+    startup_attempts: int = 2,
+    startup_retry_backoff_sec: float = 2.0,
+    unary_timeout_sec: float = 1800.0,
+    stream_timeout_sec: float = 1800.0,
     lineage_bootstrap: BranchBootstrap | None = None,
+    score_context: ScoreContext | None = None,
 ) -> AgentExecutionRecord:
     ensure_cursor_api_key()
     api_key = os.environ.get("CURSOR_API_KEY", "").strip()
@@ -115,11 +121,23 @@ def run_cursor_agent_cycle(
             failure_class="infra_failure",
         ) from exc
 
-    prompt = build_phase1_prompt(
+    # Reasoning effort is config-driven and applied to every group; build a typed
+    # ModelSelection only when a thinking level is requested.
+    if thinking:
+        from cursor_sdk import ModelParameterValue, ModelSelection
+
+        model_selection: Any = ModelSelection(
+            id=model, params=[ModelParameterValue(id="thinking", value=thinking)]
+        )
+    else:
+        model_selection = model
+
+    prompt = build_research_cycle_prompt(
         group=group,
         intent_packet=intent_packet,
         run_id=run_id,
         lineage_bootstrap=lineage_bootstrap,
+        score_context=score_context,
     )
     (run_dir / "agent_prompt.txt").write_text(prompt, encoding="utf-8")
     stream_path = run_dir / "agent_stream.jsonl"
@@ -128,15 +146,20 @@ def run_cursor_agent_cycle(
     result: Any
     agent: Any = None
     sdk_run: Any = None
-    startup_attempts = _startup_retry_attempts_from_env()
-    retry_backoff_sec = _startup_retry_backoff_sec_from_env()
-    for attempt in range(1, startup_attempts + 1):
+    # Config provides the defaults; matching env vars still override (ops escape hatch).
+    resolved_attempts = _startup_retry_attempts_from_env(startup_attempts)
+    retry_backoff_sec = _startup_retry_backoff_sec_from_env(startup_retry_backoff_sec)
+    for attempt in range(1, resolved_attempts + 1):
         try:
-            with Agent.create(
+            with cursor_sdk_client(
+                str(workdir),
+                unary_timeout_default=unary_timeout_sec,
+                stream_timeout_default=stream_timeout_sec,
+            ) as client, Agent.create(
                 api_key=api_key,
-                model=model,
+                model=model_selection,
                 local=LocalAgentOptions(cwd=str(workdir)),
-                client=cursor_sdk_client(),
+                client=client,
             ) as agent:
                 _append_stream_event(
                     stream_path,
@@ -144,9 +167,10 @@ def run_cursor_agent_cycle(
                         "type": "agent_created",
                         "agent_id": getattr(agent, "agent_id", "") or getattr(agent, "id", ""),
                         "model": model,
+                        "thinking": thinking,
                         "cwd": str(workdir),
                         "startup_attempt": attempt,
-                        "startup_attempts_config": startup_attempts,
+                        "startup_attempts_config": resolved_attempts,
                     },
                 )
                 sdk_run = agent.send(prompt)
@@ -174,7 +198,7 @@ def run_cursor_agent_cycle(
                 result = sdk_run.wait()
                 break
         except CursorAgentError as exc:
-            can_retry = attempt < startup_attempts and bool(getattr(exc, "is_retryable", False))
+            can_retry = attempt < resolved_attempts and bool(getattr(exc, "is_retryable", False))
             _append_stream_event(
                 stream_path,
                 {

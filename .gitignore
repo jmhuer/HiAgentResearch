@@ -7,14 +7,16 @@ __pycache__/
 .hiagentresearch/runs/
 .hiagentresearch/failed-runs/
 .hiagentresearch/state/evals.db
+.hiagentresearch/state-preview/
+.hiagentresearch/state-*/
 .hiagentresearch/dashboard/
 .hiagentresearch/dashboard-preview/
 .hiagentresearch/worktrees/
 # Ignore experiment workspace scratch; per-run manifests (*.json) are committed on research branches.
-.hiagentresearch/experiments/**
-!.hiagentresearch/experiments/
-!.hiagentresearch/experiments/**/
-!.hiagentresearch/experiments/**/*.json
+.hiagentresearch/cycles/**
+!.hiagentresearch/cycles/
+!.hiagentresearch/cycles/**/
+!.hiagentresearch/cycles/**/*.json
 .hiagentresearch/*.log
 
 # Project-generated training artifacts

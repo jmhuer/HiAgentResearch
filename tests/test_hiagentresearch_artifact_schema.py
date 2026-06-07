@@ -23,10 +23,13 @@ def test_normalize_eval_regression_is_clean_execution() -> None:
     assert result.failure_class == "none"
 
 
-def test_normalize_eval_only_extracts_configured_metrics() -> None:
+def test_normalize_eval_captures_all_numeric_metrics_generically() -> None:
+    # The framework captures every numeric metric the eval reports (project-agnostic),
+    # not just the configured targets; control keys are excluded.
     stdout = '{"passed": true, "accuracy": 0.99, "latency_ms": 2.0, "f1": 0.7}'
     result = normalize_eval(stdout=stdout, stderr="", exit_code=0, metric_names=("accuracy",))
-    assert result.to_metrics() == {"accuracy": 0.99}
+    assert result.to_metrics() == {"accuracy": 0.99, "latency_ms": 2.0, "f1": 0.7}
+    assert "passed" not in result.to_metrics()
 
 
 def test_normalize_eval_execution_blocked_marks_code_failure() -> None:

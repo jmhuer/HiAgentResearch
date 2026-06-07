@@ -27,14 +27,14 @@ def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 
     (artifact_dir / "stdout.txt").write_text("{}", encoding="utf-8")
     (artifact_dir / "stderr.txt").write_text("", encoding="utf-8")
     (artifact_dir / "parsed_eval.json").write_text("{}", encoding="utf-8")
-    (artifact_dir / "experiment_manifest.json").write_text(
+    (artifact_dir / "cycle_manifest.json").write_text(
         json.dumps(
             {
                 "group_id": "model_architecture",
                 "branch": "research/model-architecture",
                 "loop_index": 1,
-                "hypothesis_id": "h1",
-                "hypothesis": "Try a clean dashboard-ready experiment.",
+                "goal_id": "h1",
+                "goal": "Try a clean dashboard-ready cycle.",
                 "target_files": ["mnist/src/model.py"],
                 "planned_code_changes": ["Edit model.py"],
                 "lineage_baseline_snapshot": {
@@ -66,7 +66,7 @@ def test_ingest_records_artifacts_and_is_idempotent(tmp_path, monkeypatch) -> No
     registry.init()
     assert registry.metrics_for_run("gh_1") == {"tests_passed": 1.0}
     assert registry.outcome_for_run("gh_1")["research_outcome"] == "met_targets"
-    assert registry.experiment_for_run("gh_1")["hypothesis_id"] == "h1"
+    assert registry.cycle_for_run("gh_1")["goal_id"] == "h1"
     assert registry.baseline_snapshot()["metrics"]["accuracy"] == 0.81
     indexed = {artifact["artifact_path"] for artifact in registry.artifacts_for_run("gh_1")}
     assert indexed >= set(eval_node_index_names())
@@ -104,13 +104,13 @@ def test_ingest_synthesizes_experiment_when_manifest_missing(tmp_path, monkeypat
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
     _write_required_artifacts(artifact_dir)
-    (artifact_dir / "experiment_manifest.json").unlink()
+    (artifact_dir / "cycle_manifest.json").unlink()
 
     assert gh_ingest.ingest("gh_1", "model_architecture", "research/model-architecture", artifact_dir) == 0
 
     registry = gh_ingest.Registry(tmp_path / "state")
     registry.init()
-    experiment = registry.experiment_for_run("gh_1")
-    assert experiment is not None
-    assert experiment["hypothesis_id"] == "model_architecture-direct-eval"
-    assert "missing" in (experiment["hypothesis"] or "").lower()
+    cycle = registry.cycle_for_run("gh_1")
+    assert cycle is not None
+    assert cycle["goal_id"] == "model_architecture-direct-eval"
+    assert "missing" in (cycle["goal"] or "").lower()

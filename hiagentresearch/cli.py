@@ -25,20 +25,20 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run-group", help="Run one research group cycle.")
     run.add_argument("--group-id", required=True)
     run.add_argument("--workdir", type=Path, default=REPO_ROOT)
-    run.add_argument("--agent-model", default="composer-2.5")
+    run.add_argument("--agent-model", default="", help="Override config.agent.model; empty uses config.")
 
     loops = sub.add_parser("loops", help="Run backend-owned research loops.")
     loops.add_argument("--group-id", default="model_architecture")
     loops.add_argument("--branch", default=None)
     loops.add_argument("--loops", type=int, default=3)
     loops.add_argument("--workdir", type=Path, default=REPO_ROOT)
-    loops.add_argument("--agent-model", default="composer-2.5")
+    loops.add_argument("--agent-model", default="", help="Override config.agent.model; empty uses config.")
     loops.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
 
     loops_all = sub.add_parser("loops-all", help="Run all research groups in configured execution waves.")
     loops_all.add_argument("--loops", type=int, default=3)
     loops_all.add_argument("--workdir", type=Path, default=REPO_ROOT)
-    loops_all.add_argument("--agent-model", default="composer-2.5")
+    loops_all.add_argument("--agent-model", default="", help="Override config.agent.model; empty uses config.")
     loops_all.add_argument("--run-exact-loops", action="store_true", help="Do not stop early when quality is met.")
     loops_all.add_argument(
         "--parallel",

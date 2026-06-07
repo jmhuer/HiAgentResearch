@@ -1,0 +1,189 @@
+name: hiagentresearch-research-eval-selfhosted
+
+on:
+  workflow_dispatch:
+    inputs:
+      node_kind:
+        description: "Eval node kind"
+        required: false
+        default: "experiment"
+        type: choice
+        options:
+          - experiment
+          - baseline
+      group_id:
+        description: "Research group id override"
+        required: false
+        type: string
+      correlation_id:
+        description: "Correlation id override"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hiagentresearch-selfhosted-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate-and-ingest:
+    # Backup workflow for self-hosted runners. Keep the public workflow as default.
+    runs-on: self-hosted
+    timeout-minutes: 45
+    env:
+      HIAGENTRESEARCH_CONFIG: ${{ vars.HIAGENTRESEARCH_CONFIG || 'configs/standard.yaml' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[dev]
+          python - <<'PY'
+          import subprocess
+          import sys
+          from hiagentresearch.src.core.config import load_config
+
+          for dependency_file in load_config().dependency_file_paths():
+              subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(dependency_file)], check=True)
+          PY
+
+      - name: Resolve group id from branch
+        id: group
+        shell: bash
+        run: |
+          branch="${GITHUB_REF_NAME}"
+          input_group="${{ github.event.inputs.group_id }}"
+          if [[ -n "$input_group" ]]; then
+            gid="$input_group"
+          else
+            gid="$(python -m hiagentresearch.src.core resolve-group --branch "$branch")"
+          fi
+          echo "group_id=$gid" >> "$GITHUB_OUTPUT"
+          input_correlation="${{ github.event.inputs.correlation_id }}"
+          commit_msg="$(git log -1 --pretty=%B)"
+          correlation_id="$(python - <<'PY' "$commit_msg" "${{ github.sha }}" "$input_correlation"
+          import re, sys
+          msg, sha, override = sys.argv[1], sys.argv[2], sys.argv[3]
+          if override:
+              print(override)
+              raise SystemExit(0)
+          match = re.search(r"HiAgentResearch-Run-ID:\s*(\S+)", msg)
+          print(match.group(1) if match else sha)
+          PY
+          )"
+          echo "correlation_id=$correlation_id" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve eval command
+        id: eval_command
+        shell: bash
+        run: |
+          command="$(python - <<'PY' "${{ steps.group.outputs.group_id }}"
+          import sys
+          from hiagentresearch.src.core.config import load_config
+          config = load_config()
+          group = config.group_by_id(sys.argv[1])
+          print(config.format_eval_command(group))
+          PY
+          )"
+          echo "command=$command" >> "$GITHUB_OUTPUT"
+
+      - name: Run phase-1 eval
+        id: eval
+        shell: bash
+        run: |
+          set +e
+          ${{ steps.eval_command.outputs.command }} > stdout.txt 2> stderr.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Normalize phase-1 artifacts
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          from hiagentresearch.src.core.config import load_config
+          from hiagentresearch.src.eval.node import normalize_eval_node, write_eval_node_artifacts
+
+          config = load_config()
+          stdout = Path("stdout.txt").read_text(encoding="utf-8")
+          stderr = Path("stderr.txt").read_text(encoding="utf-8")
+          exit_code = int("${{ steps.eval.outputs.exit_code }}")
+          artifacts = normalize_eval_node(
+              stdout=stdout,
+              stderr=stderr,
+              exit_code=exit_code,
+              eval_config=config.evaluation,
+          )
+          write_eval_node_artifacts(output_dir=Path("."), artifacts=artifacts)
+          Path("run_meta.json").write_text(
+              json.dumps(
+                  {
+                      "commit_sha": "${{ github.sha }}",
+                      "workflow_run_id": "${{ github.run_id }}",
+                      "branch": "${{ github.ref_name }}",
+                      "group_id": "${{ steps.group.outputs.group_id }}",
+                      "run_id": "gh_${{ github.run_id }}",
+                      "correlation_id": "${{ steps.group.outputs.correlation_id }}",
+                      "node_kind": "${{ github.event.inputs.node_kind || 'experiment' }}",
+                      "baseline_ref": "${{ github.ref_name }}",
+                  },
+                  indent=2,
+              ),
+              encoding="utf-8",
+          )
+          manifest_path = (
+              Path(".hiagentresearch")
+              / "cycles"
+              / "${{ steps.group.outputs.group_id }}"
+              / "${{ steps.group.outputs.correlation_id }}.json"
+          )
+          if manifest_path.exists():
+              shutil.copyfile(manifest_path, "cycle_manifest.json")
+          PY
+
+      - name: Ingest into phase-1 registry
+        shell: bash
+        run: |
+          python -m hiagentresearch.src.github.ingest \
+            --run-id "gh_${{ github.run_id }}" \
+            --group-id "${{ steps.group.outputs.group_id }}" \
+            --branch "${{ github.ref_name }}" \
+            --artifact-dir "."
+
+      - name: Upload observability artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: hiagentresearch-${{ github.run_id }}
+          path: |
+            metrics.json
+            failure_class.json
+            research_outcome.json
+            run_meta.json
+            stdout.txt
+            stderr.txt
+            parsed_eval.json
+            cycle_manifest.json
+            orchestration_session.json
+            .hiagentresearch/state/evals.db
+
+      - name: Fail on execution failure
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          failure = json.loads(Path("failure_class.json").read_text(encoding="utf-8"))
+          raise SystemExit(0 if failure.get("failure_class") == "none" else 1)
+          PY

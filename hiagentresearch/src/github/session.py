@@ -10,6 +10,7 @@ from pathlib import Path
 
 from hiagentresearch.src.core.config import HiAgentResearchConfig
 from hiagentresearch.src.orchestration.session import SESSION_ARTIFACT, SESSION_META_KEY, read_session_started_at
+from hiagentresearch.src.registry.store import BASELINE_RUN_GROUP
 
 
 def read_session_from_evals_db(db_path: Path) -> str | None:
@@ -21,28 +22,22 @@ def read_session_from_evals_db(db_path: Path) -> str | None:
             "SELECT value FROM schema_meta WHERE key = ?",
             (SESSION_META_KEY,),
         ).fetchone()
+        if row:
+            try:
+                payload = json.loads(str(row[0]))
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("started_at"):
+                return str(payload["started_at"])
+        # Fallback: the frozen baseline run anchors the session start.
+        baseline = conn.execute(
+            "SELECT created_at FROM runs WHERE group_id = ? AND failure_class = 'none' "
+            "ORDER BY created_at ASC LIMIT 1",
+            (BASELINE_RUN_GROUP,),
+        ).fetchone()
+        return str(baseline[0]) if baseline else None
     finally:
         conn.close()
-    if not row:
-        return None
-    try:
-        payload = json.loads(str(row[0]))
-    except json.JSONDecodeError:
-        return None
-    if isinstance(payload, dict) and payload.get("started_at"):
-        return str(payload["started_at"])
-    row = conn.execute(
-        "SELECT value FROM schema_meta WHERE key = 'baseline_snapshot'",
-    ).fetchone()
-    if not row:
-        return None
-    try:
-        baseline = json.loads(str(row[0]))
-    except json.JSONDecodeError:
-        return None
-    if isinstance(baseline, dict) and baseline.get("created_at"):
-        return str(baseline["created_at"])
-    return None
 
 
 def resolve_github_session_started_at(config: HiAgentResearchConfig) -> str | None:

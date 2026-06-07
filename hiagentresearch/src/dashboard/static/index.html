@@ -10,7 +10,7 @@
     <main class="shell">
       <section class="hero">
         <div class="hero-main">
-          <p class="eyebrow">HiAgentResearch</p>
+          <p class="eyebrow">HiAgentResearch <span id="run-mode" class="run-mode" hidden></span></p>
           <h1 id="dashboard-title">Research Dashboard</h1>
           <p id="dashboard-tagline" class="subtitle">Experiment trajectory and research outcomes.</p>
           <a id="repo-link" class="repo-link" href="#" target="_blank" rel="noreferrer" hidden>
@@ -24,25 +24,21 @@
           </a>
         </div>
         <aside class="hero-card">
-          <dl class="hero-meta">
-            <div class="hero-meta-row">
-              <dt>Build source</dt>
-              <dd id="source-label">unknown</dd>
-            </div>
-            <div class="hero-meta-row">
-              <dt>Schema</dt>
-              <dd id="schema-label">unknown</dd>
-            </div>
-          </dl>
+          <div id="run-status" class="run-status" hidden></div>
+          <dl id="hero-meta" class="hero-meta"></dl>
         </aside>
       </section>
 
-      <section>
+      <nav id="tab-bar" class="tab-bar" aria-label="Research areas" hidden></nav>
+      <p id="area-objective" class="area-objective" hidden></p>
+
+      <section class="lineage-section">
         <div class="section-title">
-          <h2>Research Groups</h2>
-          <p>Latest execution health and research outcome by group.</p>
+          <h2>Lineage</h2>
+          <p>Each trajectory's branch chain and its current top commit (★).</p>
         </div>
-        <div id="group-cards" class="cards"></div>
+        <div id="lineage-chains" class="lineage-chains"></div>
+        <div id="lineage-merge" class="lineage-merge"></div>
       </section>
 
       <section class="panel">
@@ -79,7 +75,7 @@
         <div class="panel">
           <div class="section-title">
             <h2>Run Detail</h2>
-            <p>Hypothesis, planned changes, and audit metadata.</p>
+            <p>Goal, planned changes, and audit metadata.</p>
           </div>
           <div id="run-detail" class="detail"></div>
         </div>

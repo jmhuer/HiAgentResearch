@@ -49,14 +49,14 @@ CREATE TABLE IF NOT EXISTS research_outcomes (
 )
 """
 
-EXPERIMENTS_TABLE = """
-CREATE TABLE IF NOT EXISTS experiments (
+CYCLES_TABLE = """
+CREATE TABLE IF NOT EXISTS cycles (
     run_id TEXT PRIMARY KEY,
     group_id TEXT NOT NULL,
     branch TEXT NOT NULL,
     loop_index INTEGER,
-    hypothesis_id TEXT NOT NULL,
-    hypothesis TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    goal TEXT NOT NULL,
     target_files_json TEXT NOT NULL,
     planned_code_changes_json TEXT NOT NULL,
     manifest_path TEXT NOT NULL,
@@ -88,7 +88,7 @@ SHARED_TABLES = (
     RUNS_TABLE,
     METRICS_TABLE,
     RESEARCH_OUTCOMES_TABLE,
-    EXPERIMENTS_TABLE,
+    CYCLES_TABLE,
     ARTIFACTS_TABLE,
 )
 
@@ -108,11 +108,7 @@ WITH latest AS (
 SELECT latest.*,
        outcome.research_outcome,
        outcome.improved_baseline,
-       outcome.next_action,
-       accuracy.metric_value AS accuracy,
-       latency.metric_value AS latency_ms
+       outcome.next_action
 FROM latest
 LEFT JOIN research_outcomes outcome ON latest.run_id = outcome.run_id
-LEFT JOIN metrics accuracy ON latest.run_id = accuracy.run_id AND accuracy.metric_name = 'accuracy'
-LEFT JOIN metrics latency ON latest.run_id = latency.run_id AND latency.metric_name = 'latency_ms'
 """

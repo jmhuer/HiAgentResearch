@@ -27,7 +27,7 @@ Runtime state is intentionally SQLite-only; durable experiment intent belongs in
 - `runs` records orchestration state, branch, commit, workflow run, and `failure_class`.
 - `metrics` records numeric metric values by run.
 - `research_outcomes` records whether the experiment improved the configured baseline and what action should happen next.
-- `experiments` records the concise branch manifest: hypothesis, planned changes, target files, and manifest path.
+- `cycles` records the concise branch manifest: goal, planned changes, target files, and manifest path.
 - `artifacts` records artifact paths, types, hashes, and sizes without embedding large payloads in the database.
 
 Indexed artifact filenames for eval bundles and run cycles are defined in `hiagentresearch/src/core/artifacts.py` (not in config).

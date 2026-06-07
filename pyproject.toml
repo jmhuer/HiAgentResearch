@@ -27,3 +27,4 @@ include = ["hiagentresearch*"]
 
 [tool.setuptools.package-data]
 "hiagentresearch.src.dashboard.static" = ["*.html", "*.js", "*.css"]
+"hiagentresearch.src.dashboard.static_te" = ["*.html", "*.js", "*.css"]

@@ -4,7 +4,10 @@ import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
+# Configs live under configs/. `standard.yaml` is the flat (non-fan-out) default;
+# `fanout.yaml` is the hierarchical area version. Select a non-default with the
+# HIAGENTRESEARCH_CONFIG env var (see resolve_config_path).
+DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "standard.yaml"
 DEFAULT_STATE_DIR = REPO_ROOT / ".hiagentresearch" / "state"
 DEFAULT_RUNS_DIR = REPO_ROOT / ".hiagentresearch" / "runs"
 DEFAULT_WORKTREES_DIR = REPO_ROOT / ".hiagentresearch" / "worktrees"

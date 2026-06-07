@@ -1,145 +1,145 @@
-# Future Ambition: HiAgentResearch
+# Future Ambitions
 
-This is the forward plan for agents continuing work in this repository.
+Tracked ideas to pursue *after* the current system is verified and cleaned up. None of
+these are started yet — this file is just the backlog so we don't lose them.
 
-Primary context source:
-- `/home/jmhuer/.cursor/plans/cursor_autoresearch_v2_0c398a9f.plan.md`
+## 1. One-command repo scaffolding
 
-Secondary reference source:
-- `/home/jmhuer/github/HiAgentControl/cursor-autoresearch-architecture.json`
+Add a `hiagentresearch scaffold` (a.k.a. `onboard`) command that generates the skeleton
+for a new project in one step:
 
-Clean in-repo reference (canonical for this repo):
-- [`hiagentresearch/docs/phase2_phase3_context.md`](hiagentresearch/docs/phase2_phase3_context.md)
+- a `configs/standard.yaml` template (workdir, evaluation entrypoint/command/targets, research
+  groups, orchestration, github, agent, dashboard),
+- a stub frozen eval adapter under `.hiagentresearch/eval/` that prints canonical JSON,
+- the GitHub workflows, and the workspace `AGENTS.md`.
 
-## Decision Summary (aligned to v2 plan)
+**Why:** onboarding a new repo is currently a manual replication of the skeleton (see
+the 15-minute path in `hiagentresearch/docs/new-repo-onboarding.md`). A scaffold command
+makes the tool genuinely turnkey for a new use case.
 
-- Orchestration model: hybrid (`Cursor SDK` policy layer + `GitHub Actions` eval execution).
-- Registry model (current): `SQLite + JSONL`, with explicit migration path to Postgres/ClickHouse.
-- Agent runtime model: wake cycles (scheduled/event-driven), not always-on loops.
-- Control-plane philosophy: Python remains thin (state/scheduling/gates/persistence).
-- Operator interface: CLI-first Python package commands.
-- Phase lock:
-  - Phase 1: stable execution skeleton + observability + registry + onboarding.
-  - Phase 2: merge system.
-  - Phase 3: plugin packaging + optional ecosystem integrations.
+## 2. Package-relative framework guidance (true pip-install portability)
 
-## Non-negotiable system constraints
+The framework guidance path is repo-root-relative
+(`DEFAULT_GUIDANCE_FILES = ("hiagentresearch/AGENTS.md",)` in
+`hiagentresearch/src/core/guidance.py`), which forces the **vendored / monorepo** model:
+the framework package must sit at the repo root next to the project.
 
-- Cursor-first behavior; no heavy Python context babysitting.
-- Plan-before-code contract for each run.
-- Frozen eval authority outside agent-editable code.
-- Deterministic failure classes (`infra_failure`, `code_failure`, `eval_failure`, `invalid_cycle`).
-- Append-only, auditable run evidence and transitions.
+Make that path resolve **relative to the installed package** instead, so the tool can be
+`pip install hiagentresearch` and pointed at *any* repo that only contains its
+`configs/standard.yaml`, `workdir`, frozen eval zone, and workflows — without vendoring the
+framework source.
 
-## Phase 1 requirements still open (must finish before Phase 2)
+**Why:** clean separation of "the tool" from "the repo being researched"; the tool moves
+repo to repo as a dependency, not a copy.
 
-## 1) Evaluation registry must be production-shaped
+## 3. Refresh the onboarding doc to the full config contract
 
-Must finish:
-- Canonical registry schema coverage for runs, metrics, transitions, artifacts, intent packets.
-- Schema versioning + migration tests.
-- Idempotent ingest behavior and duplicate protection for metrics.
-- Validation gates for missing/malformed artifacts.
-- Drift checks between local run state and GitHub-ingested state.
+`hiagentresearch/docs/new-repo-onboarding.md` predates several knobs that are now
+config-driven. Document them all so a new user has a single accurate contract:
 
-Acceptance:
-- Clean bootstrap and upgrade both pass in CI.
-- Registry writes are deterministic and queryable across repeated runs.
+- `orchestration.baseline_ref` (which branch/ref the baseline + L0 lineage builds from),
+- `github.remote` (drives both `git push` and the derived `gh --repo` target),
+- the `agent` section (`model`, `thinking`, retries, timeouts),
+- `dashboard` (metrics default to `evaluation.targets`; `discrete_metrics`),
+- the lineage policy split (`inherit_policy` vs `top_commit_policy`).
 
-## 2) Onboarding strategy must be finalized
+**Why:** the runtime is now fully metric- and project-agnostic; the docs should make that
+self-service.
 
-Decision we should keep unless revised with evidence:
-- New project code remains in `<workdir>/`.
-- Eval contract is frozen in `.hiagentresearch/eval/` (default).
-- Agents can modify only configured editable project paths, not frozen eval.
+## 4. Cross-lineage merge run — IMPLEMENTED (2026-06)
 
-Need to document explicitly:
-- New-project intake flow.
-- Whether native `<workdir>/eval/` is mirrored or replaced.
-- Minimal steps to onboard a repo in under 15 minutes.
+Shipped as the `merge` task kind: a build task that combines the strongest commit of
+every lineage into one branch. It is **near-zero config** — `objective`, base
+(`inherit_from`), and `draw_from` are auto-resolved at run time: the orchestrator ranks
+each lineage's winner by the anchor metric, starts the branch from the strongest, and
+integrates the rest best→worst via git (`git diff HEAD..<sha>`). Reuses the inherit
+model (single parent → linear chain, no DAG), the engineering preserve-metrics
+regression→repair, and `best_commit` (so a failed merge keeps the strongest source as
+the star). Enable via the commented `merge_best` group + final wave in `configs/standard.yaml`.
 
-## 3) Long-horizon loop reliability and intent persistence
+Remaining follow-ups (not blocking):
+- **Merge loop budget vs. integration steps:** a merge collapses N lineages through N-1
+  sequential integration steps (base + fold in the rest), but the loop count is the
+  uniform `--loops` (default 3), not `N-1`. So ≤4 lineages integrate within the default,
+  but 5+ lineages (4+ steps) won't finish at 3 loops. Consider auto-sizing a merge group's
+  loops to `max(default, N-1)` (or a per-group `loops` override) so every source is folded
+  in regardless of lineage count.
+- **Multi-metric merge floor:** today regression is judged on the anchor metric vs the
+  inherited base; a "hold every source on its own best metric" guarantee would confirm
+  gains are truly combined across metrics.
+- **Multi-generation collapse (north star):** promote a merge's top commit to the next
+  generation's `baseline_ref` (or a `promote` step) so the merged best becomes the new
+  L0 and research continues from a collapsed baseline.
+- **Sequential/recursive merges as an auto-discovered generation:** chaining merges
+  (each inheriting the previous) is already expressible; auto-orchestrating successive
+  generations is the natural extension.
 
-Must implement and test:
-- 12-loop and 24-loop runs.
-- Intent continuity checks (`active_hypothesis`, `next_action`, evidence lineage).
-- Fault injection scenarios:
-  - malformed logs/artifacts,
-  - missing metrics/failure files,
-  - transient CI/eval failures,
-  - stale/noisy logs.
-- Verify that the next loop performs repair/pivot behavior rather than degrading intent quality.
+## 5. GHES-compatible dashboard publishing
 
-## 4) `config.yaml` as project stitch contract
+The dashboard publish path uses GitHub Pages via Actions
+(`actions/configure-pages`, `actions/upload-pages-artifact`, `actions/deploy-pages`),
+which — like the v4 artifact backend — is generally **not supported on GitHub Enterprise
+Server**. On GHES (e.g. github.disney.com) the workflow is run with `dashboard.enabled:
+false` and the dashboard is reviewed locally (`dashboard build --prefer-json` +
+`scripts/preview_dashboard.sh`), so this is not blocking — but published dashboards on
+GHES need a different mechanism.
 
-Must add one root config contract for onboarding and generalization.
+Options to design later:
+- publish the static bundle to a GHES Pages site if the instance supports it,
+- or push it to an internal static host / object store / a `gh-pages`-style branch,
+- gate the publish mechanism by config so github.com keeps using Actions→Pages and GHES
+  uses the alternative.
 
-Required fields:
-- `project_id`
-- `workdir`
-- `editable_paths`
-- `frozen_eval_entrypoint`
-- `evaluation.command_template`
-- `evaluation.parser`
-- `research_groups`
-- `policy_modes`
+**Context:** the standard GHES gaps the tool already handles are no hosted runners
+(use self-hosted via `HIAGENTRESEARCH_RUNNER`), the `setup-python` `/Users/runner` path
+(created by `scripts/setup_self_hosted_runner.sh`), and no v4 artifacts (pinned `@v3`).
+Pages publishing is the remaining GHES gap.
 
-Runtime requirement:
-- Prompt assembly and behavior contracts are generated from config + group metadata.
-- Core runtime code stays project-agnostic.
+## 6. Heartbeat / health pings for true run liveness
 
-## 5) Generalize internal prompts/behavior
+The dashboard's run-status chip (green "Live" / red "Complete") and the elapsed
+**Duration** are derived from the orchestration session at **build time**: `loops-all`
+stamps `completed_at` on exit, and the static page reflects whatever was true when it
+was last built. That cleanly distinguishes *finished* from *in-progress*, but it cannot
+tell **healthy-and-running** from **stalled or dead** (e.g. the machine slept, the loop
+hung, the process was killed without stamping `completed_at` — the page keeps showing a
+stale green "Live").
 
-Confirmed direction:
-- Internal prompts should be template-driven and config-backed.
-- No hardcoded MNIST assumptions in core orchestrator/agent backend paths.
-- Root config owns project-specific adaptation; library code remains generic.
+Add a periodic heartbeat the running loop emits — e.g. `loops-all` writes a
+`last_heartbeat_at` into the orchestration session every N seconds (and on each cycle
+boundary). Then:
 
-## 6) Additional Phase 1 hardening for stable simple execution
+- the status chip can show three states — **Live** (recent heartbeat), **Stalled**
+  (heartbeat older than a threshold), **Complete** (`completed_at` set) — instead of
+  two,
+- the **Live** Duration can tick in real time in the browser (count from baseline start
+  to *now* while live, freeze at `completed_at` when done) without misrepresenting a
+  dead run as live,
+- a publish/refresh loop could rebuild the dashboard on a cadence so a viewer sees
+  progress without manual rebuilds.
 
-- Post-edit allowlist enforcement from git diff against configured editable paths.
-- Correlation IDs across local run, GitHub run, and registry events.
-- Secret handling hardening (no secret values in run artifacts/logs).
-- CI quality gates for runtime contracts and smoke loops.
-- Registry-backed status/report command for operators.
+**Why:** makes "is this actually running right now?" trustworthy rather than a snapshot
+artifact. Keep it config-driven (heartbeat interval, stalled threshold) and host-agnostic;
+no OS-specific liveness probing in the framework.
 
-## Phase 2 scope (directly aligned to v2 plan)
+## 7. Metric-preserving top commit for engineering (last-cycle regression)
 
-Phase 2 deliverables:
-- Merge candidate promotion and compatibility evaluation.
-- Evidence-backed merge controller decisions with rollback-safe checkpoints.
-- Policy-driven scoring model and merge thresholds.
-- Merge-specific workflow and docs.
+Engineering tasks must preserve the metrics they inherited: the loop detects a regression
+below the inherited floor and steers the *next* cycle to repair it (see TaskContract
+`preserve_metrics`). But a `last_commit` engineering group (e.g. `polish_code`) whose
+**final** cycle regresses has no next cycle to repair it — and `last_commit` makes that
+regressed commit the trajectory top.
 
-Planned implementation targets in this repo:
-- `hiagentresearch/src/merge_controller.py`
-- `hiagentresearch/src/score_model.py`
-- `hiagentresearch/docs/merge-policy.md`
-- `.github/workflows/merge-eval.yml`
+Options to design later (not a priority — there are workarounds today, e.g. run an extra
+loop, or treat the inherited anchor as the fallback top):
 
-## Phase 3 scope (directly aligned to v2 plan)
+- **Top commit = latest metric-preserving commit** for engineering: skip trailing commits
+  that regressed below the floor when selecting the `last_commit` top.
+- **Acceptance threshold:** a config tolerance band so small/noise-level metric moves are
+  accepted, and only commits within the band are eligible to be the top commit.
+- Gate by `preserve_metrics` so metric_experiment groups are unaffected (their latest is
+  always a valid top, regressions are findings).
 
-Phase 3 deliverables:
-- Package stabilized skills/commands/rules as plugin assets.
-- Keep pluginization optional until Phase 1/2 runtime is proven stable.
-- Add optional ecosystem integrations only where complexity decreases.
-
-Planned implementation targets in this repo:
-- `hiagentresearch/.cursor-plugin/plugin.json`
-- `hiagentresearch/skills/`
-- `hiagentresearch/commands/`
-- `hiagentresearch/rules/`
-
-## Immediate execution order
-
-1. Finalize `config.yaml` schema + loader.
-2. Remove remaining project-specific prompt/path assumptions.
-3. Complete registry versioning/migration and ingest tests.
-4. Run long-loop soak tests with fault injection.
-5. Lock onboarding runbook for new projects.
-
-If future agents need to choose between speed and correctness, prioritize correctness of:
-- frozen eval boundaries,
-- deterministic contracts,
-- registry integrity,
-- reproducible state transitions.
+**Why:** guarantees an engineering trajectory's published top commit never shows a metric
+regression, even when the last cycle slipped. Keep it config-driven and direction-aware
+(reuse `EvaluationConfig.metric_minimizes`).

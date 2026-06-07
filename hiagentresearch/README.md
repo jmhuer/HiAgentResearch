@@ -5,7 +5,7 @@ This directory contains the first implementation of the branch-based research ru
 ## Phase 1 goals
 
 - Set up config-backed GitHub automation for research branches.
-- Define research groups and agent contracts from root `config.yaml`.
+- Define research groups and agent contracts from `configs/standard.yaml` (or another config file).
 - Run one research-group cycle with strong observability outputs.
 - Keep orchestration thin and deterministic.
 
@@ -24,7 +24,7 @@ This directory contains the first implementation of the branch-based research ru
 - `src/` runtime modules and CLIs
 - `docs/` design contracts
 - `skills/` Cursor-first skill contracts
-- `../config.yaml` canonical project stitch contract
+- `../configs/standard.yaml` canonical default project stitch contract
 - `../.hiagentresearch/state/evals.db` local registry read model
 - `../.hiagentresearch/runs/` per-run artifacts
 - `../.hiagentresearch/dashboard/` optional generated static dashboard bundle
@@ -52,10 +52,10 @@ The run command writes visibility artifacts under:
 
 - `.hiagentresearch/runs/<run_id>/`
 - `.hiagentresearch/state/evals.db`
-- `.hiagentresearch/experiments/<group_id>/<run_id>.json` on research branches
+- `.hiagentresearch/cycles/<group_id>/<run_id>.json` on research branches
 
 The agent-owned workspace (`workdir`), read-only eval zone (derived from `evaluation.entrypoint`),
-eval command, targets, and quality retry expectations come from `config.yaml`. The workspace
+eval command, targets, and quality retry expectations come from the active config file (`configs/standard.yaml` by default). The workspace
 `AGENTS.md` is generated from it.
 
 The single framework guidance document (read before each cycle) is fixed in
@@ -65,7 +65,7 @@ The single framework guidance document (read before each cycle) is fixed in
 
 The prompt also prepends `<workdir>/AGENTS.md` automatically (the project-scoped eval
 command and targets). To change framework behavior for a fork, edit `AGENTS.md`; do not
-add paths to `config.yaml`.
+add paths to the config file.
 
 Agents get fast feedback from their own quick tests in the workspace. The frozen
 eval adapter under `.hiagentresearch/eval/` remains the final authority and emits
@@ -81,5 +81,5 @@ hiagentresearch dashboard build
 hiagentresearch dashboard build-from-artifacts --artifact-root dashboard-artifacts
 ```
 
-`dashboard.enabled` in `config.yaml` controls the optional GitHub Pages workflow;
+`dashboard.enabled` in the active config controls the optional GitHub Pages workflow;
 explicit local build commands remain useful for inspection and testing.
