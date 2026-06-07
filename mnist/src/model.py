@@ -6,9 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# architecture__a2-g1: widen residual stages +25% vs standard ResNet18 (64/128/256/512).
+# architecture__a2-g1: front-load +25% widen on stem/layer1/layer2; keep layer3/layer4 at baseline.
 STEM_CHANNELS = 80
-STAGE_WIDTHS = (80, 160, 320, 640)
+STAGE_WIDTHS = (80, 160, 256, 512)
 ENCODER_BOTTLENECK = 64  # Decoder expects 64x7x7 from MnistEncoder projection.
 try:
     from .kwta import KWTA
