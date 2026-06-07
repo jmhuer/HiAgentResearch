@@ -37,9 +37,9 @@ class AlbumentationsTransform:
     def __init__(self) -> None:
         self.aug = A.Compose(
             [
-                # Single affine op calibrated to MNIST digit placement (~2px shift, ±10°, ~6% scale).
+                # Single affine op: inherited SSR per-op bounds without compound A.Rotate stack.
                 A.ShiftScaleRotate(
-                    shift_limit=0.07, scale_limit=0.06, rotate_limit=10, p=0.5
+                    shift_limit=0.10, scale_limit=0.10, rotate_limit=15, p=0.5
                 ),
                 A.RandomBrightnessContrast(p=0.2),
                 ToTensorV2(),
