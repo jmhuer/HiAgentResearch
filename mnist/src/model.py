@@ -47,18 +47,14 @@ class MnistEncoder(nn.Module):
         self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu1 = nn.ReLU(inplace=True)
-        self.layer1 = self._make_layer(block, 64, 2, stride=1, activation="relu")
-        self.layer2 = self._make_layer(block, 128, 2, stride=2, activation="relu")
+        self.layer1, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 64, 2, stride=1, activation="relu"
+        )
+        self.layer2, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 128, 2, stride=2, activation="relu"
+        )
         self.proj = nn.Conv2d(128, 64, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn_proj = nn.BatchNorm2d(64)
-
-    def _make_layer(self, block, planes, num_blocks, stride, activation="kwta"):
-        strides = [stride] + [1] * (num_blocks - 1)
-        layers = []
-        for stride in strides:
-            layers.append(block(self.in_planes, planes, stride, activation=activation))
-            self.in_planes = planes * block.expansion
-        return nn.Sequential(*layers)
 
     def forward(self, x):
         out = self.relu1(self.bn1(self.conv1(x)))
@@ -113,6 +109,24 @@ class BasicBlock(nn.Module):
         return out
 
 
+def _make_resnet_stage(
+    block: type[BasicBlock],
+    in_planes: int,
+    planes: int,
+    num_blocks: int,
+    stride: int,
+    activation: str = "kwta",
+) -> tuple[nn.Sequential, int]:
+    """Build a ResNet stage from BasicBlocks; return (sequential, updated in_planes)."""
+    strides = [stride] + [1] * (num_blocks - 1)
+    layers: list[nn.Module] = []
+    current_planes = in_planes
+    for block_stride in strides:
+        layers.append(block(current_planes, planes, block_stride, activation=activation))
+        current_planes = planes * block.expansion
+    return nn.Sequential(*layers), current_planes
+
+
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):
         super(ResNet, self).__init__()
@@ -121,19 +135,19 @@ class ResNet(nn.Module):
         self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.kwta1 = KWTA(k=10)
-        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1, activation="kwta")
-        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2, activation="kwta")
-        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2, activation="relu")
-        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2, activation="relu")
+        self.layer1, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 64, num_blocks[0], stride=1, activation="kwta"
+        )
+        self.layer2, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 128, num_blocks[1], stride=2, activation="kwta"
+        )
+        self.layer3, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 256, num_blocks[2], stride=2, activation="relu"
+        )
+        self.layer4, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 512, num_blocks[3], stride=2, activation="relu"
+        )
         self.linear = nn.Linear(512 * block.expansion, num_classes)
-
-    def _make_layer(self, block, planes, num_blocks, stride, activation="kwta"):
-        strides = [stride] + [1] * (num_blocks - 1)
-        layers = []
-        for stride in strides:
-            layers.append(block(self.in_planes, planes, stride, activation=activation))
-            self.in_planes = planes * block.expansion
-        return nn.Sequential(*layers)
 
     def forward(self, x):
         out = self.kwta1(self.bn1(self.conv1(x)))
@@ -159,17 +173,15 @@ class ResNetTrunk(nn.Module):
         self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu1 = nn.ReLU(inplace=True)
-        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1, activation="relu")
-        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2, activation="relu")
-        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2, activation="relu")
-
-    def _make_layer(self, block, planes, num_blocks, stride, activation="kwta"):
-        strides = [stride] + [1] * (num_blocks - 1)
-        layers = []
-        for stride in strides:
-            layers.append(block(self.in_planes, planes, stride, activation=activation))
-            self.in_planes = planes * block.expansion
-        return nn.Sequential(*layers)
+        self.layer1, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 64, num_blocks[0], stride=1, activation="relu"
+        )
+        self.layer2, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 128, num_blocks[1], stride=2, activation="relu"
+        )
+        self.layer3, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 256, num_blocks[2], stride=2, activation="relu"
+        )
 
     def forward(self, x):
         out = self.relu1(self.bn1(self.conv1(x)))
@@ -184,16 +196,10 @@ class ResNetHead(nn.Module):
     def __init__(self, block, num_blocks_layer4: int, num_classes: int = 10) -> None:
         super().__init__()
         self.in_planes = 256
-        self.layer4 = self._make_layer(block, 512, num_blocks_layer4, stride=2, activation="relu")
+        self.layer4, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 512, num_blocks_layer4, stride=2, activation="relu"
+        )
         self.linear = nn.Linear(512 * block.expansion, num_classes)
-
-    def _make_layer(self, block, planes, num_blocks, stride, activation="relu"):
-        strides = [stride] + [1] * (num_blocks - 1)
-        layers = []
-        for stride in strides:
-            layers.append(block(self.in_planes, planes, stride, activation=activation))
-            self.in_planes = planes * block.expansion
-        return nn.Sequential(*layers)
 
     def forward(self, x):
         out = self.layer4(x)
@@ -215,24 +221,29 @@ class SharedLayer4MultiLinearHead(nn.Module):
         super().__init__()
         self.in_planes = 256
         embed_dim = 512 * block.expansion
-        self.layer4 = self._make_layer(block, 512, num_blocks_layer4, stride=2, activation="relu")
+        self.layer4, self.in_planes = _make_resnet_stage(
+            block, self.in_planes, 512, num_blocks_layer4, stride=2, activation="relu"
+        )
         self.linears = nn.ModuleList(
             [nn.Linear(embed_dim, num_classes) for _ in range(num_heads)]
         )
-
-    def _make_layer(self, block, planes, num_blocks, stride, activation="relu"):
-        strides = [stride] + [1] * (num_blocks - 1)
-        layers = []
-        for stride in strides:
-            layers.append(block(self.in_planes, planes, stride, activation=activation))
-            self.in_planes = planes * block.expansion
-        return nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.layer4(x)
         out = F.avg_pool2d(out, 4)
         out = out.view(out.size(0), -1)
         return torch.stack([linear(out) for linear in self.linears])
+
+
+def _ensemble_kwta(outputs: torch.Tensor, kwta_k: int) -> torch.Tensor:
+    """Aggregate per-head logits with k-winners-take-all over the head dimension."""
+    if kwta_k == 1:
+        return outputs.max(dim=0).values
+    _, topk_indices = torch.topk(outputs, kwta_k, dim=0)
+    mask = torch.zeros_like(outputs, dtype=torch.bool)
+    mask.scatter_(0, topk_indices, True)
+    kwta_output = torch.where(mask, outputs, torch.tensor(0.0, device=outputs.device))
+    return kwta_output.sum(dim=0)
 
 
 class EnsembleMnistCNN(nn.Module):
@@ -256,12 +267,6 @@ class EnsembleMnistCNN(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         shared = self.trunk(x)
         outputs = self.head(shared)
-        if self.kwta_k == 1:
-            return outputs.max(dim=0).values
-        _, topk_indices = torch.topk(outputs, self.kwta_k, dim=0)
-        mask = torch.zeros_like(outputs, dtype=torch.bool)
-        mask.scatter_(0, topk_indices, True)
-        kwta_output = torch.where(mask, outputs, torch.tensor(0.0, device=outputs.device))
-        return kwta_output.sum(dim=0)
+        return _ensemble_kwta(outputs, self.kwta_k)
 
 

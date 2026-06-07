@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "run_id": "run_1c91f0045d1a",
+  "group_id": "polish",
+  "branch": "research/polish",
+  "loop_index": 1,
+  "goal_id": "polish-g1",
+  "goal": "Deduplicate repeated ResNet stage construction in model.py and extract ensemble KWTA aggregation into a named helper, improving modularity without altering network topology or forward semantics.",
+  "planned_code_changes": [
+    "Add module-level _make_resnet_stage helper that builds a BasicBlock stage and returns (Sequential, updated in_planes)",
+    "Replace five class-local _make_layer copies with calls to _make_resnet_stage",
+    "Extract _ensemble_kwta(outputs, kwta_k) from EnsembleMnistCNN.forward",
+    "Add type hints on the new helpers; no changes to layer counts, activations, or tensor ops"
+  ],
+  "target_files": [
+    "mnist/src/model.py"
+  ],
+  "success_criteria": [
+    "All existing unit tests pass (test_kwta, test_model_and_train, test_ensemble)",
+    "Smoke check: EnsembleMnistCNN and MnistCNN forward produce identical output shapes",
+    "accuracy remains >= 0.915 (baseline L0 guardrail)",
+    "No eval-interface or checkpoint-format changes"
+  ],
+  "rollback_plan": "Revert mnist/src/model.py to restore the five inline _make_layer methods and inline EnsembleMnistCNN.forward KWTA block.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "baseline",
+  "lineage_parent_group_id": null,
+  "lineage_anchor_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+  "lineage_anchor_policy": null,
+  "lineage_parent_anchor_step": null,
+  "lineage_anchor_source_group": null,
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
