@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from model import EnsembleMnistCNN
 
-ENSEMBLE_PARAM_COUNT = 4_188_510
+ENSEMBLE_PARAM_COUNT = 4_852_830
 
 
 def test_model_refactor_equivalence():

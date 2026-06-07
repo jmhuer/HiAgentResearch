@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "run_id": "run_96a0a57a451b",
+  "group_id": "architecture__a1",
+  "branch": "research/architecture-a1",
+  "loop_index": 2,
+  "goal_id": "architecture__a1-g1",
+  "goal": "Add a third residual stage to deepen the shared trunk, using modest 192-channel width so inference stays within the 13ms latency budget.",
+  "planned_code_changes": [
+    "MnistEncoder layer3: increase BasicBlock count from 2 to 3 (192 channels, stride 2 on first block only) so AE pretrain matches deeper trunk.",
+    "EnsembleMnistCNN num_blocks: change [2,2,2,2] to [2,2,3,2] so ResNetTrunk layer3 gains one extra residual block; layer4 and head unchanged.",
+    "test_ensemble.py: update ENSEMBLE_PARAM_COUNT to match new topology."
+  ],
+  "target_files": [
+    "mnist/src/model.py",
+    "mnist/src/tests/test_ensemble.py"
+  ],
+  "success_criteria": [
+    "Model constructs and forward-passes 28x28 input without shape errors.",
+    "Orchestrator eval accuracy > 0.873 inherited floor and beats group best 0.909.",
+    "latency_ms stays <= 13.0 (one extra 192-ch block adds modest FLOPs vs loop 1)."
+  ],
+  "rollback_plan": "Revert mnist/src/model.py layer3 block counts to 2 and restore ENSEMBLE_PARAM_COUNT=4_188_510 in test_ensemble.py (loop 1 state at cd3f22a).",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "polish",
+  "lineage_anchor_sha": "8eee6a12aa93b2c5f8860bd8ce98998a82217abe",
+  "lineage_anchor_policy": "last_commit",
+  "lineage_parent_anchor_step": 3,
+  "lineage_anchor_source_group": "polish",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
