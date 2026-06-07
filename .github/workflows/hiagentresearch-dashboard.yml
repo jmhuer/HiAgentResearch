@@ -168,7 +168,7 @@ jobs:
           steps.dashboard_config.outputs.enabled == 'true' &&
           steps.collect_artifacts.outputs.artifact_count != '0'
         run: |
-          hiagentresearch --config "${HIAGENTRESEARCH_CONFIG}" dashboard build-from-artifacts \
+          hiagentresearch dashboard --config "${HIAGENTRESEARCH_CONFIG}" build-from-artifacts \
             --artifact-root dashboard-artifacts \
             --output-dir _site \
             --require-sqlite-assets
