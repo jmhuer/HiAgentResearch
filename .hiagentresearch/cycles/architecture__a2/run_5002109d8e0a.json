@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "run_id": "run_5002109d8e0a",
+  "group_id": "architecture__a2",
+  "branch": "research/architecture-a2",
+  "loop_index": 3,
+  "goal_id": "architecture__a2-g1",
+  "goal": "Consolidate front-loaded channel widening at a moderate +12.5% on stem/layer1/layer2, keeping layer3/layer4 at polish baseline.",
+  "planned_code_changes": [
+    "Dial STAGE_WIDTHS from loop-2 (80,160,256,512) to moderate front-loaded (72,144,256,512): +12.5% widen stem/layer1/layer2 only",
+    "Set STEM_CHANNELS=72 to match stage-1 width",
+    "Update architecture comment to document consolidated moderate front-load rationale",
+    "Update ENSEMBLE_PARAM_COUNT in test_ensemble.py to 11_402_774",
+    "Hold num_blocks=[2,2,2,2], activations, ENCODER_BOTTLENECK=64, and training hyperparameters unchanged (single-axis: width schedule amount)"
+  ],
+  "target_files": [
+    "mnist/src/model.py",
+    "mnist/src/tests/test_ensemble.py"
+  ],
+  "success_criteria": [
+    "accuracy > 0.843 (beat group best) and recover toward inherited floor 0.873",
+    "latency_ms <= 13.0 with minimal increase over polish ~6ms (fewer early-stage FLOPs than loop 2)",
+    "pytest passes; EnsembleMnistCNN forward shape unchanged (batch, 10)",
+    "load_encoder_weights still compatible (encoder and trunk share widened early-stage shapes)"
+  ],
+  "rollback_plan": "Revert STEM_CHANNELS/STAGE_WIDTHS to loop-2 values (80,160,256,512) and ENSEMBLE_PARAM_COUNT=11_643_470, or polish baseline (64,128,256,512) with 11_183_070.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "polish",
+  "lineage_anchor_sha": "8eee6a12aa93b2c5f8860bd8ce98998a82217abe",
+  "lineage_anchor_policy": "last_commit",
+  "lineage_parent_anchor_step": 3,
+  "lineage_anchor_source_group": "polish",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
