@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "run_id": "run_1832d96f82c7",
+  "group_id": "augmentation__collapse",
+  "branch": "research/augmentation-collapse",
+  "loop_index": 1,
+  "goal_id": "augmentation__collapse-g1",
+  "goal": "Integrate augmentation__a1's single-affine augmentation fix (remove compound A.Rotate stack) while preserving augmentation__a2's always-on CoarseDropout that drives the 0.931 floor.",
+  "planned_code_changes": [
+    "In mnist/src/train.py AlbumentationsTransform.__init__: remove A.Rotate(limit=15, p=0.5)",
+    "Keep A.ShiftScaleRotate with a1 bounds (0.10) and comment documenting single-affine rationale",
+    "Preserve A.CoarseDropout block unchanged from a2 base (p=0.15, hole ranges)"
+  ],
+  "target_files": [
+    "mnist/src/train.py"
+  ],
+  "success_criteria": [
+    "accuracy >= 0.931 (inherited floor from a2 base)",
+    "Augmentation pipeline still includes CoarseDropout (a2 gain preserved)",
+    "No compound A.Rotate + SSR rotation stack (a1 gain integrated)",
+    "Existing unit tests pass (smoke check)"
+  ],
+  "rollback_plan": "If accuracy drops below 0.931, revert removal of A.Rotate in AlbumentationsTransform and restore the pre-integration compose stack; a2 compound-rotation baseline remains the known-good fallback.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "augmentation__a2",
+  "lineage_anchor_sha": "3eeb30ab9f29632d5a61277c5be36fb3abed26dc",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 6,
+  "lineage_anchor_source_group": "augmentation__a2",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

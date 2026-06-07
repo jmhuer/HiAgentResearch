@@ -37,9 +37,9 @@ class AlbumentationsTransform:
     def __init__(self) -> None:
         self.aug = A.Compose(
             [
-                A.Rotate(limit=15, p=0.5),
+                # Single affine op: SSR per-op bounds without compound A.Rotate stack (a1).
                 A.ShiftScaleRotate(
-                    shift_limit=0.1, scale_limit=0.1, rotate_limit=15, p=0.5
+                    shift_limit=0.10, scale_limit=0.10, rotate_limit=15, p=0.5
                 ),
                 A.RandomBrightnessContrast(p=0.2),
                 A.CoarseDropout(
