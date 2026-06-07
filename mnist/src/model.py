@@ -5,6 +5,11 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+# architecture__a2-g1: widen residual stages +25% vs standard ResNet18 (64/128/256/512).
+STEM_CHANNELS = 80
+STAGE_WIDTHS = (80, 160, 320, 640)
+ENCODER_BOTTLENECK = 64  # Decoder expects 64x7x7 from MnistEncoder projection.
 try:
     from .kwta import KWTA
 except ImportError:  # pragma: no cover - supports direct script/test execution.
@@ -42,19 +47,21 @@ class MnistEncoder(nn.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        self.in_planes = 64
+        self.in_planes = STEM_CHANNELS
         block = BasicBlock
-        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
+        self.conv1 = nn.Conv2d(1, STEM_CHANNELS, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(STEM_CHANNELS)
         self.relu1 = nn.ReLU(inplace=True)
         self.layer1, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 64, 2, stride=1, activation="relu"
+            block, self.in_planes, STAGE_WIDTHS[0], 2, stride=1, activation="relu"
         )
         self.layer2, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 128, 2, stride=2, activation="relu"
+            block, self.in_planes, STAGE_WIDTHS[1], 2, stride=2, activation="relu"
         )
-        self.proj = nn.Conv2d(128, 64, kernel_size=3, stride=2, padding=1, bias=False)
-        self.bn_proj = nn.BatchNorm2d(64)
+        self.proj = nn.Conv2d(
+            STAGE_WIDTHS[1], ENCODER_BOTTLENECK, kernel_size=3, stride=2, padding=1, bias=False
+        )
+        self.bn_proj = nn.BatchNorm2d(ENCODER_BOTTLENECK)
 
     def forward(self, x):
         out = self.relu1(self.bn1(self.conv1(x)))
@@ -130,24 +137,24 @@ def _make_resnet_stage(
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):
         super(ResNet, self).__init__()
-        self.in_planes = 64
+        self.in_planes = STEM_CHANNELS
 
-        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
+        self.conv1 = nn.Conv2d(1, STEM_CHANNELS, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(STEM_CHANNELS)
         self.kwta1 = KWTA(k=10)
         self.layer1, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 64, num_blocks[0], stride=1, activation="kwta"
+            block, self.in_planes, STAGE_WIDTHS[0], num_blocks[0], stride=1, activation="kwta"
         )
         self.layer2, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 128, num_blocks[1], stride=2, activation="kwta"
+            block, self.in_planes, STAGE_WIDTHS[1], num_blocks[1], stride=2, activation="kwta"
         )
         self.layer3, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 256, num_blocks[2], stride=2, activation="relu"
+            block, self.in_planes, STAGE_WIDTHS[2], num_blocks[2], stride=2, activation="relu"
         )
         self.layer4, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 512, num_blocks[3], stride=2, activation="relu"
+            block, self.in_planes, STAGE_WIDTHS[3], num_blocks[3], stride=2, activation="relu"
         )
-        self.linear = nn.Linear(512 * block.expansion, num_classes)
+        self.linear = nn.Linear(STAGE_WIDTHS[3] * block.expansion, num_classes)
 
     def forward(self, x):
         out = self.kwta1(self.bn1(self.conv1(x)))
@@ -165,22 +172,22 @@ def ResNet18():
 
 
 class ResNetTrunk(nn.Module):
-    """Shared backbone through layer3 (256x7x7)."""
+    """Shared backbone through layer3."""
 
     def __init__(self, block, num_blocks) -> None:
         super().__init__()
-        self.in_planes = 64
-        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
+        self.in_planes = STEM_CHANNELS
+        self.conv1 = nn.Conv2d(1, STEM_CHANNELS, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(STEM_CHANNELS)
         self.relu1 = nn.ReLU(inplace=True)
         self.layer1, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 64, num_blocks[0], stride=1, activation="relu"
+            block, self.in_planes, STAGE_WIDTHS[0], num_blocks[0], stride=1, activation="relu"
         )
         self.layer2, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 128, num_blocks[1], stride=2, activation="relu"
+            block, self.in_planes, STAGE_WIDTHS[1], num_blocks[1], stride=2, activation="relu"
         )
         self.layer3, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 256, num_blocks[2], stride=2, activation="relu"
+            block, self.in_planes, STAGE_WIDTHS[2], num_blocks[2], stride=2, activation="relu"
         )
 
     def forward(self, x):
@@ -195,11 +202,11 @@ class ResNetHead(nn.Module):
 
     def __init__(self, block, num_blocks_layer4: int, num_classes: int = 10) -> None:
         super().__init__()
-        self.in_planes = 256
+        self.in_planes = STAGE_WIDTHS[2]
         self.layer4, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 512, num_blocks_layer4, stride=2, activation="relu"
+            block, self.in_planes, STAGE_WIDTHS[3], num_blocks_layer4, stride=2, activation="relu"
         )
-        self.linear = nn.Linear(512 * block.expansion, num_classes)
+        self.linear = nn.Linear(STAGE_WIDTHS[3] * block.expansion, num_classes)
 
     def forward(self, x):
         out = self.layer4(x)
@@ -219,10 +226,10 @@ class SharedLayer4MultiLinearHead(nn.Module):
         num_classes: int = 10,
     ) -> None:
         super().__init__()
-        self.in_planes = 256
-        embed_dim = 512 * block.expansion
+        self.in_planes = STAGE_WIDTHS[2]
+        embed_dim = STAGE_WIDTHS[3] * block.expansion
         self.layer4, self.in_planes = _make_resnet_stage(
-            block, self.in_planes, 512, num_blocks_layer4, stride=2, activation="relu"
+            block, self.in_planes, STAGE_WIDTHS[3], num_blocks_layer4, stride=2, activation="relu"
         )
         self.linears = nn.ModuleList(
             [nn.Linear(embed_dim, num_classes) for _ in range(num_heads)]

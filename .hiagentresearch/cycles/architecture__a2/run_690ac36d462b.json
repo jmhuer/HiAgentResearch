@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "run_id": "run_690ac36d462b",
+  "group_id": "architecture__a2",
+  "branch": "research/architecture-a2",
+  "loop_index": 1,
+  "goal_id": "architecture__a2-g1",
+  "goal": "Widen the channels of the existing residual stages instead of deepening, trading a little latency for representational capacity.",
+  "planned_code_changes": [
+    "Add STEM_CHANNELS=80 and STAGE_WIDTHS=(80,160,320,640) constants (+25% over 64/128/256/512) in model.py",
+    "Wire ResNet, MnistEncoder, ResNetTrunk, ResNetHead, and SharedLayer4MultiLinearHead to use the widened stage widths; keep ENCODER_BOTTLENECK=64 for decoder compatibility",
+    "Keep num_blocks=[2,2,2,2] and all activation/KWTA choices unchanged (single-axis change)",
+    "Update test_ensemble.py ENSEMBLE_PARAM_COUNT to lock the new topology"
+  ],
+  "target_files": [
+    "mnist/src/model.py",
+    "mnist/src/tests/test_ensemble.py"
+  ],
+  "success_criteria": [
+    "accuracy > 0.873 (inherited floor) and ideally improves over polish baseline 0.915",
+    "latency_ms <= 13.0 (expect modest increase from ~6ms given ~1.56x conv FLOPs at +25% width)",
+    "pytest passes; EnsembleMnistCNN forward shape unchanged (batch, 10)",
+    "load_encoder_weights still compatible (MnistEncoder and ResNetTrunk share widened trunk shapes)"
+  ],
+  "rollback_plan": "Revert STEM_CHANNELS/STAGE_WIDTHS constants and restore 64/128/256/512 planes in model.py; restore ENSEMBLE_PARAM_COUNT=11183070 in test_ensemble.py.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "polish",
+  "lineage_anchor_sha": "8eee6a12aa93b2c5f8860bd8ce98998a82217abe",
+  "lineage_anchor_policy": "last_commit",
+  "lineage_parent_anchor_step": 3,
+  "lineage_anchor_source_group": "polish",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
