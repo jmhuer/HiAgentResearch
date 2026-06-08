@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "run_id": "run_bfa80218e1d6",
+  "group_id": "final_merge",
+  "branch": "research/final-merge",
+  "loop_index": 1,
+  "goal_id": "final_merge-g1",
+  "goal": "Graft augmentation__a2's consolidated CoarseDropout cutout into the hyperparameters base without touching optimizer, LR schedule, or architecture gains.",
+  "planned_code_changes": [
+    "Add A.CoarseDropout to AlbumentationsTransform in mnist/src/train.py with augmentation__a2 consolidated params (p=0.15, single hole, 11-21% size, fill=0)",
+    "Leave hyperparameters gains untouched: cosine+warmup LR, AdamW, label smoothing, val-accuracy early stopping, epochs=25, architecture constants in model.py"
+  ],
+  "target_files": [
+    "mnist/src/train.py"
+  ],
+  "success_criteria": [
+    "accuracy >= 0.983 (inherited floor from hyperparameters__a1)",
+    "All existing unit tests pass",
+    "AlbumentationsTransform composes without error and includes CoarseDropout alongside existing rotate/shift/brightness augmentations"
+  ],
+  "rollback_plan": "Revert the CoarseDropout block in AlbumentationsTransform if eval accuracy drops below 0.983; hyperparameters-only path is the known-good baseline.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "hyperparameters__a1",
+  "lineage_anchor_sha": "e20beae9339190ef99d71af3b2d38e9781a1644e",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 13,
+  "lineage_anchor_source_group": "hyperparameters__a1",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
