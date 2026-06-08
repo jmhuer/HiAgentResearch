@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import albumentations as A
@@ -25,6 +26,31 @@ except ImportError:  # pragma: no cover - supports direct script/test execution.
     from model import Autoencoder, Decoder, EnsembleMnistCNN, MnistCNN
 
 TRAINING_SEED = 42
+MIN_LR_RATIO = 0.0
+
+
+def learning_rate_for_step(
+    step: int,
+    *,
+    total_steps: int,
+    warmup_steps: int,
+    base_lr: float,
+    min_lr_ratio: float = MIN_LR_RATIO,
+) -> float:
+    """Linear warmup over the first epoch, then cosine decay through the planned budget."""
+    min_lr = base_lr * min_lr_ratio
+    if warmup_steps > 0 and step < warmup_steps:
+        return base_lr * float(step + 1) / float(warmup_steps)
+    if total_steps <= warmup_steps:
+        return base_lr
+    progress = (step - warmup_steps) / float(total_steps - warmup_steps)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return min_lr + (base_lr - min_lr) * cosine
+
+
+def set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+    for param_group in optimizer.param_groups:
+        param_group["lr"] = lr
 
 
 def set_training_seed(seed: int = TRAINING_SEED) -> None:
@@ -92,16 +118,31 @@ def pretrain_autoencoder(
     optimizer = torch.optim.Adam(autoencoder.parameters(), lr=lr)
     criterion = nn.MSELoss()
 
+    steps_per_epoch = len(loader)
+    warmup_steps = steps_per_epoch
+    total_steps = epochs * steps_per_epoch
+    global_step = 0
+
     autoencoder.train()
     for epoch in range(epochs):
         total_loss = 0.0
         for images, _ in loader:
+            set_optimizer_lr(
+                optimizer,
+                learning_rate_for_step(
+                    global_step,
+                    total_steps=total_steps,
+                    warmup_steps=warmup_steps,
+                    base_lr=lr,
+                ),
+            )
             images = images.to(device)
             optimizer.zero_grad()
             reconstructions = autoencoder(images)
             loss = criterion(reconstructions, images)
             loss.backward()
             optimizer.step()
+            global_step += 1
             total_loss += loss.item()
         print(f"Autoencoder Pre-train Epoch {epoch + 1}/{epochs}, Loss: {total_loss / len(loader):.4f}")
     print("Autoencoder pre-training finished.")
@@ -140,16 +181,31 @@ def train_ensemble_with_early_stopping(
     best_val_loss = float("inf")
     patience_counter = 0
 
+    steps_per_epoch = len(train_loader)
+    warmup_steps = steps_per_epoch
+    total_steps = epochs * steps_per_epoch
+    global_step = 0
+
     print("Training shared-trunk ensemble...")
     for epoch in range(epochs):
         model.train()
         for images, labels in train_loader:
+            set_optimizer_lr(
+                optimizer,
+                learning_rate_for_step(
+                    global_step,
+                    total_steps=total_steps,
+                    warmup_steps=warmup_steps,
+                    base_lr=lr,
+                ),
+            )
             images = images.to(device)
             labels = labels.to(device)
             optimizer.zero_grad()
             loss = criterion(model(images), labels)
             loss.backward()
             optimizer.step()
+            global_step += 1
 
         val_loss = evaluate_ensemble_loss(model, test_loader, device, criterion)
         print(f"Ensemble Epoch {epoch + 1}/{epochs} finished. Validation Loss: {val_loss:.4f}")
