@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover - supports direct script/test execution.
     from model import Autoencoder, Decoder, EnsembleMnistCNN, MnistCNN
 
 TRAINING_SEED = 42
-MIN_LR_RATIO = 0.1
+MIN_LR_RATIO = 0.15
 
 
 def learning_rate_for_step(
