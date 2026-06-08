@@ -4,7 +4,13 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from model import Autoencoder, Decoder, EnsembleMnistCNN, MnistCNN
-from train import MIN_LR_RATIO, evaluate_ensemble_loss, learning_rate_for_step, pretrain_autoencoder
+from train import (
+    MIN_LR_RATIO,
+    evaluate_ensemble_accuracy,
+    evaluate_ensemble_loss,
+    learning_rate_for_step,
+    pretrain_autoencoder,
+)
 
 
 def test_mnist_cnn_architecture():
@@ -83,3 +89,16 @@ def test_evaluate_ensemble_loss():
     loss = evaluate_ensemble_loss(model, loader, device, criterion)
 
     assert loss > 0.0
+
+
+def test_evaluate_ensemble_accuracy():
+    loader = DataLoader(
+        TensorDataset(torch.randn(32, 1, 28, 28), torch.randint(0, 10, (32,))),
+        batch_size=16,
+    )
+    model = EnsembleMnistCNN(num_sub_networks=3, kwta_k=1)
+    device = torch.device("cpu")
+
+    accuracy = evaluate_ensemble_accuracy(model, loader, device)
+
+    assert 0.0 <= accuracy <= 1.0

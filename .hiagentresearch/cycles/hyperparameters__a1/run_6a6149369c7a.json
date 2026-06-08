@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "run_id": "run_6a6149369c7a",
+  "group_id": "hyperparameters__a1",
+  "branch": "research/hyperparameters-a1",
+  "loop_index": 1,
+  "goal_id": "hyperparameters__a1-g1",
+  "goal": "Increase the number of training epochs with early stopping on validation accuracy (patience-bounded).",
+  "planned_code_changes": [
+    "Raise --epochs default from 3 to 15 to expand the training budget while keeping other hyperparameters fixed",
+    "Add evaluate_ensemble_accuracy and switch early-stopping criterion from validation loss to validation accuracy (higher is better)",
+    "Track and restore the best validation-accuracy weights before checkpoint export",
+    "Record early_stopping_metric, patience, and epochs_budget in train metrics metadata"
+  ],
+  "target_files": [
+    "mnist/src/train.py",
+    "mnist/src/tests/test_model_and_train.py"
+  ],
+  "success_criteria": [
+    "train.py imports and train_ensemble_with_early_stopping executes without error",
+    "pytest kwta smoke tests and train unit tests pass",
+    "accuracy >= inherited floor 0.969 (orchestrator eval); target improvement over 0.969 if training converges further",
+    "latency_ms unchanged in principle (inference graph untouched; only training duration may rise within eval budget)"
+  ],
+  "rollback_plan": "If accuracy regresses below 0.969, revert epochs default to 3 and restore loss-based early stopping; if training latency blows the eval budget, reduce epochs to 8 while keeping accuracy-based early stopping.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "optimization__collapse",
+  "lineage_anchor_sha": "91249a0fbaeb1730d0953a136e25d4201b366294",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 11,
+  "lineage_anchor_source_group": "optimization__collapse",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

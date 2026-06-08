@@ -164,6 +164,24 @@ def evaluate_ensemble_loss(
     return val_loss / len(loader)
 
 
+def evaluate_ensemble_accuracy(
+    model: EnsembleMnistCNN,
+    loader: DataLoader,
+    device: torch.device,
+) -> float:
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for images, labels in loader:
+            images = images.to(device)
+            labels = labels.to(device)
+            preds = model(images).argmax(dim=1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+    return correct / max(total, 1)
+
+
 def train_ensemble_with_early_stopping(
     model: EnsembleMnistCNN,
     train_loader: DataLoader,
@@ -180,13 +198,14 @@ def train_ensemble_with_early_stopping(
 
     a1: manual ``learning_rate_for_step`` with ``MIN_LR_RATIO`` cosine floor.
     a2: AdamW optimizer, label smoothing on training loss, decoupled weight decay.
-    Validation uses hard labels (no smoothing) so early-stopping tracks true CE.
+    Early stopping tracks validation accuracy (eval-aligned) with patience-bounded stopping
+    and restores the best-seen weights before checkpoint export.
     """
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     train_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-    val_criterion = nn.CrossEntropyLoss()  # hard labels — smoothed val loss regressed loop 1
 
-    best_val_loss = float("inf")
+    best_val_accuracy = 0.0
+    best_state_dict: dict[str, torch.Tensor] | None = None
     patience_counter = 0
 
     steps_per_epoch = len(train_loader)
@@ -216,20 +235,28 @@ def train_ensemble_with_early_stopping(
             optimizer.step()
             global_step += 1
 
-        val_loss = evaluate_ensemble_loss(model, test_loader, device, val_criterion)
-        print(f"Ensemble Epoch {epoch + 1}/{epochs} finished. Validation Loss: {val_loss:.4f}")
+        val_accuracy = evaluate_ensemble_accuracy(model, test_loader, device)
+        print(
+            f"Ensemble Epoch {epoch + 1}/{epochs} finished. "
+            f"Validation Accuracy: {val_accuracy:.4f}"
+        )
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if val_accuracy > best_val_accuracy:
+            best_val_accuracy = val_accuracy
+            best_state_dict = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
             patience_counter = 0
         else:
             patience_counter += 1
             if patience_counter >= patience:
                 print(
-                    f"Early stopping ensemble due to no improvement in validation loss "
+                    f"Early stopping ensemble due to no improvement in validation accuracy "
                     f"for {patience} epochs."
                 )
                 break
+
+    if best_state_dict is not None:
+        model.load_state_dict(best_state_dict)
+        print(f"Restored best validation accuracy checkpoint ({best_val_accuracy:.4f}).")
 
 
 def save_ensemble_artifacts(
@@ -283,7 +310,9 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
     ckpt_dir = mnist_root / "src" / "checkpoints"
     checkpoint_path = args.checkpoint or (ckpt_dir / "mnist_cnn_ensemble.pt")
     metrics = {
-        "epochs": args.epochs,
+        "epochs_budget": args.epochs,
+        "early_stopping_metric": "val_accuracy",
+        "patience": args.patience,
         "checkpoint": str(checkpoint_path.relative_to(mnist_root)),
         "device": str(device),
         "quick_mode": args.quick,
@@ -295,7 +324,6 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
         "lr_schedule": "cosine_warmup",
         "warmup_epochs": 1,
         "min_lr_ratio": MIN_LR_RATIO,
-        "val_label_smoothing": 0.0,
     }
     return save_ensemble_artifacts(
         ensemble_model,
@@ -308,7 +336,12 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train MNIST CNN.")
     parser.add_argument("--mnist-root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=15,
+        help="Maximum ensemble training epochs; early stopping may finish sooner.",
+    )
     parser.add_argument(
         "--autoencoder-epochs",
         type=int,
