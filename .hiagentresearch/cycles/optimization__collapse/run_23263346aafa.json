@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "run_id": "run_23263346aafa",
+  "group_id": "optimization__collapse",
+  "branch": "research/optimization-collapse",
+  "loop_index": 1,
+  "goal_id": "optimization__collapse-g1",
+  "goal": "Selectively graft optimization__a2 regularization and optimizer improvements (AdamW, label smoothing, weight decay defaults) onto the a1 manual cosine+warmup schedule with MIN_LR_RATIO=0.1.",
+  "planned_code_changes": [
+    "Switch ensemble optimizer from Adam to AdamW with decoupled weight_decay",
+    "Add label_smoothing parameter (default 0.1) to train_ensemble_with_early_stopping and CrossEntropyLoss",
+    "Change --weight-decay CLI default from 0.0 to 1e-2 to match a2 AdamW regularization",
+    "Add --label-smoothing CLI argument (default 0.1)",
+    "Record optimizer, weight_decay, label_smoothing, lr_schedule, warmup_epochs in metrics metadata",
+    "Preserve a1 MIN_LR_RATIO=0.1 and manual learning_rate_for_step for autoencoder and ensemble"
+  ],
+  "target_files": [
+    "mnist/src/train.py"
+  ],
+  "success_criteria": [
+    "train.py imports and train_ensemble_with_early_stopping constructs without error",
+    "pytest kwta/ensemble smoke tests pass",
+    "accuracy held at or above inherited floor 0.963 (orchestrator eval)",
+    "a1 LR schedule (MIN_LR_RATIO=0.1, per-step warmup+cosine) unchanged"
+  ],
+  "rollback_plan": "Revert AdamW/label_smoothing/weight_decay defaults; restore Adam optimizer and weight_decay=0.0 defaults while keeping MIN_LR_RATIO=0.1 scheduling.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "optimization__a1",
+  "lineage_anchor_sha": "dc357a78426593dbbf7ab61308dd243b93c13f0b",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 8,
+  "lineage_anchor_source_group": "optimization__a1",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
