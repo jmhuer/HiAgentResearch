@@ -132,10 +132,11 @@ def train_ensemble_with_early_stopping(
     epochs: int,
     lr: float,
     weight_decay: float,
+    label_smoothing: float,
     patience: int,
 ) -> None:
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -211,6 +212,7 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
         epochs=args.epochs,
         lr=args.lr,
         weight_decay=args.weight_decay,
+        label_smoothing=args.label_smoothing,
         patience=args.patience,
     )
 
@@ -223,6 +225,9 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
         "quick_mode": args.quick,
         "num_sub_networks": args.num_sub_networks,
         "kwta_k": args.kwta_k,
+        "optimizer": "AdamW",
+        "weight_decay": args.weight_decay,
+        "label_smoothing": args.label_smoothing,
     }
     return save_ensemble_artifacts(
         ensemble_model,
@@ -244,7 +249,18 @@ def main() -> None:
     )
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay (L2 penalty).")
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=1e-2,
+        help="Decoupled weight decay for AdamW.",
+    )
+    parser.add_argument(
+        "--label-smoothing",
+        type=float,
+        default=0.1,
+        help="Label smoothing epsilon for ensemble CrossEntropyLoss.",
+    )
     parser.add_argument(
         "--patience",
         type=int,
