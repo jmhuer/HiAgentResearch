@@ -177,7 +177,8 @@ def train_ensemble_with_early_stopping(
     patience: int,
 ) -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    train_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    val_criterion = nn.CrossEntropyLoss()
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -203,12 +204,12 @@ def train_ensemble_with_early_stopping(
             images = images.to(device)
             labels = labels.to(device)
             optimizer.zero_grad()
-            loss = criterion(model(images), labels)
+            loss = train_criterion(model(images), labels)
             loss.backward()
             optimizer.step()
             global_step += 1
 
-        val_loss = evaluate_ensemble_loss(model, test_loader, device, criterion)
+        val_loss = evaluate_ensemble_loss(model, test_loader, device, val_criterion)
         print(f"Ensemble Epoch {epoch + 1}/{epochs} finished. Validation Loss: {val_loss:.4f}")
 
         if val_loss < best_val_loss:
@@ -311,14 +312,14 @@ def main() -> None:
     parser.add_argument(
         "--weight-decay",
         type=float,
-        default=1e-2,
-        help="Decoupled weight decay for AdamW.",
+        default=1e-3,
+        help="Decoupled weight decay for AdamW (calibrated for MIN_LR_RATIO=0.1 schedule).",
     )
     parser.add_argument(
         "--label-smoothing",
         type=float,
-        default=0.1,
-        help="Label smoothing epsilon for ensemble CrossEntropyLoss.",
+        default=0.05,
+        help="Label smoothing epsilon for ensemble training CrossEntropyLoss.",
     )
     parser.add_argument(
         "--patience",
