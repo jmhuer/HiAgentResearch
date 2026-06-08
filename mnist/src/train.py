@@ -365,7 +365,7 @@ def main() -> None:
     parser.add_argument(
         "--patience",
         type=int,
-        default=5,
+        default=7,
         help="Number of epochs to wait for improvement before early stopping.",
     )
     parser.add_argument(
