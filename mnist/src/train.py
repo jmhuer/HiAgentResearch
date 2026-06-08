@@ -66,6 +66,12 @@ def set_training_seed(seed: int = TRAINING_SEED) -> None:
 
 
 class AlbumentationsTransform:
+    """Train-time augmentation with always-on consolidated CoarseDropout cutout.
+
+    augmentation__a2 (3eeb30a): single hole, 11–21% of image, fill=0, p=0.15.
+    No phase gating — every training sample may receive cutout (unlike pre-3eeb30a a2).
+    """
+
     def __init__(self) -> None:
         self.aug = A.Compose(
             [
@@ -118,6 +124,7 @@ def build_mnist_dataloaders(
     *,
     quick: bool = False,
 ) -> tuple[DataLoader, DataLoader]:
+    """Build train/val loaders: augmented train set, eval-aligned deterministic val set."""
     train_transform = build_mnist_transform()
     eval_transform = build_eval_transform()
     train_set = datasets.MNIST(str(data_dir), train=True, download=True, transform=train_transform)
@@ -218,12 +225,14 @@ def train_ensemble_with_early_stopping(
     label_smoothing: float,
     patience: int,
 ) -> None:
-    """Train ensemble with a1 per-step cosine+warmup and a2 AdamW regularization.
+    """Train ensemble with merged hyperparameters__a1 + augmentation__a2 stack.
 
     a1: manual ``learning_rate_for_step`` with ``MIN_LR_RATIO`` cosine floor.
     a2: AdamW optimizer, label smoothing on training loss, decoupled weight decay.
-    Early stopping tracks validation accuracy (eval-aligned) with patience-bounded stopping
-    and restores the best-seen weights before checkpoint export.
+    augmentation__a2: always-on consolidated CoarseDropout on train loader only
+    (``COARSE_DROPOUT_*`` constants); val loader uses deterministic eval-aligned transform.
+    Early stopping tracks validation accuracy with patience-bounded stopping and restores
+    the best-seen weights before checkpoint export.
     """
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     train_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)

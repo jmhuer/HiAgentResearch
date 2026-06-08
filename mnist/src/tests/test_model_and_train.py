@@ -1,16 +1,46 @@
+import albumentations as A
 import pytest
 import torch
 import torch.nn as nn
+from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
 
 from model import Autoencoder, Decoder, EnsembleMnistCNN, MnistCNN
 from train import (
+    COARSE_DROPOUT_FILL,
+    COARSE_DROPOUT_HOLE_HEIGHT_RANGE,
+    COARSE_DROPOUT_HOLE_WIDTH_RANGE,
+    COARSE_DROPOUT_NUM_HOLES_RANGE,
+    COARSE_DROPOUT_P,
     MIN_LR_RATIO,
+    AlbumentationsTransform,
+    build_eval_transform,
+    build_mnist_transform,
     evaluate_ensemble_accuracy,
     evaluate_ensemble_loss,
     learning_rate_for_step,
     pretrain_autoencoder,
 )
+
+
+def test_consolidated_coarse_dropout_augmentation():
+    """Regression guard for augmentation__a2 always-on consolidated cutout (3eeb30a)."""
+    cutout = next(
+        (t for t in AlbumentationsTransform().aug.transforms if isinstance(t, A.CoarseDropout)),
+        None,
+    )
+    assert cutout is not None
+    assert cutout.p == COARSE_DROPOUT_P
+    assert cutout.num_holes_range == COARSE_DROPOUT_NUM_HOLES_RANGE
+    assert cutout.hole_height_range == COARSE_DROPOUT_HOLE_HEIGHT_RANGE
+    assert cutout.hole_width_range == COARSE_DROPOUT_HOLE_WIDTH_RANGE
+    assert cutout.fill == COARSE_DROPOUT_FILL
+
+    img = Image.new("L", (28, 28), color=128)
+    train_out = build_mnist_transform()(img)
+    eval_out = build_eval_transform()(img)
+    assert train_out.shape == (1, 28, 28)
+    assert eval_out.shape == (1, 28, 28)
 
 
 def test_mnist_cnn_architecture():
