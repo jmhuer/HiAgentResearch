@@ -140,12 +140,12 @@ def train_ensemble_with_early_stopping(
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
     steps_per_epoch = len(train_loader)
-    warmup_steps = steps_per_epoch
+    warmup_steps = max(1, steps_per_epoch // 4)
     total_steps = max(1, epochs * steps_per_epoch)
     cosine_steps = max(1, total_steps - warmup_steps)
     warmup_scheduler = LinearLR(
         optimizer,
-        start_factor=0.1,
+        start_factor=0.3,
         end_factor=1.0,
         total_iters=warmup_steps,
     )
@@ -252,7 +252,8 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
         "weight_decay": args.weight_decay,
         "label_smoothing": args.label_smoothing,
         "lr_schedule": "cosine_warmup",
-        "warmup_epochs": 1,
+        "warmup_fraction": 0.25,
+        "warmup_start_factor": 0.3,
     }
     return save_ensemble_artifacts(
         ensemble_model,
