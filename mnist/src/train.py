@@ -27,6 +27,12 @@ except ImportError:  # pragma: no cover - supports direct script/test execution.
 
 TRAINING_SEED = 42
 MIN_LR_RATIO = 0.1
+# augmentation__a2 consolidated CoarseDropout (3eeb30a): single hole, 11–21% size, p=0.15.
+COARSE_DROPOUT_NUM_HOLES_RANGE = (1, 1)
+COARSE_DROPOUT_HOLE_HEIGHT_RANGE = (0.11, 0.21)
+COARSE_DROPOUT_HOLE_WIDTH_RANGE = (0.11, 0.21)
+COARSE_DROPOUT_FILL = 0
+COARSE_DROPOUT_P = 0.15
 
 
 def learning_rate_for_step(
@@ -69,11 +75,11 @@ class AlbumentationsTransform:
                 ),
                 A.RandomBrightnessContrast(p=0.2),
                 A.CoarseDropout(
-                    num_holes_range=(1, 1),
-                    hole_height_range=(0.11, 0.21),
-                    hole_width_range=(0.11, 0.21),
-                    fill=0,
-                    p=0.15,
+                    num_holes_range=COARSE_DROPOUT_NUM_HOLES_RANGE,
+                    hole_height_range=COARSE_DROPOUT_HOLE_HEIGHT_RANGE,
+                    hole_width_range=COARSE_DROPOUT_HOLE_WIDTH_RANGE,
+                    fill=COARSE_DROPOUT_FILL,
+                    p=COARSE_DROPOUT_P,
                 ),
                 ToTensorV2(),
             ]
@@ -96,15 +102,26 @@ def build_mnist_transform() -> transforms.Compose:
     )
 
 
+def build_eval_transform() -> transforms.Compose:
+    """Deterministic preprocessing aligned with `.hiagentresearch/eval/score.py`."""
+    return transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,)),
+        ]
+    )
+
+
 def build_mnist_dataloaders(
     data_dir: Path,
     batch_size: int,
     *,
     quick: bool = False,
 ) -> tuple[DataLoader, DataLoader]:
-    transform = build_mnist_transform()
-    train_set = datasets.MNIST(str(data_dir), train=True, download=True, transform=transform)
-    test_set = datasets.MNIST(str(data_dir), train=False, download=True, transform=transform)
+    train_transform = build_mnist_transform()
+    eval_transform = build_eval_transform()
+    train_set = datasets.MNIST(str(data_dir), train=True, download=True, transform=train_transform)
+    test_set = datasets.MNIST(str(data_dir), train=False, download=True, transform=eval_transform)
     if quick:
         train_set = Subset(train_set, range(2000))
         test_set = Subset(test_set, range(1000))
@@ -331,6 +348,15 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
         "lr_schedule": "cosine_warmup",
         "warmup_epochs": 1,
         "min_lr_ratio": MIN_LR_RATIO,
+        "augmentation": {
+            "cutout": "CoarseDropout",
+            "num_holes_range": list(COARSE_DROPOUT_NUM_HOLES_RANGE),
+            "hole_height_range": list(COARSE_DROPOUT_HOLE_HEIGHT_RANGE),
+            "hole_width_range": list(COARSE_DROPOUT_HOLE_WIDTH_RANGE),
+            "fill": COARSE_DROPOUT_FILL,
+            "p": COARSE_DROPOUT_P,
+            "val_transform": "deterministic_eval_aligned",
+        },
     }
     return save_ensemble_artifacts(
         ensemble_model,
