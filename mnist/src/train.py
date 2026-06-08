@@ -287,6 +287,8 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
         "checkpoint": str(checkpoint_path.relative_to(mnist_root)),
         "device": str(device),
         "quick_mode": args.quick,
+        "batch_size": args.batch_size,
+        "base_lr": args.lr,
         "num_sub_networks": args.num_sub_networks,
         "kwta_k": args.kwta_k,
         "optimizer": "AdamW",
@@ -315,8 +317,8 @@ def main() -> None:
         default=5,
         help="Number of epochs for autoencoder pre-training.",
     )
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--lr", type=float, default=8e-4)
     parser.add_argument(
         "--weight-decay",
         type=float,

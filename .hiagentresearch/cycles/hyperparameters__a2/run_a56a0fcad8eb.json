@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "run_id": "run_a56a0fcad8eb",
+  "group_id": "hyperparameters__a2",
+  "branch": "research/hyperparameters-a2",
+  "loop_index": 1,
+  "goal_id": "hyperparameters__a2-g1",
+  "goal": "Jointly tune batch size and base learning rate for AdamW: halve batch to 64 and set base_lr=8e-4 (sub-linear inverse scaling) to double gradient steps per epoch while keeping the a1 cosine+warmup schedule and a2 AdamW regularization stack unchanged.",
+  "planned_code_changes": [
+    "Change --batch-size CLI default from 128 to 64",
+    "Change --lr CLI default from 1e-3 to 8e-4 (joint batch/LR pair, single experimental axis)",
+    "Record batch_size and base_lr in save_ensemble_artifacts metrics metadata for auditability"
+  ],
+  "target_files": [
+    "mnist/src/train.py"
+  ],
+  "success_criteria": [
+    "train.py imports and argparse defaults reflect batch_size=64, lr=8e-4",
+    "pytest mnist smoke tests pass",
+    "accuracy improves above inherited floor 0.969 or yields attributable evidence if below floor",
+    "latency_ms unchanged (training-only hyperparameter edit; inference path untouched)"
+  ],
+  "rollback_plan": "Revert --batch-size default to 128 and --lr default to 1e-3; remove batch_size/base_lr metadata keys if they cause test breakage.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "optimization__collapse",
+  "lineage_anchor_sha": "91249a0fbaeb1730d0953a136e25d4201b366294",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 11,
+  "lineage_anchor_source_group": "optimization__collapse",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
