@@ -338,7 +338,7 @@ def main() -> None:
     parser.add_argument(
         "--num-sub-networks",
         type=int,
-        default=3,
+        default=5,
         help="Number of sub-networks in the ensemble.",
     )
     parser.add_argument("--kwta-k", type=int, default=1, help="k value for k-Winners-Take-All.")
