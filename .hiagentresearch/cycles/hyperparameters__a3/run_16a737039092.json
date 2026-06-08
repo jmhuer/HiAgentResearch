@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "run_id": "run_16a737039092",
+  "group_id": "hyperparameters__a3",
+  "branch": "research/hyperparameters-a3",
+  "loop_index": 3,
+  "goal_id": "hyperparameters__a3-g1",
+  "goal": "Tune the ensemble size (num-sub-networks) and KWTA k for the best accuracy-within-latency trade-off.",
+  "planned_code_changes": [
+    "Raise default --kwta-k from 2 to 3 in train.py (single-axis: KWTA aggregation; num_sub_networks held at 3)"
+  ],
+  "target_files": [
+    "mnist/src/train.py"
+  ],
+  "success_criteria": [
+    "pytest kwta/ensemble smoke tests pass",
+    "training completes and checkpoint metadata records num_sub_networks=3, kwta_k=3",
+    "accuracy > 0.958 (beat group best) and move toward 0.969 inherited floor",
+    "latency_ms unchanged (~6 ms) \u2014 kwta_k only affects post-forward logit aggregation"
+  ],
+  "rollback_plan": "If accuracy regresses below 0.958, revert kwta_k to 2 (loop-2 group best). If k=3 underperforms k=1 floor, the finding is that max-KWTA (k=1) remains optimal for 3-head ensembles.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "optimization__collapse",
+  "lineage_anchor_sha": "91249a0fbaeb1730d0953a136e25d4201b366294",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 11,
+  "lineage_anchor_source_group": "optimization__collapse",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

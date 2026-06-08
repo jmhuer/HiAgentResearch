@@ -341,7 +341,7 @@ def main() -> None:
         default=3,
         help="Number of sub-networks in the ensemble.",
     )
-    parser.add_argument("--kwta-k", type=int, default=2, help="k value for k-Winners-Take-All.")
+    parser.add_argument("--kwta-k", type=int, default=3, help="k value for k-Winners-Take-All.")
     parser.add_argument("--quick", action="store_true", help="Use a small train subset for fast smoke runs.")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--checkpoint", type=Path, default=None, help="Model checkpoint path.")
