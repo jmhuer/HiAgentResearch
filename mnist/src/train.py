@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from albumentations.pytorch import ToTensorV2
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
@@ -138,6 +139,27 @@ def train_ensemble_with_early_stopping(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
+    steps_per_epoch = len(train_loader)
+    warmup_steps = steps_per_epoch
+    total_steps = max(1, epochs * steps_per_epoch)
+    cosine_steps = max(1, total_steps - warmup_steps)
+    warmup_scheduler = LinearLR(
+        optimizer,
+        start_factor=0.1,
+        end_factor=1.0,
+        total_iters=warmup_steps,
+    )
+    cosine_scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=cosine_steps,
+        eta_min=lr * 0.01,
+    )
+    scheduler = SequentialLR(
+        optimizer,
+        schedulers=[warmup_scheduler, cosine_scheduler],
+        milestones=[warmup_steps],
+    )
+
     best_val_loss = float("inf")
     patience_counter = 0
 
@@ -151,6 +173,7 @@ def train_ensemble_with_early_stopping(
             loss = criterion(model(images), labels)
             loss.backward()
             optimizer.step()
+            scheduler.step()
 
         val_loss = evaluate_ensemble_loss(model, test_loader, device, criterion)
         print(f"Ensemble Epoch {epoch + 1}/{epochs} finished. Validation Loss: {val_loss:.4f}")
@@ -228,6 +251,8 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
         "optimizer": "AdamW",
         "weight_decay": args.weight_decay,
         "label_smoothing": args.label_smoothing,
+        "lr_schedule": "cosine_warmup",
+        "warmup_epochs": 1,
     }
     return save_ensemble_artifacts(
         ensemble_model,
