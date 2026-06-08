@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "run_id": "run_8cdd418139f7",
+  "group_id": "hyperparameters__a2",
+  "branch": "research/hyperparameters-a2",
+  "loop_index": 2,
+  "goal_id": "hyperparameters__a2-g1",
+  "goal": "Refine loop-1 batch/LR pair: keep batch_size=64 (2\u00d7 gradient steps/epoch) but apply linear inverse scaling base_lr=5e-4 instead of sub-linear 8e-4, holding a1 cosine+warmup and a2 AdamW stack fixed.",
+  "planned_code_changes": [
+    "Change --lr CLI default from 8e-4 to 5e-4 (linear inverse scaling for batch=64)",
+    "Keep --batch-size default at 64 (not resubmitting the scored 64/8e-4 pair)",
+    "Metrics metadata base_lr field auto-updates via args.lr"
+  ],
+  "target_files": [
+    "mnist/src/train.py"
+  ],
+  "success_criteria": [
+    "train.py argparse defaults reflect batch_size=64, lr=5e-4",
+    "pytest smoke tests pass",
+    "accuracy beats group best 0.959 and ideally recovers toward floor 0.969",
+    "latency_ms unchanged (training-only hyperparameter edit)"
+  ],
+  "rollback_plan": "Revert --lr default to 8e-4 (loop-1 state) or 1e-3 with batch 128 (inherited floor) if linear scaling also regresses.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "optimization__collapse",
+  "lineage_anchor_sha": "91249a0fbaeb1730d0953a136e25d4201b366294",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 11,
+  "lineage_anchor_source_group": "optimization__collapse",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

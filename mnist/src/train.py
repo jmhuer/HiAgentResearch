@@ -318,7 +318,7 @@ def main() -> None:
         help="Number of epochs for autoencoder pre-training.",
     )
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--lr", type=float, default=8e-4)
+    parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument(
         "--weight-decay",
         type=float,
