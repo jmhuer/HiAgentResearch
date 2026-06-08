@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "run_id": "run_d055764dae4e",
+  "group_id": "hyperparameters__a1",
+  "branch": "research/hyperparameters-a1",
+  "loop_index": 2,
+  "goal_id": "hyperparameters__a1-g1",
+  "goal": "Increase the number of training epochs with early stopping on validation accuracy (patience-bounded).",
+  "planned_code_changes": [
+    "Raise --epochs default from 15 to 25 to extend the ensemble training budget while keeping patience, LR, optimizer, and architecture fixed",
+    "Update metrics metadata epochs_budget to reflect the new default"
+  ],
+  "target_files": [
+    "mnist/src/train.py"
+  ],
+  "success_criteria": [
+    "train.py imports and run_training_pipeline executes without error",
+    "pytest kwta smoke tests pass; existing train unit tests pass",
+    "accuracy > group best 0.982 and >= inherited floor 0.969",
+    "latency_ms unchanged (inference graph untouched)"
+  ],
+  "rollback_plan": "If accuracy regresses below 0.969 or fails to beat 0.982, revert --epochs default to 15. If training wall-clock exceeds eval budget, reduce to --epochs 20 while keeping val-accuracy early stopping.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "optimization__collapse",
+  "lineage_anchor_sha": "91249a0fbaeb1730d0953a136e25d4201b366294",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 11,
+  "lineage_anchor_source_group": "optimization__collapse",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

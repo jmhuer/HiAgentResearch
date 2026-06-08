@@ -339,7 +339,7 @@ def main() -> None:
     parser.add_argument(
         "--epochs",
         type=int,
-        default=15,
+        default=25,
         help="Maximum ensemble training epochs; early stopping may finish sooner.",
     )
     parser.add_argument(
