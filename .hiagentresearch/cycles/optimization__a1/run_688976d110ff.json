@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "run_id": "run_688976d110ff",
+  "group_id": "optimization__a1",
+  "branch": "research/optimization-a1",
+  "loop_index": 2,
+  "goal_id": "optimization__a1-g1",
+  "goal": "Cosine learning-rate schedule with a short linear warmup over the first epoch.",
+  "planned_code_changes": [
+    "Raise MIN_LR_RATIO from 0.0 to 0.1 so cosine decay floors at 10% of base_lr instead of zero",
+    "Keep warmup length (one epoch), base lr, optimizer, epochs, architecture, and per-step schedule wiring unchanged"
+  ],
+  "target_files": [
+    "mnist/src/train.py"
+  ],
+  "success_criteria": [
+    "Training pipeline completes; pytest kwta tests still pass",
+    "accuracy improves over group best 0.96",
+    "latency_ms unchanged (no model or inference-path edits)"
+  ],
+  "rollback_plan": "Revert MIN_LR_RATIO to 0.0; restore loop-1 cosine-to-zero schedule.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "architecture__collapse",
+  "lineage_anchor_sha": "32e20f70d0d0be5a286330a6c35f65c30cd139e1",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 6,
+  "lineage_anchor_source_group": "architecture__a2",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}
