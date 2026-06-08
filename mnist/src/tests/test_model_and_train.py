@@ -1,9 +1,10 @@
+import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from model import Autoencoder, Decoder, EnsembleMnistCNN, MnistCNN
-from train import evaluate_ensemble_loss, pretrain_autoencoder
+from train import MIN_LR_RATIO, evaluate_ensemble_loss, learning_rate_for_step, pretrain_autoencoder
 
 
 def test_mnist_cnn_architecture():
@@ -46,6 +47,28 @@ def test_pretrain_autoencoder_loss_decrease():
         current_loss = total_loss / len(dummy_loader)
         assert current_loss < initial_loss
         initial_loss = current_loss
+
+
+def test_learning_rate_for_step_cosine_floor():
+    base_lr = 1e-3
+    total_steps = 100
+    warmup_steps = 10
+    floor_lr = learning_rate_for_step(
+        total_steps,
+        total_steps=total_steps,
+        warmup_steps=warmup_steps,
+        base_lr=base_lr,
+        min_lr_ratio=MIN_LR_RATIO,
+    )
+    assert floor_lr == pytest.approx(base_lr * MIN_LR_RATIO)
+    last_train_lr = learning_rate_for_step(
+        total_steps - 1,
+        total_steps=total_steps,
+        warmup_steps=warmup_steps,
+        base_lr=base_lr,
+        min_lr_ratio=MIN_LR_RATIO,
+    )
+    assert last_train_lr == pytest.approx(base_lr * MIN_LR_RATIO, rel=0.01)
 
 
 def test_evaluate_ensemble_loss():

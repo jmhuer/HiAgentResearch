@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "run_id": "run_f0ea946a80d9",
+  "group_id": "optimization__collapse",
+  "branch": "research/optimization-collapse",
+  "loop_index": 3,
+  "goal_id": "optimization__collapse-g1",
+  "goal": "Final consolidation (attempt 3/3): lock the loop-2 winning merge (0.965) \u2014 a1 manual cosine+warmup with MIN_LR_RATIO=0.1 plus a2 AdamW/label-smoothing/weight-decay graft with calibrated defaults and hard-label validation early-stopping.",
+  "planned_code_changes": [
+    "Document merged a1+a2 stack in train_ensemble_with_early_stopping docstring and val_criterion comment",
+    "Pass min_lr_ratio=MIN_LR_RATIO explicitly in ensemble learning_rate_for_step call (auditable a1 graft)",
+    "Add val_label_smoothing: 0.0 to metrics metadata to record loop-2 early-stopping fix",
+    "Add unit test locking learning_rate_for_step cosine floor at MIN_LR_RATIO=0.1"
+  ],
+  "target_files": [
+    "mnist/src/train.py",
+    "mnist/src/tests/test_model_and_train.py"
+  ],
+  "success_criteria": [
+    "train.py imports without error; learning_rate_for_step floor test passes",
+    "pytest mnist smoke tests pass",
+    "No hyperparameter or scheduler changes \u2014 behavior-preserving consolidation only",
+    "accuracy held at or above best held 0.965 (orchestrator eval)"
+  ],
+  "rollback_plan": "If eval regresses, revert only the consolidation doc/test/metadata edits; core loop-2 train.py logic at 34844db remains the known-good baseline.",
+  "local_status": "finished",
+  "local_failure_class": "none",
+  "local_research_outcome": "awaiting_ci_eval",
+  "lineage_mode": "inherit",
+  "lineage_parent_group_id": "optimization__a1",
+  "lineage_anchor_sha": "dc357a78426593dbbf7ab61308dd243b93c13f0b",
+  "lineage_anchor_policy": "best_commit",
+  "lineage_parent_anchor_step": 8,
+  "lineage_anchor_source_group": "optimization__a1",
+  "lineage_baseline_snapshot": {
+    "ref": "main",
+    "commit_sha": "ec2999c2da47e79e7c4b99510178822d5a796935",
+    "metrics": {
+      "accuracy": 0.915,
+      "duration_sec": 258.6991,
+      "eval_exit_code": 2.0,
+      "latency_ms": 6.0798,
+      "pytest_exit_code": 0.0,
+      "tests_failed": 0.0,
+      "tests_passed": 2.0,
+      "train_exit_code": 0.0
+    }
+  }
+}

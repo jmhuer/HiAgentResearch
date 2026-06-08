@@ -176,9 +176,15 @@ def train_ensemble_with_early_stopping(
     label_smoothing: float,
     patience: int,
 ) -> None:
+    """Train ensemble with a1 per-step cosine+warmup and a2 AdamW regularization.
+
+    a1: manual ``learning_rate_for_step`` with ``MIN_LR_RATIO`` cosine floor.
+    a2: AdamW optimizer, label smoothing on training loss, decoupled weight decay.
+    Validation uses hard labels (no smoothing) so early-stopping tracks true CE.
+    """
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     train_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-    val_criterion = nn.CrossEntropyLoss()
+    val_criterion = nn.CrossEntropyLoss()  # hard labels — smoothed val loss regressed loop 1
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -199,6 +205,7 @@ def train_ensemble_with_early_stopping(
                     total_steps=total_steps,
                     warmup_steps=warmup_steps,
                     base_lr=lr,
+                    min_lr_ratio=MIN_LR_RATIO,
                 ),
             )
             images = images.to(device)
@@ -288,6 +295,7 @@ def run_training_pipeline(args: argparse.Namespace) -> dict:
         "lr_schedule": "cosine_warmup",
         "warmup_epochs": 1,
         "min_lr_ratio": MIN_LR_RATIO,
+        "val_label_smoothing": 0.0,
     }
     return save_ensemble_artifacts(
         ensemble_model,
