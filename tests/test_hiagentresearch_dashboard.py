@@ -5,9 +5,29 @@ from pathlib import Path
 
 from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.dashboard import build as dashboard_build
-from hiagentresearch.src.dashboard.build import _area_lineage, _area_tabs, _collapse_result_points, _lineage_parents, _lineage_topology, _repository_metadata, build_from_artifacts, build_from_registry
+from hiagentresearch.src.dashboard.build import _area_lineage, _area_tabs, _collapse_result_points, _dashboard_display_metric_names, _lineage_parents, _lineage_topology, _repository_metadata, build_from_artifacts, build_from_registry
 from hiagentresearch.src.dashboard.cli import main
 from hiagentresearch.src.registry.store import Registry
+
+
+def test_dashboard_display_metric_names_preserve_config_order() -> None:
+    assert _dashboard_display_metric_names(
+        configured=["macro_f1", "duration_sec", "weighted_f1"],
+        available=["duration_sec", "macro_f1", "weighted_f1", "pytest_exit_code"],
+    ) == ["macro_f1", "duration_sec", "weighted_f1"]
+
+
+def test_dashboard_summary_metric_names_follow_config_order(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "jmhuer/HiAgentResearch")
+    runtime_root = Path(__file__).resolve().parents[1]
+    config = load_config(runtime_root / "configs" / "standard.yaml")
+    state_dir = tmp_path / "state"
+    _seed_registry(state_dir)
+    output_dir = tmp_path / "dashboard"
+    build_from_registry(state_dir=state_dir, output_dir=output_dir, config=config)
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["metric_names"] == ["accuracy", "latency_ms"]
 
 
 def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None:

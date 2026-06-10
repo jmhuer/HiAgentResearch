@@ -11,7 +11,7 @@ import urllib.request
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from hiagentresearch.src.core.artifacts import (
     CYCLE_MANIFEST,
@@ -179,6 +179,24 @@ def build_from_artifacts(
         )
 
 
+def _dashboard_display_metric_names(
+    *,
+    configured: list[str],
+    available: Iterable[str],
+) -> list[str]:
+    """Return chart metric names in config order (first = default in the UI).
+
+    When the dashboard config lists metrics explicitly, preserve that order instead of
+    sorting alphabetically — otherwise duration_sec wins over macro_f1. Any captured
+    metrics not listed in config are appended in sorted order.
+    """
+    available_set = {str(name) for name in available if name}
+    configured_set = {str(name) for name in configured if name}
+    if configured_set:
+        return [str(name) for name in configured if str(name) in available_set]
+    return sorted(available_set)
+
+
 def _write_dashboard_files(
     *,
     output_dir: Path,
@@ -187,8 +205,9 @@ def _write_dashboard_files(
     config: HiAgentResearchConfig,
     source_label: str,
 ) -> DashboardBuildResult:
-    metric_names = sorted(
-        name for name in snapshot.get("metric_names", []) if not config.dashboard.metrics or name in config.dashboard.metrics
+    metric_names = _dashboard_display_metric_names(
+        configured=list(config.dashboard.metrics),
+        available=snapshot.get("metric_names", []),
     )
     summary = {
         "title": config.dashboard.title,
