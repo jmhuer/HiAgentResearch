@@ -807,10 +807,7 @@ function renderMergeGroups() {
     // A single-result area (e.g. the engineering foundation) has no competing approaches to
     // select or merge. Keep the section present but greyed so the two-section layout stays
     // stable when switching tabs, rather than collapsing to an empty box.
-    container.innerHTML =
-      tab && !tab.overview
-        ? `<p class="lineage-empty">Single result — no competing approaches to select or merge.</p>`
-        : "";
+    container.innerHTML = `<p class="lineage-empty">Single result — no competing approaches to select or merge.</p>`;
     return;
   }
   const runs = dashboardData.runs || [];

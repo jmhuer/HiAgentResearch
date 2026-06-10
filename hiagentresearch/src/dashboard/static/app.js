@@ -802,7 +802,7 @@ function renderMergeGroups() {
   }
   const mergeGroups = (topology.merge_groups || []).filter(mergeFilter);
   if (!mergeGroups.length) {
-    container.innerHTML = "";
+    container.innerHTML = `<p class="lineage-empty">Single result — no competing approaches to select or merge.</p>`;
     return;
   }
   const runs = dashboardData.runs || [];

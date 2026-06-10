@@ -25,6 +25,9 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
     assert result.database_path.exists()
     assert (output_dir / "index.html").exists()
     assert (output_dir / "app.js").exists()
+    assert "Single result — no competing approaches to select or merge." in (
+        output_dir / "app.js"
+    ).read_text(encoding="utf-8")
     manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["dashboard_schema_version"] == 1
     assert manifest["sqlite"]["worker_url"] == "sqlite.worker.js"
