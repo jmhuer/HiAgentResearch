@@ -648,6 +648,41 @@ def test_collapse_traces_adopted_source_climb_into_base_for_select_and_merge() -
     assert not any(r["group_id"] == "final_merge" for r in out)
 
 
+def test_collapse_traces_baseline_root_source_climb_into_base() -> None:
+    """A first-wave baseline leaf implicitly starts at L0, so an adopted L3 commit
+    must re-emit L1 and L2 on the collapse series for Overview."""
+    topology = {
+        "groups": {
+            "prompting__a1": {"mode": "baseline", "role": "leaf"},
+            "prompting__collapse": {"mode": "inherit", "role": "collapse"},
+        },
+        "inherit_anchors": {
+            "prompting__collapse": {
+                "anchor_source_group": "prompting__a1",
+                "parent_trajectory_step": 3,
+                "commit_sha": "a1_l3",
+            },
+        },
+    }
+    rows = [
+        {"group_id": "prompting__a1", "metric_name": "accuracy", "trajectory_x": 0, "metric_value": 0.80, "commit_sha": "base", "is_baseline_anchor": True},
+        {"group_id": "prompting__a1", "metric_name": "accuracy", "trajectory_x": 1, "metric_value": 0.84, "commit_sha": "a1_l1"},
+        {"group_id": "prompting__a1", "metric_name": "accuracy", "trajectory_x": 2, "metric_value": 0.82, "commit_sha": "a1_l2"},
+        {"group_id": "prompting__a1", "metric_name": "accuracy", "trajectory_x": 3, "metric_value": 0.88, "commit_sha": "a1_l3"},
+        {"group_id": "prompting__a1", "metric_name": "accuracy", "trajectory_x": 4, "metric_value": 0.81, "commit_sha": "a1_l4"},
+    ]
+    out = _collapse_result_points(rows, topology, ["accuracy"])
+    by_run = {r["run_id"]: r for r in out}
+
+    base = by_run["collapsebase:prompting__collapse"]
+    assert base["trajectory_x"] == 3 and base["commit_sha"] == "a1_l3" and base["metric_value"] == 0.88
+    assert by_run["collapsepath:prompting__collapse:1"]["metric_value"] == 0.84
+    assert by_run["collapsepath:prompting__collapse:2"]["metric_value"] == 0.82
+    assert "collapsepath:prompting__collapse:0" not in by_run
+    assert "collapsepath:prompting__collapse:3" not in by_run
+    assert "collapsepath:prompting__collapse:4" not in by_run
+
+
 def test_select_collapse_flagged_distinctly_from_merge_collapse() -> None:
     """A select collapse (combine:false → loops==0) is flagged is_select so the dashboard renders
     it as 'adopt the strongest competing leaf', not a fold-in merge chain. A real merge collapse

@@ -509,10 +509,9 @@ def _collapse_result_points(
         if not source or step is None or step == "" or not sha:
             continue
         step = int(step)
-        # The adopted leaf's own inherited anchor step — the lower bound for the path trace (below
-        # it is the previous area, drawn by the walk; we only trace the leaf's own loop climb).
-        leaf_anchor = inherit_anchors.get(source) or {}
-        leaf_anchor_step = leaf_anchor.get("parent_trajectory_step")
+        # The adopted source's own anchor step is the lower bound for the path trace. Inherited
+        # sources have an explicit anchor; baseline-mode roots implicitly inherit the frozen L0.
+        source_anchor_step = _source_anchor_trajectory_step(source, groups, inherit_anchors)
         # Trace the adopted source's climb into the base for EVERY collapse, unconditionally.
         # The climb (the source's loops from its own anchor up to the adopted commit) is a
         # structural fact — it happened regardless of metric and regardless of whether a MERGE
@@ -522,7 +521,7 @@ def _collapse_result_points(
         # leaf's commit then runs its own loops, but both reach their base via the same leaf climb.
         # Only `role==collapse` groups get here; the auto `final_merge` (role=="final_merge") is
         # excluded, so it never re-traces a child collapse's climb (which would double-draw).
-        trace = leaf_anchor_step not in (None, "")
+        trace = source_anchor_step is not None
         for metric in metric_names:
             if (group_id, metric, step) not in point_at:  # base node (the adopted commit)
                 src_point = point_at.get((source, metric, step))
@@ -540,7 +539,7 @@ def _collapse_result_points(
                         }
                     )
             if trace:  # re-emit the adopted leaf's climb into the base (Overview-only via path_of_leaf)
-                for s in range(int(leaf_anchor_step) + 1, step):
+                for s in range(source_anchor_step + 1, step):
                     sp = point_at.get((source, metric, s))
                     if sp is None:
                         continue
@@ -558,6 +557,25 @@ def _collapse_result_points(
                         }
                     )
     return results
+
+
+def _source_anchor_trajectory_step(
+    group_id: str,
+    groups: dict[str, Any],
+    inherit_anchors: dict[str, Any],
+) -> int | None:
+    """Return the trajectory step a source group started from.
+
+    Inherit-mode groups carry this explicitly in ``inherit_anchors``. Baseline-mode groups
+    are roots; for trajectory/path purposes they have the implicit frozen L0 anchor.
+    """
+    anchor = inherit_anchors.get(group_id) or {}
+    step = anchor.get("parent_trajectory_step")
+    if step not in (None, ""):
+        return int(step)
+    if (groups.get(group_id) or {}).get("mode") == "baseline":
+        return 0
+    return None
 
 
 def _dedupe_metric_rows(metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:
