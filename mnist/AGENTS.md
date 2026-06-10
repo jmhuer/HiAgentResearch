@@ -58,4 +58,4 @@ editable workspace for this research phase:
 - Research branches keep accumulating valid experiments; metric regressions are knowledge, not execution failures.
 
 For how to work a cycle (planning, self-review, smoke tests, what counts as a
-regression, git boundaries), follow the framework contract in `hiagentresearch/AGENTS.md`.
+regression, git boundaries), follow the framework contract in `.hiagentresearch/AGENTS.md`.

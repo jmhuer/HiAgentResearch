@@ -121,7 +121,7 @@ def test_run_cursor_agent_cycle_streams_messages_and_preserves_prompt(monkeypatc
     assert record.success is True
     assert FakeAgent.kwargs["model"] == "composer-2.5"
     assert "client" in FakeAgent.kwargs
-    assert "hiagentresearch/AGENTS.md" in (run_dir / "agent_prompt.txt").read_text(encoding="utf-8")
+    assert ".hiagentresearch/AGENTS.md" in (run_dir / "agent_prompt.txt").read_text(encoding="utf-8")
     assert "streamed assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
     assert "dict assistant text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")
     assert "dump text" in (run_dir / "agent_messages.txt").read_text(encoding="utf-8")

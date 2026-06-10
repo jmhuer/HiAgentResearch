@@ -371,6 +371,7 @@ def _seed_intent(group: ResearchGroup) -> IntentPacket:
 
 
 def init_state() -> int:
+    from hiagentresearch.src.core.guidance import materialize_framework_guidance
     from hiagentresearch.src.project.docs import write_workspace_agents
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -378,9 +379,22 @@ def init_state() -> int:
     registry = Registry(STATE_DIR)
     registry.init()
     groups = _load_groups(CONFIG_PATH)
+    framework_agents = materialize_framework_guidance()
     if CONFIG_PATH.suffix in {".yaml", ".yml"}:
-        write_workspace_agents(load_config(CONFIG_PATH))
-    print(json.dumps({"ok": True, "groups": sorted(groups.keys())}, indent=2))
+        workspace_agents = write_workspace_agents(load_config(CONFIG_PATH))
+    else:
+        workspace_agents = None
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "groups": sorted(groups.keys()),
+                "framework_agents": str(framework_agents),
+                "workspace_agents": str(workspace_agents) if workspace_agents else None,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

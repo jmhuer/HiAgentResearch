@@ -1,5 +1,9 @@
-from hiagentresearch.src.core.guidance import DEFAULT_GUIDANCE_FILES, default_guidance_files
-from hiagentresearch.src.core import guidance
+from hiagentresearch.src.core.guidance import (
+    DEFAULT_GUIDANCE_FILES,
+    FRAMEWORK_GUIDANCE_PATH,
+    default_guidance_files,
+    materialize_framework_guidance,
+)
 
 
 def test_default_guidance_files_matches_constants() -> None:
@@ -7,10 +11,14 @@ def test_default_guidance_files_matches_constants() -> None:
     assert len(DEFAULT_GUIDANCE_FILES) == 1
 
 
-def test_default_guidance_files_supports_embedded_runtime(monkeypatch, tmp_path) -> None:
-    embedded = tmp_path / ".hiagentresearch" / "runtime" / "hiagentresearch"
-    embedded.mkdir(parents=True)
-    (embedded / "AGENTS.md").write_text("# Contract\n", encoding="utf-8")
-    monkeypatch.setattr(guidance, "REPO_ROOT", tmp_path)
+def test_default_guidance_files_are_project_facing() -> None:
+    assert default_guidance_files() == (".hiagentresearch/AGENTS.md",)
 
-    assert default_guidance_files() == (".hiagentresearch/runtime/hiagentresearch/AGENTS.md",)
+
+def test_materialize_framework_guidance_exposes_runtime_contract(tmp_path) -> None:
+    target = materialize_framework_guidance(root=tmp_path)
+
+    assert target == tmp_path / FRAMEWORK_GUIDANCE_PATH
+    text = target.read_text(encoding="utf-8")
+    assert "Generated from HiAgentResearch runtime" in text
+    assert "HiAgentResearch Agent Contract" in text

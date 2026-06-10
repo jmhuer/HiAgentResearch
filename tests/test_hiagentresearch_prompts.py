@@ -35,7 +35,7 @@ def test_prompt_is_config_backed() -> None:
     assert "evaluation zone is read-only" in prompt.lower()
     assert ".hiagentresearch/eval/" in prompt
     assert "mnist/AGENTS.md" in prompt
-    assert "hiagentresearch/AGENTS.md" in prompt
+    assert ".hiagentresearch/AGENTS.md" in prompt
     assert group.evaluation.command not in prompt
     assert "owned by the GitHub eval node" in prompt
     # The orchestrator is the sole committer: the agent must leave edits uncommitted and
