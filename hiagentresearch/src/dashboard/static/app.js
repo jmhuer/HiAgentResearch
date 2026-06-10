@@ -972,27 +972,12 @@ function renderMergeGroups() {
 }
 
 function runCountLabel(groupId) {
-  // The Overview plots one trajectory per AREA RESULT, but a SELECT collapse owns no runs of its
-  // own — its result is an adopted leaf, so the runs live under the leaf. Scoping the count to the
-  // area-result ids alone therefore drops every SELECT area (and the not-yet-run final merge),
-  // under-reporting both numbers. Count by AREA instead: every run that fed a shown area, and the
-  // number of area-result trajectories on screen. (A per-area tab already scopes to leaves, which
-  // do own runs, so it keeps the simple group-level count below.)
-  if (activeTab()?.overview && groupId === ALL_GROUPS) {
-    const groups = (dashboardData.lineage_topology || {}).groups || {};
-    const areaResults = areaResultGroupIds();
-    const areaOf = (id) => groups[id]?.area || String(id);
-    const shownAreas = new Set([...areaResults].map(areaOf));
-    const runs = (dashboardData.runs || []).filter((run) => shownAreas.has(areaOf(run.group_id)));
-    return `${runs.length} runs · ${areaResults.size} groups`;
-  }
-  const runs = (dashboardData.runs || []).filter((run) => inChartScope(run.group_id));
+  const runs = visibleChartRuns(dashboardData.runs || [], groupId, selectedMetricName());
   if (groupId === ALL_GROUPS) {
     const groupCount = new Set(runs.map((run) => run.group_id).filter(Boolean)).size;
     return `${runs.length} runs · ${groupCount} groups`;
   }
-  const filtered = runs.filter((run) => run.group_id === groupId);
-  return `${filtered.length} runs · ${groupId}`;
+  return `${runs.length} runs · ${groupId}`;
 }
 
 function updateChartRunSummary(groupId) {
@@ -1024,19 +1009,21 @@ function renderFilters(data) {
   setOptions("group-filter", groups, { allLabel: "All groups" });
   setOptions("metric-filter", metrics);
   // Assign (not addEventListener) so re-rendering on tab switch never double-binds.
-  document.getElementById("group-filter").onchange = renderChart;
-  document.getElementById("metric-filter").onchange = renderChart;
+  document.getElementById("group-filter").onchange = renderChartAndRuns;
+  document.getElementById("metric-filter").onchange = renderChartAndRuns;
 }
 
 function renderRuns(runs) {
   const container = document.getElementById("run-list");
-  const sorted = sortRunsForDisplay(runs.filter((run) => inScope(run.group_id)));
+  const sorted = sortRunsForDisplay(visibleChartRuns(runs, selectedGroupId(), selectedMetricName()));
   if (!sorted.length) {
     container.textContent = "No runs found.";
+    selectedRunId = null;
     renderRunDetail();
     return;
   }
-  selectedRunId = selectedRunId || sorted[0].run_id;
+  const visibleIds = new Set(sorted.map((run) => run.run_id));
+  selectedRunId = selectedRunId && visibleIds.has(selectedRunId) ? selectedRunId : sorted[0].run_id;
   container.innerHTML = sorted
     .map(
       (run) => `
@@ -1055,6 +1042,52 @@ function renderRuns(runs) {
     });
   });
   renderRunDetail();
+}
+
+function selectedGroupId() {
+  return document.getElementById("group-filter")?.value || ALL_GROUPS;
+}
+
+function selectedMetricName() {
+  const selected = document.getElementById("metric-filter")?.value;
+  return selected || chartMetricNames(dashboardData)[0] || "";
+}
+
+function renderChartAndRuns() {
+  renderRuns(dashboardData.runs || []);
+  renderChart();
+}
+
+function visibleChartRuns(runs, groupId, metricName) {
+  const byId = new Map(runs.map((run) => [run.run_id, run]));
+  const runIds = [];
+  const seen = new Set();
+  for (const point of chartPointsForSelection(groupId, metricName)) {
+    const runId = resolveRunIdForPoint(point);
+    if (!runId || seen.has(runId) || !byId.has(runId)) continue;
+    seen.add(runId);
+    runIds.push(runId);
+  }
+  return runIds.map((runId) => byId.get(runId));
+}
+
+function chartPointsForSelection(groupId, metricName) {
+  const indexes = dashboardIndexes();
+  let values = (dashboardData.metrics || [])
+    .filter(
+      (metric) =>
+        (groupId === ALL_GROUPS || metric.group_id === groupId) &&
+        inChartScope(metric.group_id) &&
+        metric.metric_name === metricName &&
+        !(metric.path_of_leaf && inChartScope(metric.path_of_leaf)) &&
+        Number(metric.trajectory_x) <= overviewTrajectoryCutoff(metric.group_id),
+    )
+    .map((metric) => enrichMetricPoint(metric, indexes))
+    .filter((point) => Number.isFinite(point.metric_value));
+  if (values.length) {
+    values = [...values, ...lineageWalkOrigins(values, metricName, groupId)];
+  }
+  return values;
 }
 
 function showChartMessage(container, message) {
@@ -1080,31 +1113,16 @@ function ensureChartCanvas(container) {
 async function renderChart() {
   const container = document.getElementById("metric-chart");
   try {
-    const groupId = document.getElementById("group-filter").value;
-    const metricName = document.getElementById("metric-filter").value;
+    const groupId = selectedGroupId();
+    const metricName = selectedMetricName();
     updateChartRunSummary(groupId);
-    const indexes = dashboardIndexes();
     // The backend already emits render-ready rows: deduped, with baseline/origin
     // anchors, trajectory_x, and symbol. The frontend only filters and joins run
     // metadata for tooltips — it does not recompute chart geometry.
     // The backend emits only real nodes (loop runs, baseline, collapse merge-base / select-adopted)
-    // plus a SELECT collapse's path-to-winner nodes (path_of_leaf). Drop those path nodes on the
+    // plus collapse path-to-winner nodes (path_of_leaf). Drop those path nodes on the
     // leaf's own tab — there the leaf line already draws the climb, so re-drawing it would double.
-    let values = (dashboardData.metrics || [])
-      .filter(
-        (metric) =>
-          (groupId === ALL_GROUPS || metric.group_id === groupId) &&
-          inChartScope(metric.group_id) &&
-          metric.metric_name === metricName &&
-          !(metric.path_of_leaf && inChartScope(metric.path_of_leaf)) &&
-          Number(metric.trajectory_x) <= overviewTrajectoryCutoff(metric.group_id),
-      )
-      .map((metric) => enrichMetricPoint(metric, indexes))
-      .filter((point) => Number.isFinite(point.metric_value));
-    if (values.length) {
-      // Connect each in-scope group's trajectory back to its nearest in-scope ancestor.
-      values = [...values, ...lineageWalkOrigins(values, metricName, groupId)];
-    }
+    const values = chartPointsForSelection(groupId, metricName);
     if (!values.length) {
       showChartMessage(container, "No metric data for this selection.");
       updateChartRunSummary(groupId);
