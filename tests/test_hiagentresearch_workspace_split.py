@@ -28,6 +28,10 @@ def test_render_workspace_agents_includes_command_and_targets() -> None:
     assert ".hiagentresearch/eval/" in doc
     assert "read-only" in doc.lower()
     assert "canonical JSON" in doc
+    assert "except for the protected paths listed" in doc
+    assert "Add project dependencies only to the configured dependency file(s)" in doc
+    assert "`mnist/requirements.txt`" in doc
+    assert "mnist/src/tests/" not in doc
 
 
 def test_required_baseline_metrics_derived_from_targets() -> None:

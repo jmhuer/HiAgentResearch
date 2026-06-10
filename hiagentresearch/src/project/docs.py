@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
+from hiagentresearch.src.core.guidance import default_guidance_files
 from hiagentresearch.src.paths import REPO_ROOT
 
 
@@ -37,6 +38,12 @@ def _targets_lines(config: HiAgentResearchConfig) -> list[str]:
     return lines or ["- (no metrics configured)"]
 
 
+def _dependency_lines(config: HiAgentResearchConfig) -> str:
+    if not config.dependency_files:
+        return "- No project dependency file is configured for this research workspace."
+    return "\n".join(f"- `{path}`" for path in config.dependency_files)
+
+
 def render_workspace_agents(config: HiAgentResearchConfig) -> str:
     workdir = config.workdir.rstrip("/") or "."
     metric_fields = ", ".join(f"`{name}`" for name in config.evaluation.targets) or "the configured metrics"
@@ -47,15 +54,23 @@ def render_workspace_agents(config: HiAgentResearchConfig) -> str:
         or "- Follow the objective and keep changes inside the workspace."
     )
     targets_block = "\n".join(_targets_lines(config))
+    dependency_lines = _dependency_lines(config)
+    framework_guidance = default_guidance_files()[0]
     command = _display_eval_command(config)
     return f"""# Workspace contract ({workdir})
 
 <!-- Generated from the active config by `hiagentresearch render-workspace-docs`. Do not edit by hand. -->
 
-This workspace (`{workdir}/`) is yours. You may add, modify, restructure, and
-delete files anywhere under it: add modules, add tests under `{workdir}/src/tests/`
-or `{workdir}/tests/`, add dependencies to the requirements file, and reorganize
-code to support your change.
+This workspace (`{workdir}/`) is yours, except for the protected paths listed
+below. You may add, modify, restructure, and delete files inside the editable
+workspace: add modules, add tests under `{workdir}/tests/`, update the configured
+dependency file(s), and reorganize code to support your change.
+
+## Dependency files
+
+Add project dependencies only to the configured dependency file(s):
+
+{dependency_lines}
 
 ## How you are evaluated
 
@@ -98,7 +113,7 @@ editable workspace for this research phase:
 {expectation_lines}
 
 For how to work a cycle (planning, self-review, smoke tests, what counts as a
-regression, git boundaries), follow the framework contract in `hiagentresearch/AGENTS.md`.
+regression, git boundaries), follow the framework contract in `{framework_guidance}`.
 """
 
 
