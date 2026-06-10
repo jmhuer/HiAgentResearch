@@ -210,10 +210,30 @@ function lineageWalkOrigins(values, metricName, selectedGroupId) {
       loop_index: 0,
       is_walk_origin: true,
       connector_source_group_id: origin.source_group_id || "",
-      commit_sha: ancestorRow?.commit_sha || "",
+      ...walkOriginDisplayMetadata(origin, ancestorRow),
     });
   }
   return origins;
+}
+
+function walkOriginDisplayMetadata(origin, ancestorRow) {
+  if (origin.is_baseline) {
+    const baseline = (dashboardData.lineage_topology || {}).baseline_snapshot || {};
+    const ref = baseline.ref || "main";
+    return {
+      commit_sha: baseline.commit_sha || "",
+      goal: `Frozen eval anchor (${ref})`,
+      outcome: "baseline",
+      is_baseline_anchor: true,
+    };
+  }
+  return {
+    commit_sha: ancestorRow?.commit_sha || "",
+    goal: ancestorRow?.goal || "",
+    reason: ancestorRow?.reason || "",
+    outcome: ancestorRow?.research_outcome || ancestorRow?.outcome || "",
+    is_baseline_anchor: Boolean(ancestorRow?.is_baseline_anchor),
+  };
 }
 
 // Merge-contribution arrows: a dashed edge from each merge's fold-in SOURCE into the merge's base
