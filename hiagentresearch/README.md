@@ -58,14 +58,15 @@ The agent-owned workspace (`workdir`), read-only eval zone (derived from `evalua
 eval command, targets, and quality retry expectations come from the active config file (`configs/standard.yaml` by default). The workspace
 `AGENTS.md` is generated from it.
 
-The single framework guidance document (read before each cycle) is fixed in
-`hiagentresearch/src/core/guidance.py`:
+The single framework guidance document (read before each cycle) is materialized by
+`hiagentresearch init` at the stable project-facing path:
 
-- `hiagentresearch/AGENTS.md` — control-plane rules and the per-cycle contract
+- `.hiagentresearch/AGENTS.md` — control-plane rules and the per-cycle contract
 
 The prompt also prepends `<workdir>/AGENTS.md` automatically (the project-scoped eval
-command and targets). To change framework behavior for a fork, edit `AGENTS.md`; do not
-add paths to the config file.
+command and targets). To change framework behavior for a fork, edit the runtime source
+contract at `hiagentresearch/AGENTS.md`, then run `hiagentresearch init` in the project;
+do not add framework guidance paths to the config file.
 
 Agents get fast feedback from their own quick tests in the workspace. The frozen
 eval adapter under `.hiagentresearch/eval/` remains the final authority and emits

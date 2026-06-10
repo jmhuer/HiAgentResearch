@@ -17,17 +17,15 @@ for a new project in one step:
 the 15-minute path in `hiagentresearch/docs/new-repo-onboarding.md`). A scaffold command
 makes the tool genuinely turnkey for a new use case.
 
-## 2. Package-relative framework guidance (true pip-install portability)
+## 2. Package distribution polish
 
-The framework guidance path is repo-root-relative
-(`DEFAULT_GUIDANCE_FILES = ("hiagentresearch/AGENTS.md",)` in
-`hiagentresearch/src/core/guidance.py`), which forces the **vendored / monorepo** model:
-the framework package must sit at the repo root next to the project.
+`hiagentresearch init` now materializes the framework guidance contract from the
+installed runtime into `.hiagentresearch/AGENTS.md`, so prompts use a stable
+project-facing path regardless of whether the runtime is vendored or installed.
 
-Make that path resolve **relative to the installed package** instead, so the tool can be
-`pip install hiagentresearch` and pointed at *any* repo that only contains its
-`configs/standard.yaml`, `workdir`, frozen eval zone, and workflows — without vendoring the
-framework source.
+The remaining distribution work is packaging polish: make the CLI installable as
+`hiagentresearch`, document the config/eval skeleton expected in a target repo, and
+ensure the source `hiagentresearch/AGENTS.md` is always included as package data.
 
 **Why:** clean separation of "the tool" from "the repo being researched"; the tool moves
 repo to repo as a dependency, not a copy.
