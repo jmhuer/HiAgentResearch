@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(os.environ.get("HIAGENTRESEARCH_REPO_ROOT", str(_DEFAULT_REPO_ROOT))).resolve()
 # Configs live under configs/. `standard.yaml` is the flat (non-fan-out) default;
 # `fanout.yaml` is the hierarchical area version. Select a non-default with the
 # HIAGENTRESEARCH_CONFIG env var (see resolve_config_path).
