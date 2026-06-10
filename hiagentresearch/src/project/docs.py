@@ -41,6 +41,11 @@ def render_workspace_agents(config: HiAgentResearchConfig) -> str:
     workdir = config.workdir.rstrip("/") or "."
     metric_fields = ", ".join(f"`{name}`" for name in config.evaluation.targets) or "the configured metrics"
     reference_lines = "\n".join(f"- `{path}`" for path in config.all_reference_paths())
+    hidden_lines = "\n".join(f"- `{path}`" for path in config.hidden_paths) or "- (none configured)"
+    expectation_lines = (
+        "\n".join(f"- {item}" for item in config.agent_contract.research_output_expectations)
+        or "- Follow the objective and keep changes inside the workspace."
+    )
     targets_block = "\n".join(_targets_lines(config))
     command = _display_eval_command(config)
     return f"""# Workspace contract ({workdir})
@@ -80,6 +85,17 @@ Read these files to understand exactly how your model is loaded, what
 preprocessing is applied at inference, and how each metric is computed. Never
 edit or run them: the orchestrator runs the eval after your cycle and that result
 is authoritative. Editing the eval zone is rejected as an invalid cycle.
+
+## Other protected paths
+
+These paths are available for context when they exist, but are not part of your
+editable workspace for this research phase:
+
+{hidden_lines}
+
+## Research expectations
+
+{expectation_lines}
 
 For how to work a cycle (planning, self-review, smoke tests, what counts as a
 regression, git boundaries), follow the framework contract in `hiagentresearch/AGENTS.md`.
