@@ -73,7 +73,6 @@ def main(argv: list[str] | None = None) -> int:
     if raw_args[:1] == ["dashboard"]:
         return dashboard_cli.main(raw_args[1:])
 
-    ensure_cursor_api_key()
     parser = build_parser()
     args = parser.parse_args(raw_args)
     if args.cmd == "init":
@@ -81,12 +80,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "status":
         return status_report(group_id=args.group_id)
     if args.cmd == "run-group":
+        ensure_cursor_api_key()
         return run_group(
             group_id=args.group_id,
             workdir=args.workdir.resolve(),
             agent_model=args.agent_model,
         )
     if args.cmd == "loops":
+        ensure_cursor_api_key()
         summary = run_loops(
             group_id=args.group_id,
             branch=args.branch,
@@ -98,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(summary.to_dict(), indent=2))
         return 0 if summary.ok else 1
     if args.cmd == "loops-all":
+        ensure_cursor_api_key()
         return run_loops_all(
             loops=args.loops,
             workdir=args.workdir.resolve(),
