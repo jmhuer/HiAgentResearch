@@ -2,10 +2,16 @@
 
 <!-- Generated from the active config by `hiagentresearch render-workspace-docs`. Do not edit by hand. -->
 
-This workspace (`mnist/`) is yours. You may add, modify, restructure, and
-delete files anywhere under it: add modules, add tests under `mnist/src/tests/`
-or `mnist/tests/`, add dependencies to the requirements file, and reorganize
-code to support your change.
+This workspace (`mnist/`) is yours, except for the protected paths listed
+below. You may add, modify, restructure, and delete files inside the editable
+workspace: add modules, add tests under `mnist/tests/`, update the configured
+dependency file(s), and reorganize code to support your change.
+
+## Dependency files
+
+Add project dependencies only to the configured dependency file(s):
+
+- `mnist/requirements.txt`
 
 ## How you are evaluated
 
@@ -37,6 +43,19 @@ Read these files to understand exactly how your model is loaded, what
 preprocessing is applied at inference, and how each metric is computed. Never
 edit or run them: the orchestrator runs the eval after your cycle and that result
 is authoritative. Editing the eval zone is rejected as an invalid cycle.
+
+## Other protected paths
+
+These paths are available for context when they exist, but are not part of your
+editable workspace for this research phase:
+
+- (none configured)
+
+## Research expectations
+
+- Every cycle starts with concrete evidence and a written plan before code edits.
+- Every cycle leaves an auditable trail (planning artifacts, committed manifest, updated tactical intent); the orchestrator runs eval after the edit.
+- Research branches keep accumulating valid experiments; metric regressions are knowledge, not execution failures.
 
 For how to work a cycle (planning, self-review, smoke tests, what counts as a
 regression, git boundaries), follow the framework contract in `hiagentresearch/AGENTS.md`.
