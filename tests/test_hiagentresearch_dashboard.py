@@ -40,7 +40,12 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
     registry.record_artifact(run_id="run_abc", artifact_path=artifact, artifact_type="local_eval", base_dir=tmp_path)
 
     output_dir = tmp_path / "dashboard"
-    result = build_from_registry(state_dir=state_dir, output_dir=output_dir, config=load_config())
+    runtime_root = Path(__file__).resolve().parents[1]
+    result = build_from_registry(
+        state_dir=state_dir,
+        output_dir=output_dir,
+        config=load_config(runtime_root / "configs" / "standard.yaml"),
+    )
 
     assert result.database_path.exists()
     assert (output_dir / "index.html").exists()
@@ -57,7 +62,7 @@ def test_dashboard_build_outputs_sanitized_bundle(tmp_path, monkeypatch) -> None
     snapshot = json.loads((output_dir / "dashboard.json").read_text(encoding="utf-8"))
     assert snapshot["metric_names"] == ["accuracy", "latency_ms"]
     assert snapshot["cycles"][0]["goal_id"] == "h1"
-    config = load_config()
+    config = load_config(runtime_root / "configs" / "standard.yaml")
     accuracy_min = config.evaluation.targets["accuracy"].min
     assert {
         "group_id": "model_architecture",
@@ -1103,8 +1108,22 @@ def test_dashboard_excludes_runs_before_orchestration_session(tmp_path) -> None:
 def test_dashboard_cli_build(tmp_path, capsys) -> None:
     state_dir = tmp_path / "state"
     _seed_registry(state_dir)
+    runtime_root = Path(__file__).resolve().parents[1]
 
-    assert main(["build", "--state-dir", str(state_dir), "--output-dir", str(tmp_path / "site")]) == 0
+    assert (
+        main(
+            [
+                "--config",
+                str(runtime_root / "configs" / "standard.yaml"),
+                "build",
+                "--state-dir",
+                str(state_dir),
+                "--output-dir",
+                str(tmp_path / "site"),
+            ]
+        )
+        == 0
+    )
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
     assert payload["database_path"].endswith("dashboard.db")
@@ -1245,6 +1264,66 @@ def test_merge_group_resolves_to_its_own_row_not_a_chain(tmp_path) -> None:
     assert meta["draw_from"] == ["data_augmentation"]
     assert meta["intent_label"] == "Merge goal"
     assert meta["preserve_metrics"] is True
+
+
+def test_merge_topology_prefers_persisted_merge_plan(tmp_path) -> None:
+    from hiagentresearch.src.dashboard.build import _lineage_topology
+
+    registry = Registry(tmp_path / "state")
+    registry.init()
+    registry.record_run(
+        run_id="gh_model",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="completed",
+        failure_class="none",
+        metrics={"accuracy": 0.95},
+        commit_sha="modelsha",
+    )
+    registry.record_run(
+        run_id="gh_data",
+        group_id="data_augmentation",
+        branch="research/data-augmentation",
+        status="completed",
+        failure_class="none",
+        metrics={"accuracy": 0.90},
+        commit_sha="datasha",
+    )
+    registry.record_run(
+        run_id="gh_merge",
+        group_id="merge_best",
+        branch="research/merge-best",
+        status="completed",
+        failure_class="none",
+        metrics={"accuracy": 0.96},
+        commit_sha="mergesha",
+    )
+    merge_plan = {
+        "base": {"source_group_id": "data_augmentation", "group_id": "data_augmentation", "commit_sha": "datasha"},
+        "fold_ins": [
+            {"source_group_id": "model_architecture", "group_id": "model_architecture", "commit_sha": "modelsha"}
+        ],
+        "no_ops": [],
+        "ranking_metric": "accuracy",
+        "policy": "best_commit",
+        "resolved_at": "2026-06-11T00:00:00+00:00",
+    }
+    registry.record_cycle_manifest(
+        run_id="gh_merge",
+        manifest_path=".hiagentresearch/cycles/merge_best/gh_merge.json",
+        manifest={"group_id": "merge_best", "loop_index": 1, "merge_plan": merge_plan},
+    )
+
+    snapshot = registry.dashboard_snapshot()
+    topology = _lineage_topology(_merge_topology_config(), registry=registry, cycles=snapshot["cycles"])
+    merge = next(m for m in topology["merge_groups"] if m["group_id"] == "merge_best")
+
+    assert [p["group_id"] for p in merge["participants"]] == [
+        "data_augmentation",
+        "model_architecture",
+    ]
+    assert merge["merge_plan"] == merge_plan
+    assert topology["groups"]["merge_best"]["draw_from"] == ["model_architecture"]
 
 
 def test_merge_with_three_lineages_has_two_integration_steps(tmp_path) -> None:

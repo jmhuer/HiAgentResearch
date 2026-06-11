@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { walkToNearestInScope } from "../hiagentresearch/src/dashboard/static/lineage_walk.js";
+import { mergeContributionEdges } from "../hiagentresearch/src/dashboard/static/merge_contributions.js";
 
 // A chain mirroring the hard case: an optimization leaf inheriting from a SELECT collapse whose
 // adopted commit belongs to a hidden leaf. nearest-first → L0.
@@ -72,4 +73,87 @@ test("baseline with no value returns null (nothing to connect to)", () => {
 test("empty chain returns null", () => {
   assert.equal(walkToNearestInScope([], { inScope: () => true, valueAt, baselineValue }), null);
   assert.equal(walkToNearestInScope(undefined, { inScope: () => true, valueAt, baselineValue }), null);
+});
+
+test("merge contribution arrows use per-cycle active_source targets", () => {
+  const edges = mergeContributionEdges({
+    grouped: {
+      merge_best: [
+        { run_id: "gh_merge_1", trajectory_x: 10, metric_value: 0.93 },
+        { run_id: "gh_merge_2", trajectory_x: 11, metric_value: 0.94 },
+      ],
+    },
+    selectIds: new Set(),
+    cycles: [
+      {
+        run_id: "gh_merge_2",
+        group_id: "merge_best",
+        merge_cycle_provenance: {
+          phase: "fold_in",
+          active_source: {
+            source_group_id: "source_b",
+            group_id: "source_b",
+            trajectory_step: 5,
+            commit_sha: "bsha",
+          },
+        },
+      },
+    ],
+    runsIdx: new Map([["gh_merge_1", {}], ["gh_merge_2", {}]]),
+    lineageParentsFor: (gid) => ({
+      primary: [],
+      secondary:
+        gid === "merge_best"
+          ? [{ group_id: "source_a", trajectory_step: 4, commit_sha: "asha" }]
+          : [],
+    }),
+    walkToNearestInScope,
+    deps: {
+      inScope: (gid) => gid === "source_b",
+      valueAt: (gid, step) => (gid === "source_b" && step === 5 ? 0.92 : null),
+      baselineValue,
+    },
+  });
+
+  assert.deepEqual(edges, [
+    [
+      { coord: [5, 0.92], name: "source_b" },
+      { coord: [11, 0.94], name: "merge_best" },
+    ],
+  ]);
+});
+
+test("recorded merge provenance suppresses fallback arrows for refine/no-op cycles", () => {
+  const edges = mergeContributionEdges({
+    grouped: {
+      merge_best: [{ run_id: "gh_merge_1", trajectory_x: 10, metric_value: 0.93 }],
+    },
+    selectIds: new Set(),
+    cycles: [
+      {
+        run_id: "gh_merge_1",
+        group_id: "merge_best",
+        merge_cycle_provenance: {
+          phase: "refine",
+          active_source: null,
+        },
+      },
+    ],
+    runsIdx: new Map([["gh_merge_1", {}]]),
+    lineageParentsFor: (gid) => ({
+      primary: [],
+      secondary:
+        gid === "merge_best"
+          ? [{ group_id: "source_a", trajectory_step: 4, commit_sha: "asha" }]
+          : [],
+    }),
+    walkToNearestInScope,
+    deps: {
+      inScope: (gid) => gid === "source_a",
+      valueAt: (gid, step) => (gid === "source_a" && step === 4 ? 0.91 : null),
+      baselineValue,
+    },
+  });
+
+  assert.deepEqual(edges, []);
 });

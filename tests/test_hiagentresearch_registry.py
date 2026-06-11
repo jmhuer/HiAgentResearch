@@ -219,6 +219,56 @@ def test_registry_records_research_outcome_and_experiment(tmp_path) -> None:
     assert summary[0]["metrics"]["accuracy"] == 0.99
 
 
+def test_registry_round_trips_merge_provenance_from_cycle_manifest(tmp_path) -> None:
+    registry = Registry(tmp_path)
+    registry.init()
+    registry.record_run(
+        run_id="gh_merge",
+        group_id="merge_best",
+        branch="research/merge-best",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.96},
+        commit_sha="mergesha",
+    )
+    merge_plan = {
+        "base": {"source_group_id": "a1", "group_id": "a1", "commit_sha": "base1"},
+        "fold_ins": [{"source_group_id": "a2", "group_id": "a2", "commit_sha": "fold2"}],
+        "no_ops": [
+            {"source_group_id": "a3", "group_id": "a1", "commit_sha": "base1", "reason": "same_as_base"}
+        ],
+        "ranking_metric": "accuracy",
+        "policy": "best_commit",
+        "resolved_at": "2026-06-11T00:00:00+00:00",
+    }
+    merge_cycle = {
+        "merge_group_id": "merge_best",
+        "loop_index": 1,
+        "active_source": {"source_group_id": "a2", "group_id": "a2", "commit_sha": "fold2"},
+        "phase": "fold_in",
+        "base_snapshot": {"source_group_id": "a1", "group_id": "a1", "commit_sha": "base1"},
+    }
+    registry.record_cycle_manifest(
+        run_id="gh_merge",
+        manifest_path=".hiagentresearch/cycles/merge_best/gh_merge.json",
+        manifest={
+            "group_id": "merge_best",
+            "loop_index": 1,
+            "merge_plan": merge_plan,
+            "merge_cycle_provenance": merge_cycle,
+        },
+    )
+
+    cycle = registry.cycle_for_run("gh_merge")
+    snapshot_cycle = registry.dashboard_snapshot()["cycles"][0]
+
+    assert cycle is not None
+    assert cycle["merge_plan"] == merge_plan
+    assert cycle["merge_cycle_provenance"] == merge_cycle
+    assert snapshot_cycle["merge_plan"] == merge_plan
+    assert snapshot_cycle["merge_cycle_provenance"] == merge_cycle
+
+
 def test_registry_v4_migrates_existing_database(tmp_path) -> None:
     db_path = tmp_path / "evals.db"
     conn = sqlite3.connect(db_path)

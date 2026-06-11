@@ -156,8 +156,8 @@ def _merge_stanza(bootstrap: BranchBootstrap) -> str:
     lines = []
     for source in bootstrap.merge_sources:
         sha = str(source.get("commit_sha", ""))[:7]
-        gid = source.get("group_id", "")
-        branch = source.get("branch", "")
+        gid = source.get("source_group_id") or source.get("group_id", "")
+        branch = source.get("source_branch") or source.get("branch", "")
         value = source.get("metric_value")
         suffix = f", {metric}={value:.4g}" if isinstance(value, (int, float)) else ""
         lines.append(f"- {gid} (branch {branch}) at {sha}{suffix}")

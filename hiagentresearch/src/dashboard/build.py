@@ -101,7 +101,7 @@ def build_from_registry(
     snapshot = registry.dashboard_snapshot()
     metric_targets = _metric_targets(loaded)
     snapshot["metric_targets"] = metric_targets
-    topology = _lineage_topology(loaded, registry=registry)
+    topology = _lineage_topology(loaded, registry=registry, cycles=snapshot.get("cycles", []))
     topology["inherit_anchors"] = _inherit_anchors_combined(
         loaded,
         registry,
@@ -209,6 +209,7 @@ def _write_dashboard_files(
         configured=list(config.dashboard.metrics),
         available=snapshot.get("metric_names", []),
     )
+    snapshot = {**snapshot, "metric_names": metric_names}
     summary = {
         "title": config.dashboard.title,
         "metric_names": metric_names,
@@ -345,7 +346,8 @@ def _create_dashboard_schema(conn: sqlite3.Connection) -> None:
                    r.correlation_id, r.created_at, m.metric_name, m.metric_value,
                    e.loop_index, e.lineage_mode, e.lineage_parent_group_id,
                    e.lineage_anchor_sha, e.lineage_anchor_policy,
-                   e.lineage_parent_anchor_step, e.lineage_anchor_source_group
+                   e.lineage_parent_anchor_step, e.lineage_anchor_source_group,
+                   e.merge_plan_json, e.merge_cycle_provenance_json
             FROM runs r
             JOIN metrics m ON r.run_id = m.run_id
             LEFT JOIN cycles e ON r.run_id = e.run_id;
@@ -606,7 +608,12 @@ def _prefer_github_run(candidate: dict[str, Any], incumbent: dict[str, Any]) -> 
     return str(candidate.get("run_id", "")) > str(incumbent.get("run_id", ""))
 
 
-def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | None = None) -> dict[str, Any]:
+def _lineage_topology(
+    config: HiAgentResearchConfig,
+    *,
+    registry: Registry | None = None,
+    cycles: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     group_meta = {
         group.id: {
             "mode": group.lineage.mode,
@@ -660,30 +667,43 @@ def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | Non
         # the merge cannot know its base/commits, so the UI shows placeholders. `planned`
         # carries the config-known lineage names for the no-resolution-yet case.
         participants: list[dict[str, Any]] = []
+        no_ops: list[dict[str, Any]] = []
+        merge_plan = _latest_merge_plan(cycles or [], group.id)
         if registry is not None:
-            try:
-                bootstrap = resolve_branch_bootstrap(group, config, registry=registry, git=git)
-            except LineageError:
-                bootstrap = None
-            if bootstrap is not None:
-                ordered = [{"group_id": bootstrap.parent_group_id, "commit_sha": bootstrap.start_ref}]
-                ordered += [
-                    {"group_id": str(s.get("group_id", "")), "commit_sha": str(s.get("commit_sha", ""))}
-                    for s in bootstrap.merge_sources
-                ]
-                for participant in ordered:
-                    gid = participant["group_id"]
-                    participant["known"] = bool(gid) and registry.last_github_run(gid) is not None
-                participants = ordered
+            if merge_plan:
+                participants = _participants_from_merge_plan(merge_plan, registry=registry)
+                no_ops = [_participant_from_merge_plan(source, registry=registry) for source in merge_plan.get("no_ops", [])]
+            else:
+                try:
+                    bootstrap = resolve_branch_bootstrap(group, config, registry=registry, git=git)
+                except LineageError:
+                    bootstrap = None
+                if bootstrap is not None:
+                    base = bootstrap.merge_base or {"group_id": bootstrap.parent_group_id, "commit_sha": bootstrap.start_ref}
+                    ordered = [_participant_from_merge_plan(base, registry=registry)]
+                    ordered += [
+                        _participant_from_merge_plan(source, registry=registry)
+                        for source in bootstrap.merge_sources
+                    ]
+                    no_ops = [
+                        _participant_from_merge_plan(source, registry=registry)
+                        for source in bootstrap.merge_no_ops
+                    ]
+                    participants = ordered
+            if participants:
                 # Keep the per-group draw_from in sync so Run Detail's "merges in:" tag
                 # shows the integration sources (Run Detail reads group_meta, not merge_groups).
-                group_meta[group.id]["draw_from"] = [p["group_id"] for p in participants[1:]]
+                group_meta[group.id]["draw_from"] = [
+                    p.get("source_group_id") or p.get("group_id") for p in participants[1:]
+                ]
         merge_groups.append(
             {
                 "group_id": group.id,
                 "branch": group.branch,
                 "planned_sources": planned,
                 "participants": participants,
+                "no_ops": no_ops,
+                "merge_plan": merge_plan,
                 # A select collapse (combine:false → loops==0) ADOPTS the single strongest leaf
                 # rather than integrating them. The dashboard renders it distinctly so the losing
                 # competitors aren't shown as folded-in merge steps.
@@ -723,6 +743,61 @@ def _lineage_topology(config: HiAgentResearchConfig, *, registry: Registry | Non
         "group_trajectory_winners": {},
         "lineage_winners": {},
     }
+
+
+def _latest_merge_plan(cycles: list[dict[str, Any]], group_id: str) -> dict[str, Any] | None:
+    matches = [
+        cycle.get("merge_plan")
+        for cycle in cycles
+        if str(cycle.get("group_id", "")) == group_id and isinstance(cycle.get("merge_plan"), dict)
+    ]
+    return matches[-1] if matches else None
+
+
+def _participants_from_merge_plan(
+    merge_plan: dict[str, Any],
+    *,
+    registry: Registry,
+) -> list[dict[str, Any]]:
+    base = merge_plan.get("base")
+    if not isinstance(base, dict):
+        return []
+    return [
+        _participant_from_merge_plan(base, registry=registry),
+        *[
+            _participant_from_merge_plan(source, registry=registry)
+            for source in merge_plan.get("fold_ins", [])
+            if isinstance(source, dict)
+        ],
+    ]
+
+
+def _participant_from_merge_plan(source: dict[str, Any], *, registry: Registry) -> dict[str, Any]:
+    group_id = str(source.get("group_id") or "")
+    source_group_id = str(source.get("source_group_id") or "")
+    participant = {
+        "group_id": group_id,
+        "source_group_id": source_group_id,
+        "branch": str(source.get("branch") or ""),
+        "source_branch": str(source.get("source_branch") or ""),
+        "commit_sha": str(source.get("commit_sha") or ""),
+        "metric_value": source.get("metric_value"),
+        "trajectory_step": source.get("trajectory_step"),
+        "known": _participant_known(source, registry=registry),
+    }
+    if source.get("reason"):
+        participant["reason"] = str(source.get("reason"))
+    return participant
+
+
+def _participant_known(source: dict[str, Any], *, registry: Registry) -> bool:
+    commit_sha = str(source.get("commit_sha") or "")
+    if not commit_sha:
+        return False
+    for gid in (str(source.get("group_id") or ""), str(source.get("source_group_id") or "")):
+        if gid and registry.last_github_run(gid) is not None:
+            return True
+    return False
 
 
 def _area_lineage(config: HiAgentResearchConfig) -> dict[str, Any]:

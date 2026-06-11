@@ -34,7 +34,10 @@ class BranchBootstrap:
     # Merge groups only: the OTHER lineage winners to fold in, ranked best→worst.
     # Each entry: {"group_id", "branch", "commit_sha", "metric_value"}. The branch
     # starts from the strongest (parent_group_id / start_ref); these are integrated.
+    merge_base: dict | None = None
     merge_sources: tuple[dict, ...] = ()
+    merge_no_ops: tuple[dict, ...] = ()
+    merge_requested_sources: tuple[str, ...] = ()
 
 
 def resolve_branch_bootstrap(
@@ -165,8 +168,10 @@ def _resolve_merge_bootstrap(
         owner = anchor.source_group_id
         resolved.append(
             {
+                "source_group_id": gid,
                 "group_id": owner,
                 "branch": config.group_by_id(owner).branch if owner else "",
+                "source_branch": config.group_by_id(gid).branch,
                 "commit_sha": anchor.ref,
                 "metric_value": anchor.metric_value,
                 # Global axis position of the source's winning commit, so the merge can be
@@ -192,11 +197,19 @@ def _resolve_merge_bootstrap(
     # the base. This subsumes the old "group_id is None" (frozen L0) guard — L0 is upstream of
     # everything — into the single graph rule, and is direction/policy agnostic.
     base_ancestors = _lineage_ancestor_group_ids(config, base["group_id"]) if base["group_id"] else set()
-    merge_sources = tuple(
-        s
-        for s in rest
-        if s["group_id"] and _area_result_node(config, s["group_id"]) not in base_ancestors
-    )
+    fold_ins: list[dict] = []
+    no_ops: list[dict] = []
+    seen_fold_keys = {_participant_key(base)}
+    for source in rest:
+        reason = _merge_no_op_reason(source=source, base=base, base_ancestors=base_ancestors, config=config)
+        key = _participant_key(source)
+        if not reason and key in seen_fold_keys:
+            reason = "duplicate_source"
+        if reason:
+            no_ops.append({**source, "reason": reason})
+            continue
+        seen_fold_keys.add(key)
+        fold_ins.append(source)
     return BranchBootstrap(
         branch=group.branch,
         mode="inherit",
@@ -206,8 +219,40 @@ def _resolve_merge_bootstrap(
         anchor_metric=metric,
         parent_anchor_step=base.get("trajectory_step"),
         anchor_source_group_id=base["group_id"],
-        merge_sources=merge_sources,
+        merge_base=base,
+        merge_sources=tuple(fold_ins),
+        merge_no_ops=tuple(no_ops),
+        merge_requested_sources=tuple(source_ids),
     )
+
+
+def _participant_key(source: dict) -> tuple[str, str]:
+    group_id = str(source.get("group_id") or "")
+    commit_sha = str(source.get("commit_sha") or "").lower()
+    return group_id, commit_sha
+
+
+def _merge_no_op_reason(
+    *,
+    source: dict,
+    base: dict,
+    base_ancestors: set[str],
+    config: HiAgentResearchConfig,
+) -> str:
+    group_id = str(source.get("group_id") or "")
+    if not group_id:
+        return "baseline"
+    if _same_commit(str(source.get("commit_sha") or ""), str(base.get("commit_sha") or "")):
+        return "same_as_base"
+    if _area_result_node(config, group_id) in base_ancestors:
+        return "ancestor_of_base"
+    return ""
+
+
+def _same_commit(left: str, right: str) -> bool:
+    left = left.strip().lower()
+    right = right.strip().lower()
+    return bool(left and right and (left == right or left.startswith(right) or right.startswith(left)))
 
 
 def _resolve_inherit_ref(

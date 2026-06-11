@@ -222,6 +222,66 @@ def test_record_cycle_manifest_persists_parent_anchor_step(tmp_path) -> None:
     assert cycle["lineage_anchor_source_group"] == "model_architecture"
 
 
+def test_merge_drops_sources_that_resolve_to_same_base_commit(tmp_path) -> None:
+    registry = Registry(tmp_path / "state")
+    registry.init()
+    for run_id, group_id, accuracy, sha in (
+        ("gh_a1", "a1", 0.90, "sharedsha"),
+        ("gh_a2", "a2", 0.89, "sharedsha"),
+    ):
+        registry.record_run(
+            run_id=run_id,
+            group_id=group_id,
+            branch=f"research/{group_id}",
+            status="completed",
+            failure_class="none",
+            metrics={"accuracy": accuracy},
+            commit_sha=sha,
+        )
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        policy_modes={"explore": "Explore.", "exploit": "Exploit."},
+        orchestration=OrchestrationConfig(execution_waves=[["a1", "a2"], ["merge_best"]]),
+        research_groups=[
+            _group("a1"),
+            _group("a2"),
+            ResearchGroupConfig(
+                id="merge_best",
+                branch="research/merge-best",
+                policy_mode="exploit",
+                task_kind="merge",
+                lineage=LineageConfig(
+                    mode="inherit",
+                    inherit_from="a1",
+                    draw_from=["a2"],
+                    anchor_metric="accuracy",
+                ),
+            ),
+        ],
+    )
+
+    bootstrap = resolve_branch_bootstrap(
+        config.group_by_id("merge_best"),
+        config,
+        registry=registry,
+        git=GitService(tmp_path),
+    )
+
+    assert bootstrap.parent_group_id == "a1"
+    assert bootstrap.start_ref == "sharedsha"
+    assert bootstrap.merge_sources == ()
+    assert len(bootstrap.merge_no_ops) == 1
+    assert bootstrap.merge_no_ops[0]["source_group_id"] == "a2"
+    assert bootstrap.merge_no_ops[0]["group_id"] == "a2"
+    assert bootstrap.merge_no_ops[0]["reason"] == "same_as_base"
+
+
 def test_best_commit_prefers_parent_l0_when_baseline_is_higher(monkeypatch, tmp_path) -> None:
     def fake_run(args, **kwargs):
         if args[1:] == ["rev-parse", "main"]:

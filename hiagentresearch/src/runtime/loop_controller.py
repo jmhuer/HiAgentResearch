@@ -165,6 +165,8 @@ class CycleManifest:
     lineage_anchor_policy: str | None
     lineage_parent_anchor_step: int | None
     lineage_anchor_source_group: str | None
+    merge_plan: dict | None = None
+    merge_cycle_provenance: dict | None = None
     lineage_baseline_snapshot: dict | None = None
     schema_version: int = CYCLE_MANIFEST_SCHEMA_VERSION
 
@@ -193,6 +195,10 @@ class CycleManifest:
         }
         if self.lineage_baseline_snapshot is not None:
             payload["lineage_baseline_snapshot"] = self.lineage_baseline_snapshot
+        if self.merge_plan is not None:
+            payload["merge_plan"] = self.merge_plan
+        if self.merge_cycle_provenance is not None:
+            payload["merge_cycle_provenance"] = self.merge_cycle_provenance
         return payload
 
 
@@ -263,6 +269,7 @@ def run_loops(
                 "lineage_anchor_policy": bootstrap.anchor_policy,
                 "lineage_parent_anchor_step": bootstrap.parent_anchor_step,
                 "lineage_anchor_source_group": bootstrap.anchor_source_group_id,
+                "merge_plan": _merge_plan_snapshot(bootstrap, resolved_at=utc_now_iso()),
             },
         )
         return LoopSummary(
@@ -582,6 +589,8 @@ def _write_cycle_manifest(
         lineage_anchor_policy=bootstrap.anchor_policy,
         lineage_parent_anchor_step=bootstrap.parent_anchor_step,
         lineage_anchor_source_group=bootstrap.anchor_source_group_id,
+        merge_plan=_merge_plan_snapshot(bootstrap, resolved_at=utc_now_iso()),
+        merge_cycle_provenance=_merge_cycle_provenance(bootstrap, group_id=group_id, loop_index=loop_index),
         lineage_baseline_snapshot=lineage_baseline_snapshot,
     ).to_dict()
     path = CYCLE_MANIFEST_ROOT / group_id / f"{local_run_id}.json"
@@ -589,6 +598,57 @@ def _write_cycle_manifest(
     absolute_path.parent.mkdir(parents=True, exist_ok=True)
     absolute_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return str(path), manifest
+
+
+def _merge_plan_snapshot(bootstrap: BranchBootstrap, *, resolved_at: str) -> dict | None:
+    if not bootstrap.merge_base:
+        return None
+    return {
+        "base": _merge_participant_payload(bootstrap.merge_base),
+        "fold_ins": [_merge_participant_payload(source) for source in bootstrap.merge_sources],
+        "no_ops": [_merge_participant_payload(source) for source in bootstrap.merge_no_ops],
+        "ranking_metric": bootstrap.anchor_metric,
+        "policy": bootstrap.anchor_policy,
+        "resolved_at": resolved_at,
+        "requested_sources": list(bootstrap.merge_requested_sources),
+    }
+
+
+def _merge_cycle_provenance(
+    bootstrap: BranchBootstrap,
+    *,
+    group_id: str,
+    loop_index: int,
+) -> dict | None:
+    if not bootstrap.merge_base:
+        return None
+    active = bootstrap.merge_sources[loop_index - 1] if loop_index <= len(bootstrap.merge_sources) else None
+    return {
+        "merge_group_id": group_id,
+        "loop_index": loop_index,
+        "active_source": _merge_participant_payload(active) if active else None,
+        "phase": "fold_in" if active else "refine",
+        "base_snapshot": _merge_participant_payload(bootstrap.merge_base),
+    }
+
+
+def _merge_participant_payload(source: dict | None) -> dict | None:
+    if not source:
+        return None
+    payload = {
+        "source_group_id": str(source.get("source_group_id") or ""),
+        "group_id": str(source.get("group_id") or ""),
+        "branch": str(source.get("branch") or ""),
+        "source_branch": str(source.get("source_branch") or ""),
+        "commit_sha": str(source.get("commit_sha") or ""),
+        "trajectory_step": source.get("trajectory_step"),
+    }
+    metric_value = source.get("metric_value")
+    if isinstance(metric_value, (int, float)):
+        payload["metric_value"] = float(metric_value)
+    if source.get("reason"):
+        payload["reason"] = str(source.get("reason"))
+    return payload
 
 
 def _read_json(path: Path) -> dict:

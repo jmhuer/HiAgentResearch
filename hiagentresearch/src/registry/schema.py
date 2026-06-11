@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS cycles (
     lineage_anchor_policy TEXT,
     lineage_parent_anchor_step INTEGER,
     lineage_anchor_source_group TEXT,
+    merge_plan_json TEXT,
+    merge_cycle_provenance_json TEXT,
     created_at TEXT NOT NULL
 )
 """

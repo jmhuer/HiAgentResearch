@@ -1,4 +1,5 @@
 import { walkToNearestInScope } from "./lineage_walk.js";
+import { mergeContributionEdges } from "./merge_contributions.js";
 
 const SQL_HTTPVFS_URL = "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/+esm";
 const ECHARTS_URL = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.esm.min.js";
@@ -259,35 +260,15 @@ function mergeContributionSeries(grouped, metricName) {
       .map((mg) => mg.group_id),
   );
   const runsIdx = dashboardIndexes().runs;
-  const edges = [];
-  for (const [mergeId, rows] of Object.entries(grouped)) {
-    if (selectIds.has(mergeId)) continue;
-    const foldIns = lineageParentsFor(mergeId).secondary || [];
-    if (!foldIns.length) continue;
-    // The arrow points at the merge's FIRST integration cycle — its earliest real own run — NOT the
-    // inherited base node (the strongest source it started from, drawn as the merge's trajectory
-    // start) nor any synthetic connector. Fold-in happens DURING the merge's loops, so this is where
-    // it begins; and it is consistent whether or not the merge plots a synthetic base node (an area
-    // collapse does; the final_merge doesn't). Real runs are the ones present in the runs index;
-    // the base/path/walk-origin nodes carry placeholder ids and are excluded.
-    const mergeRuns = rows.filter(
-      (row) => runsIdx.has(row.run_id) && Number.isFinite(Number(row.trajectory_x)),
-    );
-    if (!mergeRuns.length) continue;
-    const firstCycle = mergeRuns.reduce((a, b) => (Number(a.trajectory_x) <= Number(b.trajectory_x) ? a : b));
-    const target = { x: Number(firstCycle.trajectory_x), y: Number(firstCycle.metric_value) };
-    if (!Number.isFinite(target.y)) continue;
-    for (const fold of foldIns) {
-      const origin = walkToNearestInScope([fold, ...lineageParentsFor(fold.group_id).primary], deps);
-      if (!origin || origin.source_group_id !== fold.group_id) continue; // only when the source itself is in view
-      const from = { x: Number(origin.trajectory_x), y: Number(origin.metric_value) };
-      if (!Number.isFinite(from.y) || (from.x === target.x && from.y === target.y)) continue;
-      edges.push([
-        { coord: [from.x, from.y], name: fold.group_id },
-        { coord: [target.x, target.y], name: mergeId },
-      ]);
-    }
-  }
+  const edges = mergeContributionEdges({
+    grouped,
+    selectIds,
+    cycles: dashboardData.cycles || [],
+    runsIdx,
+    lineageParentsFor,
+    walkToNearestInScope,
+    deps,
+  });
   if (!edges.length) return null;
   return {
     name: MERGE_CONTRIB_SERIES,
@@ -853,6 +834,10 @@ function renderMergeGroups() {
       const id = String(merge.group_id);
       const winner = groupWinners[id] || {};
       const doneCount = runs.filter((r) => String(r.group_id) === id).length;
+      const noOps = merge.no_ops || [];
+      const noOpCaption = noOps.length
+        ? ` &middot; ${noOps.length} no-op ${noOps.length === 1 ? "source" : "sources"}`
+        : "";
 
       // Ordered participants, base first (only meaningful once every source lineage has a
       // real run — the base and the integration order aren't known before then).
@@ -861,13 +846,14 @@ function renderMergeGroups() {
         sha: String(p.commit_sha || ""),
         known: !!p.known,
       }));
-      // How many lineages this merge combines is known from config even before any run.
-      const sourceCount = parts.length || (merge.planned_sources || []).length;
+      // How many lineages this merge considers is known from config even before any run. Once
+      // resolved, no-op sources still count as considered, but they do not become merge steps.
+      const sourceCount = Math.max(parts.length + noOps.length, (merge.planned_sources || []).length);
       if (!sourceCount) {
         return "";
       }
-      const stepCount = Math.max(0, sourceCount - 1); // N lineages collapse via N-1 steps
       const resolved = parts.length > 0 && parts.every((p) => p.known);
+      const stepCount = resolved ? Math.max(0, parts.length - 1) : Math.max(0, sourceCount - 1);
 
       if (merge.is_select) {
         // Select collapse: ADOPT the single strongest leaf; the others competed and were
@@ -884,10 +870,10 @@ function renderMergeGroups() {
           // "strongest of N" in the caption already says it, and the dimming reads as not-adopted.
           const competedNodes = competed.map((c) => competedNode(c.name, c.sha));
           selectPath = [selNode, ...competedNodes].join(" ");
-          selectCaption = `<span class="lineage-star">★</span> selected <strong>${escapeHtml(selected.name)}</strong> @ ${escapeHtml(shortSha(sha))} &middot; strongest of ${sourceCount}`;
+          selectCaption = `<span class="lineage-star">★</span> selected <strong>${escapeHtml(selected.name)}</strong> @ ${escapeHtml(shortSha(sha))} &middot; strongest of ${sourceCount}${noOpCaption}`;
         } else {
           selectPath = pendingNode("select · TBD", "the strongest of the area's leaves is adopted after the leaf runs finish");
-          selectCaption = `adopts the strongest of ${sourceCount} after the leaf runs finish`;
+          selectCaption = `adopts the strongest of ${sourceCount} after the leaf runs finish${noOpCaption}`;
         }
         return `
         <article class="lineage-chain lineage-merge-chain">
@@ -913,9 +899,11 @@ function renderMergeGroups() {
         // Same caption shape as a lineage row: "★ top commit <sha> · <detail>". The active
         // tab already names which merge this is, so we don't repeat the group id here.
         caption =
-          doneCount > 0 && winner.commit_sha
+          steps.length === 0
+            ? `no distinct merge steps${noOpCaption}`
+            : doneCount > 0 && winner.commit_sha
             ? `<span class="lineage-star">★</span> top commit <strong>${escapeHtml(shortSha(winner.commit_sha))}</strong> &middot; ${Math.min(doneCount, steps.length)}/${steps.length} merges`
-            : `${steps.length} merge ${stepWord} planned`;
+            : `${steps.length} merge ${stepWord} planned${noOpCaption}`;
       } else {
         // Unknown: we know HOW MANY lineages will merge, but not which is the base, which
         // are the sources, or the order — so show generic positional placeholders.
@@ -924,7 +912,7 @@ function renderMergeGroups() {
           pendingNode(`merge ${i + 1}`, "source and order resolved after the lineage runs finish"),
         );
         path = [baseNode, ...stepNodes].join('<span class="lineage-arrow">→</span>');
-        caption = `base + ${stepCount} merge ${stepWord}, resolved after the lineage runs finish`;
+        caption = `base + ${stepCount} merge ${stepWord}, resolved after the lineage runs finish${noOpCaption}`;
       }
 
       return `
@@ -1172,13 +1160,20 @@ function renderRunDetail() {
     ? (mergeEntry.participants || [])
         .slice(1)
         .filter((p) => p && p.group_id)
-        .map((p) => `${p.group_id}${p.commit_sha ? " @" + String(p.commit_sha).slice(0, 7) : ""}`)
+        .map((p) => `${p.source_group_id || p.group_id}${p.commit_sha ? " @" + String(p.commit_sha).slice(0, 7) : ""}`)
+    : [];
+  const noOps = mergeEntry
+    ? (mergeEntry.no_ops || [])
+        .filter((p) => p && (p.source_group_id || p.group_id))
+        .map((p) => `${p.source_group_id || p.group_id}${p.reason ? " (" + p.reason + ")" : ""}`)
     : [];
   const mergeTag = contributors.length
     ? `<span class="tag">contributors: ${escapeHtml(contributors.join(", "))}</span>`
-    : drawFrom.length
-      ? `<span class="tag">merges in: ${escapeHtml(drawFrom.join(", "))} (pending)</span>`
-      : "";
+    : noOps.length
+      ? `<span class="tag">no distinct fold-ins: ${escapeHtml(noOps.join(", "))}</span>`
+      : drawFrom.length
+        ? `<span class="tag">merges in: ${escapeHtml(drawFrom.join(", "))} (pending)</span>`
+        : "";
   const tags = [
     `<span class="badge ${outcomeClass(outcome?.research_outcome)}">${escapeHtml(displayResearchOutcome(outcome?.research_outcome))}</span>`,
     `<span class="tag">failure: ${escapeHtml(run.failure_class || "none")}</span>`,
@@ -1875,6 +1870,11 @@ function parseCycle(row) {
     ...row,
     target_files: parseJson(row.target_files_json, row.target_files || []),
     planned_code_changes: parseJson(row.planned_code_changes_json, row.planned_code_changes || []),
+    merge_plan: parseJson(row.merge_plan_json, row.merge_plan || null),
+    merge_cycle_provenance: parseJson(
+      row.merge_cycle_provenance_json,
+      row.merge_cycle_provenance || null,
+    ),
   };
 }
 

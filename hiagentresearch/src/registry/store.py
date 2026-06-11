@@ -12,7 +12,7 @@ from hiagentresearch.src.orchestration.session import SESSION_META_KEY
 from hiagentresearch.src.registry import schema
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Reserved group id for the frozen L0 baseline run. It is intentionally empty so
 # the baseline run never attaches to a configured research group's series (the
@@ -105,6 +105,8 @@ class Registry:
             ("lineage_anchor_policy", "ALTER TABLE cycles ADD COLUMN lineage_anchor_policy TEXT"),
             ("lineage_parent_anchor_step", "ALTER TABLE cycles ADD COLUMN lineage_parent_anchor_step INTEGER"),
             ("lineage_anchor_source_group", "ALTER TABLE cycles ADD COLUMN lineage_anchor_source_group TEXT"),
+            ("merge_plan_json", "ALTER TABLE cycles ADD COLUMN merge_plan_json TEXT"),
+            ("merge_cycle_provenance_json", "ALTER TABLE cycles ADD COLUMN merge_cycle_provenance_json TEXT"),
         ):
             if column not in cycle_columns:
                 conn.execute(ddl)
@@ -420,9 +422,11 @@ class Registry:
                     lineage_anchor_policy,
                     lineage_parent_anchor_step,
                     lineage_anchor_source_group,
+                    merge_plan_json,
+                    merge_cycle_provenance_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -440,6 +444,12 @@ class Registry:
                     optional_str(manifest.get("lineage_anchor_policy")),
                     as_int_or_none(manifest.get("lineage_parent_anchor_step")),
                     optional_str(manifest.get("lineage_anchor_source_group")),
+                    json.dumps(manifest.get("merge_plan"), sort_keys=True) if manifest.get("merge_plan") else None,
+                    (
+                        json.dumps(manifest.get("merge_cycle_provenance"), sort_keys=True)
+                        if manifest.get("merge_cycle_provenance")
+                        else None
+                    ),
                     now,
                 ),
             )
@@ -931,4 +941,18 @@ def _cycle_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     payload = _row_to_dict(row)
     payload["target_files"] = json.loads(str(payload.pop("target_files_json")))
     payload["planned_code_changes"] = json.loads(str(payload.pop("planned_code_changes_json")))
+    payload["merge_plan"] = _json_object_or_none(payload.pop("merge_plan_json", None))
+    payload["merge_cycle_provenance"] = _json_object_or_none(
+        payload.pop("merge_cycle_provenance_json", None)
+    )
     return payload
+
+
+def _json_object_or_none(value: Any) -> dict[str, Any] | None:
+    if not value:
+        return None
+    try:
+        payload = json.loads(str(value))
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
