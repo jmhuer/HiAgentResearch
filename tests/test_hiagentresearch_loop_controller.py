@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from hiagentresearch.src.core.config import load_config
+from hiagentresearch.src.core.config import HiAgentResearchConfig, ResearchGroupConfig, load_config
 from hiagentresearch.src.github.actions import GitHubRun
 from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot
 from hiagentresearch.src.runtime.loop_controller import (
@@ -9,6 +9,7 @@ from hiagentresearch.src.runtime.loop_controller import (
     _preserve_parallel_failure_artifacts,
     _run_group_capture,
     run_loops,
+    run_loops_all,
 )
 from hiagentresearch.src.registry.store import Registry
 from hiagentresearch.src.core.models import IntentPacket
@@ -504,6 +505,77 @@ def test_preserve_parallel_failure_artifacts_copies_worktree_runs(monkeypatch, t
     ] == "sdk_run_123"
     assert (copied / "worktree_status.txt").exists()
     assert (copied / "worktree_diff.patch").exists()
+
+
+def test_parallel_loops_all_checks_out_configured_baseline(monkeypatch, tmp_path) -> None:
+    """Parallel orchestration must respect the configured baseline branch.
+
+    Layer-specific configs can use non-default baselines (for example main-layer2);
+    checking out a hardcoded default branch before creating worktrees drops the files
+    those configs depend on.
+    """
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.ensure_cursor_api_key", lambda: None)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.ensure_baseline_snapshot", lambda *a, **k: None)
+
+    checked_out: list[str] = []
+
+    class FakeGitService:
+        def __init__(self, repo_root: Path) -> None:
+            self.repo_root = repo_root
+
+        def checkout(self, branch: str) -> None:
+            checked_out.append(branch)
+
+    class FakeWorktreeManager:
+        def __init__(self, worktree_root: str) -> None:
+            self.worktree_root = worktree_root
+            self.removed = False
+
+        def remove_all(self) -> None:
+            self.removed = True
+
+    parallel_calls: list[list[str]] = []
+
+    def fake_run_wave_parallel(wave, **kwargs):
+        parallel_calls.append(list(wave))
+        return 0
+
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.GitService", FakeGitService)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.WorktreeManager", FakeWorktreeManager)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller._run_wave_parallel", fake_run_wave_parallel)
+
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        policy_modes={"explore": "Explore."},
+        orchestration={
+            "baseline_ref": "main-layer2",
+            "execution_waves": [["g1", "g2"]],
+            "worktree_root": ".hiagentresearch/worktrees",
+        },
+        research_groups=[
+            ResearchGroupConfig(id="g1", branch="research/g1", objective="t", policy_mode="explore"),
+            ResearchGroupConfig(id="g2", branch="research/g2", objective="t", policy_mode="explore"),
+        ],
+    )
+
+    assert run_loops_all(
+        loops=1,
+        workdir=tmp_path,
+        agent_model="composer-2.5",
+        config=config,
+        parallel=True,
+    ) == 0
+
+    assert checked_out == ["main-layer2"]
+    assert parallel_calls == [["g1", "g2"]]
 
 
 def test_ensure_baseline_snapshot_uses_github_eval_node(tmp_path) -> None:

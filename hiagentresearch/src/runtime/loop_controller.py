@@ -706,7 +706,7 @@ def run_loops_all(
     summaries: list[LoopSummary] = []
     worktrees = WorktreeManager(worktree_root=loaded_config.orchestration.worktree_root)
     if parallel:
-        GitService(REPO_ROOT).checkout("main")
+        GitService(REPO_ROOT).checkout(loaded_config.orchestration.baseline_ref)
     try:
         for wave in loaded_config.execution_waves():
             if parallel and len(wave) > 1:

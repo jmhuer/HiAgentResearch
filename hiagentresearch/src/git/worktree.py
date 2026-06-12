@@ -32,8 +32,9 @@ class WorktreeManager:
         if self.git.branch_exists(branch):
             self._run(["worktree", "add", str(path), branch])
         else:
-            ref = start_ref or "main"
-            self._run(["worktree", "add", "-b", branch, str(path), ref])
+            if not start_ref:
+                raise GitServiceError(f"cannot create worktree for {branch}: missing start_ref")
+            self._run(["worktree", "add", "-b", branch, str(path), start_ref])
         if sync_to_ref and start_ref:
             GitService(path).sync_to_ref(start_ref)
         return path

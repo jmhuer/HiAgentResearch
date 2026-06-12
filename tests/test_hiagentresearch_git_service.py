@@ -3,6 +3,7 @@ import subprocess
 import pytest
 
 from hiagentresearch.src.git.service import GitService, GitServiceError
+from hiagentresearch.src.git.worktree import WorktreeManager
 
 
 def test_git_service_parses_status_and_staged_files(monkeypatch, tmp_path) -> None:
@@ -58,6 +59,36 @@ def test_git_service_creates_missing_branch_from_main(monkeypatch, tmp_path) -> 
     service.checkout_or_create("research/demo", base_branch="main")
 
     assert ["git", "checkout", "-b", "research/demo", "main"] in calls
+
+
+def test_worktree_requires_start_ref_for_new_branch(monkeypatch, tmp_path) -> None:
+    def fake_run(args, **kwargs):
+        if args[1:] == ["rev-parse", "--verify", "research/demo"]:
+            return subprocess.CompletedProcess(args, 1, "", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manager = WorktreeManager(repo_root=tmp_path)
+
+    with pytest.raises(GitServiceError, match="missing start_ref"):
+        manager.ensure("demo", "research/demo")
+
+
+def test_worktree_creates_new_branch_from_start_ref(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[1:] == ["rev-parse", "--verify", "research/demo"]:
+            return subprocess.CompletedProcess(args, 1, "", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manager = WorktreeManager(repo_root=tmp_path)
+
+    manager.ensure("demo", "research/demo", start_ref="main-layer2")
+
+    assert ["git", "worktree", "add", "-b", "research/demo", str(manager.path_for("demo")), "main-layer2"] in calls
 
 
 def test_git_service_syncs_existing_branch_to_start_ref(monkeypatch, tmp_path) -> None:
