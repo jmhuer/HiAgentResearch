@@ -92,6 +92,10 @@ class LineageConfig(BaseModel):
 
 class OrchestrationConfig(BaseModel):
     baseline_ref: str = "main"
+    # Research group whose top_commit_policy winner is promoted onto baseline_ref by
+    # scripts/promote_research_baseline.sh. Empty → auto-pick the highest anchor metric
+    # across configured groups with scored CI runs.
+    promote_from_group: str = ""
     execution_waves: list[list[str]] | None = None
     execution_order: list[str] | None = None
     max_parallel_groups: int = 2
