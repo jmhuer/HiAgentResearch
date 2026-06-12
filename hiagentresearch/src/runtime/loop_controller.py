@@ -705,22 +705,25 @@ def run_loops_all(
     ensure_baseline_snapshot(registry, loaded_config)
     summaries: list[LoopSummary] = []
     worktrees = WorktreeManager(worktree_root=loaded_config.orchestration.worktree_root)
+    max_parallel_groups = max(1, loaded_config.orchestration.max_parallel_groups)
     if parallel:
         GitService(REPO_ROOT).checkout(loaded_config.orchestration.baseline_ref)
     try:
         for wave in loaded_config.execution_waves():
             if parallel and len(wave) > 1:
-                exit_code = _run_wave_parallel(
-                    wave,
-                    loops=loops,
-                    agent_model=agent_model,
-                    config=loaded_config,
-                    stop_on_success=stop_on_success,
-                    worktrees=worktrees,
-                )
-                if exit_code != 0:
-                    print(json.dumps({"ok": False, "reason": "parallel wave failed", "summaries": []}, indent=2))
-                    return exit_code
+                for start in range(0, len(wave), max_parallel_groups):
+                    wave_chunk = wave[start : start + max_parallel_groups]
+                    exit_code = _run_wave_parallel(
+                        wave_chunk,
+                        loops=loops,
+                        agent_model=agent_model,
+                        config=loaded_config,
+                        stop_on_success=stop_on_success,
+                        worktrees=worktrees,
+                    )
+                    if exit_code != 0:
+                        print(json.dumps({"ok": False, "reason": "parallel wave failed", "summaries": []}, indent=2))
+                        return exit_code
                 continue
             for group_id in wave:
                 summary = run_loops(

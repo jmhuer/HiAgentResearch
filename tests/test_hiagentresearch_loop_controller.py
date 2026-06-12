@@ -578,6 +578,68 @@ def test_parallel_loops_all_checks_out_configured_baseline(monkeypatch, tmp_path
     assert parallel_calls == [["g1", "g2"]]
 
 
+def test_parallel_loops_all_honors_max_parallel_groups(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.ensure_cursor_api_key", lambda: None)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.ensure_baseline_snapshot", lambda *a, **k: None)
+
+    class FakeGitService:
+        def __init__(self, repo_root: Path) -> None:
+            self.repo_root = repo_root
+
+        def checkout(self, branch: str) -> None:
+            self.branch = branch
+
+    class FakeWorktreeManager:
+        def __init__(self, worktree_root: str) -> None:
+            self.worktree_root = worktree_root
+
+        def remove_all(self) -> None:
+            pass
+
+    parallel_calls: list[list[str]] = []
+
+    def fake_run_wave_parallel(wave, **kwargs):
+        parallel_calls.append(list(wave))
+        return 0
+
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.GitService", FakeGitService)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.WorktreeManager", FakeWorktreeManager)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller._run_wave_parallel", fake_run_wave_parallel)
+
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        policy_modes={"explore": "Explore."},
+        orchestration={
+            "baseline_ref": "main-layer2",
+            "execution_waves": [["g1", "g2", "g3"]],
+            "max_parallel_groups": 2,
+        },
+        research_groups=[
+            ResearchGroupConfig(id="g1", branch="research/g1", objective="t", policy_mode="explore"),
+            ResearchGroupConfig(id="g2", branch="research/g2", objective="t", policy_mode="explore"),
+            ResearchGroupConfig(id="g3", branch="research/g3", objective="t", policy_mode="explore"),
+        ],
+    )
+
+    assert run_loops_all(
+        loops=1,
+        workdir=tmp_path,
+        agent_model="composer-2.5",
+        config=config,
+        parallel=True,
+    ) == 0
+
+    assert parallel_calls == [["g1", "g2"], ["g3"]]
+
+
 def test_ensure_baseline_snapshot_uses_github_eval_node(tmp_path) -> None:
     registry = Registry(tmp_path / ".hiagentresearch" / "state")
     registry.init()
