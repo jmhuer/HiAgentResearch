@@ -136,6 +136,7 @@ def run_cursor_agent_cycle(
         group=group,
         intent_packet=intent_packet,
         run_id=run_id,
+        checkout_root=workdir.resolve(),
         lineage_bootstrap=lineage_bootstrap,
         score_context=score_context,
     )

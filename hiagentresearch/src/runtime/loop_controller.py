@@ -18,6 +18,7 @@ from typing import Callable, Protocol
 
 from hiagentresearch.src.core.coerce import as_string_list
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
+from hiagentresearch.src.core.guidance import materialize_framework_guidance
 from hiagentresearch.src.github.ingest import ingest
 from hiagentresearch.src.agents.credentials import ensure_cursor_api_key
 from hiagentresearch.src.agents.task_contract import task_contract
@@ -26,6 +27,7 @@ from hiagentresearch.src.git.worktree import WorktreeManager
 from hiagentresearch.src.lineage.resolve import BranchBootstrap, resolve_branch_bootstrap
 from hiagentresearch.src.github.actions import GitHubActionsService, gh_repo_slug, load_run_meta
 from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot, install_dependency_files
+from hiagentresearch.src.project.docs import write_workspace_agents
 from hiagentresearch.src.paths import (
     REPO_ROOT,
     is_linked_git_worktree,
@@ -776,6 +778,8 @@ def _run_wave_parallel(
             start_ref=bootstrap.start_ref,
             sync_to_ref=bootstrap.mode == "inherit",
         )
+        materialize_framework_guidance(root=worktree_path)
+        write_workspace_agents(config, root=worktree_path)
         cmd = [
             sys.executable,
             "-m",

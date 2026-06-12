@@ -1,9 +1,8 @@
 """Generate the workspace-facing AGENTS.md from config.
 
-The workspace AGENTS.md is the single, honest description of the agent's
-contract for a project: the workspace is theirs, the eval zone is read-only, and
-they are told the exact command and targets that will judge them. It is derived
-from the active config file so it stays correct when targets or the eval command change.
+The workspace AGENTS.md owns project-specific guidance: editable paths,
+dependency files, eval command/metrics, and research expectations. Framework
+cycle mechanics stay in the framework AGENTS.md.
 """
 
 from __future__ import annotations
@@ -112,8 +111,8 @@ editable workspace for this research phase:
 
 {expectation_lines}
 
-For how to work a cycle (planning, self-review, smoke tests, what counts as a
-regression, git boundaries), follow the framework contract in `{framework_guidance}`.
+For cycle mechanics, planning artifacts, self-review, and git boundaries,
+follow the framework contract in `{framework_guidance}`.
 """
 
 

@@ -8,6 +8,7 @@ from hiagentresearch.src.runtime.loop_controller import (
     _extract_last_json_object,
     _preserve_parallel_failure_artifacts,
     _run_group_capture,
+    _run_wave_parallel,
     run_loops,
     run_loops_all,
 )
@@ -576,6 +577,93 @@ def test_parallel_loops_all_checks_out_configured_baseline(monkeypatch, tmp_path
 
     assert checked_out == ["main-layer2"]
     assert parallel_calls == [["g1", "g2"]]
+
+
+def test_parallel_wave_materializes_guides_inside_worktree(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
+
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir="mnist",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        policy_modes={"explore": "Explore."},
+        research_groups=[
+            ResearchGroupConfig(id="g1", branch="research/g1", objective="t", policy_mode="explore"),
+        ],
+    )
+
+    bootstrap = BranchBootstrap(branch="research/g1", mode="baseline", start_ref="main-layer2")
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.resolve_branch_bootstrap",
+        lambda *a, **k: bootstrap,
+    )
+
+    materialized: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.materialize_framework_guidance",
+        lambda *, root: materialized.append(("framework", root)) or (root / ".hiagentresearch/AGENTS.md"),
+    )
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.write_workspace_agents",
+        lambda config, *, root: materialized.append(("workspace", root)) or (root / "mnist/AGENTS.md"),
+    )
+
+    class FakeGit:
+        def __init__(self, root: Path) -> None:
+            self.root = root
+
+    class FakeWorktrees:
+        def __init__(self) -> None:
+            self.created: list[tuple[str, str, str | None, bool]] = []
+
+        def ensure(self, group_id: str, branch: str, *, start_ref: str | None = None, sync_to_ref: bool = False):
+            self.created.append((group_id, branch, start_ref, sync_to_ref))
+            path = tmp_path / "worktrees" / group_id
+            path.mkdir(parents=True)
+            return path
+
+        def path_for(self, group_id: str) -> Path:
+            return tmp_path / "worktrees" / group_id
+
+    class FakeStdout:
+        def __iter__(self):
+            return iter(["ok\n"])
+
+        def close(self) -> None:
+            pass
+
+    popen_calls: list[dict] = []
+
+    class FakePopen:
+        def __init__(self, cmd, **kwargs) -> None:
+            popen_calls.append({"cmd": cmd, **kwargs})
+            self.stdout = FakeStdout()
+
+        def wait(self) -> int:
+            return 0
+
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.GitService", FakeGit)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.subprocess.Popen", FakePopen)
+
+    worktrees = FakeWorktrees()
+    assert _run_wave_parallel(
+        ["g1"],
+        loops=1,
+        agent_model="composer-2.5",
+        config=config,
+        stop_on_success=True,
+        worktrees=worktrees,
+    ) == 0
+
+    worktree_path = tmp_path / "worktrees" / "g1"
+    assert worktrees.created == [("g1", "research/g1", "main-layer2", False)]
+    assert materialized == [("framework", worktree_path), ("workspace", worktree_path)]
+    assert str(worktree_path) in popen_calls[0]["cmd"]
 
 
 def test_ensure_baseline_snapshot_uses_github_eval_node(tmp_path) -> None:

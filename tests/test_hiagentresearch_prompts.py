@@ -28,16 +28,26 @@ def test_prompt_is_config_backed() -> None:
         next_action="continue",
     )
 
-    prompt = build_research_cycle_prompt(group=group, intent_packet=packet, run_id="run_abc")
+    prompt = build_research_cycle_prompt(
+        group=group,
+        intent_packet=packet,
+        run_id="run_abc",
+        checkout_root=Path("/tmp/hiagent-worktree"),
+    )
 
     assert "workspace is `mnist/`" in prompt
     assert "Do not create branch-memory source files" in prompt
-    assert "evaluation zone is read-only" in prompt.lower()
+    assert "Read-only scoring references" in prompt
     assert ".hiagentresearch/eval/" in prompt
     assert "mnist/AGENTS.md" in prompt
     assert ".hiagentresearch/AGENTS.md" in prompt
+    assert "current checkout root is `/tmp/hiagent-worktree`" in prompt
+    assert "All relative paths in this prompt and the guide files resolve inside this checkout" in prompt
+    assert "parent checkout's `.hiagentresearch/` directory" in prompt
+    assert "Write these planning artifacts in the current checkout" in prompt
+    assert "System expectations" not in prompt
     assert group.evaluation.command not in prompt
-    assert "owned by the GitHub eval node" in prompt
+    assert "GitHub eval node owns metric-producing evaluation" in prompt
     # The orchestrator is the sole committer: the agent must leave edits uncommitted and
     # never move HEAD (a self-commit makes the working tree look empty to the edit-boundary).
     assert "git commit" in prompt

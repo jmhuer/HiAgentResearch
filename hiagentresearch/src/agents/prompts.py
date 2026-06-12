@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from hiagentresearch.src.agents.task_contract import task_contract
 from hiagentresearch.src.lineage.resolve import BranchBootstrap
 from hiagentresearch.src.core.models import IntentPacket, ResearchGroup, ScoreContext
@@ -10,12 +12,14 @@ def build_research_cycle_prompt(
     group: ResearchGroup,
     intent_packet: IntentPacket,
     run_id: str,
+    checkout_root: Path | None = None,
     lineage_bootstrap: BranchBootstrap | None = None,
     score_context: ScoreContext | None = None,
 ) -> str:
     run_plan_md = f".hiagentresearch/runs/{run_id}/cycle_plan.md"
     run_intent_json = f".hiagentresearch/runs/{run_id}/cycle_intent.json"
     workdir = group.workdir.rstrip("/") or "."
+    active_checkout = (checkout_root or Path.cwd()).resolve()
 
     guidance_files = list(group.guidance_files)
     if group.workspace_agents_path and group.workspace_agents_path not in guidance_files:
@@ -53,22 +57,26 @@ def build_research_cycle_prompt(
         f"Your workspace is `{workdir}/`; you own its editable paths. {contract.cycle_instruction}\n"
         f"{contract.metric_directive}\n\n"
         f"Scope this cycle: {scope_text}\n\n"
-        "System expectations for this cycle:\n"
+        "Project-specific expectations:\n"
         f"{expectations_text}\n\n"
-        "Write these planning artifacts before editing code:\n"
+        "Write these planning artifacts in the current checkout before editing code:\n"
         f"- {run_intent_json}: run_id, group_id, objective, goal_id, goal,\n"
         "  evidence_refs, planned_code_changes,\n"
         f"  target_files (all under `{workdir}/`), success_criteria, rollback_plan.\n"
         f"- {run_plan_md}: headings ## Evidence, ## Planned Edit, ## Risk and Rollback, {contract.plan_heading}.\n"
         f"  In {contract.plan_heading}, {contract.plan_expectation}\n\n"
-        "The evaluation zone is read-only — read it to see exactly how you are scored, but never "
-        "edit or run it (the metric-producing evaluation is owned by the GitHub eval node):\n"
+        "Read-only scoring references:\n"
         f"{reference_text}\n\n"
         "Boundaries:\n"
+        f"- Your current checkout root is `{active_checkout}`. All relative paths in this prompt and "
+        "the guide files resolve inside this checkout; do not use a parent checkout's "
+        "`.hiagentresearch/` directory for this run.\n"
         "- Do NOT commit or move HEAD: never run `git add`, `git commit`, `git merge`, `git rebase`, "
         "`git reset`, `git stash`, `git checkout <ref>`, or `git push`. Leave your edit UNCOMMITTED in "
         "the working tree — the orchestrator commits it after the cycle. (Read-only git such as "
         "`git diff`, `git show`, and `git log` is fine.)\n"
+        "- The scoring references above are read-only: read them to understand how you are scored, "
+        "but never edit or run them; the GitHub eval node owns metric-producing evaluation.\n"
         "- Do not create branch-memory source files; the runtime records your intent.\n"
         f"- Edit only files under `{workdir}/`, excluding protected paths named in the workspace guide, "
         "and don't run package/dependency managers (e.g. `uv`, "

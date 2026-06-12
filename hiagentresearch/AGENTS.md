@@ -5,7 +5,8 @@ This project uses a Cursor-first research loop with a thin Python control-plane.
 ## Core cycle contract
 
 1. Research and planning happen before code edits.
-2. Each run writes planning artifacts under `.hiagentresearch/runs/<run_id>/`:
+2. Each run writes planning artifacts under `.hiagentresearch/runs/<run_id>/`
+   in the checkout where the agent is running:
    - `cycle_intent.json`
    - `cycle_plan.md`
 3. Each run applies real, bounded code edits to the workspace; keep them reversible and
@@ -20,8 +21,9 @@ This project uses a Cursor-first research loop with a thin Python control-plane.
 
 ## Editing boundaries
 
+- **The active checkout is the root.** You do not choose or move the git position. Treat the current checkout/cwd as "here"; all relative paths in prompts and guides resolve there, including `.hiagentresearch/runs/<run_id>/`.
 - **The workspace (`workdir`) is yours.** Edit, add, restructure, and add tests or dependencies freely within it (its generated `AGENTS.md` lists the exact eval command and targets). Keep changes inside the workspace plus run-local observability artifacts; add a needed dependency to the workspace requirements file, not to core runtime dependencies.
-- **The evaluation zone is read-only, and its contract is binding.** The eval zone (the directory holding `evaluation.entrypoint`, e.g. `.hiagentresearch/eval/`) loads, runs, and scores your work through a fixed interface — the entry points, signatures, and output shapes it reads. Read it to understand exactly how you are scored; never edit or run it (the orchestrator and GitHub eval nodes own the metric-producing evaluation, and editing the eval zone is rejected as an invalid cycle). **Preserve that interface:** a change that compiles but no longer fits how the eval loads/runs/scores you fails the cycle as surely as a crash. If the contract itself is genuinely wrong, fix it canonically — through config, eval adapters, registry invariants, or operator commands — never by bending the workspace to a broken contract, weakening the eval to fit your change, or adding ad-hoc guardrails that weaken the architecture.
+- **The evaluation zone is read-only, and its contract is binding.** Read it to understand how you are scored, preserve the loaded entry points/signatures/output shapes, and never edit or run it. The orchestrator and GitHub eval nodes own metric-producing evaluation.
 - **Review and smoke-check before you finish (required).** Read back your own diff (`git diff`) and confirm it is internally consistent — symbols, shapes, signatures, and unpacking are correct, and nothing you introduced is unused. Then run a quick, cheap (CPU-bounded) smoke check — import or construct what you changed, or a fast unit test — to confirm it executes. This is your feedback loop; do **not** run the full evaluation or any long/expensive job (that is the eval node's). A crash a diff re-read or a 10-second construct would have caught is a wasted cycle.
 - **Read-only git is encouraged; never change git state yourself.** Inspect freely — `git diff`, `git show`, `git log`, `git blame`, `git diff HEAD..<commit>`. What you must NOT do is *mutate* git or move HEAD: no `git add`, `git commit`, `git merge`, `git rebase`, `git reset`, `git stash`, `git checkout <ref>`, or `git push`. Make your edit and leave it **uncommitted** in the working tree; the orchestrator owns commits and branch history and commits it (with its manifest) after your cycle. Moving HEAD during a cycle fails the cycle with an `agent_moved_head` error. If a prior state is a worse basis to build on, fix it forward with a new edit — never with git history operations.
 - **You don't pick a mode — you propose the next change.** The orchestrator carries each cycle's outcome forward and sets the next action; how a result counts (a finding to build on vs. a regression to repair) is defined per task kind in your cycle prompt, not here.

@@ -32,6 +32,8 @@ def test_render_workspace_agents_includes_command_and_targets() -> None:
     assert "Add project dependencies only to the configured dependency file(s)" in doc
     assert "`mnist/requirements.txt`" in doc
     assert "mnist/src/tests/" not in doc
+    assert "For cycle mechanics, planning artifacts, self-review, and git boundaries" in doc
+    assert "what counts as a regression" not in doc
 
 
 def test_required_baseline_metrics_derived_from_targets() -> None:
