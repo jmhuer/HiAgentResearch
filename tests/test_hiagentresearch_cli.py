@@ -68,3 +68,41 @@ def test_cli_runs_loop_command(monkeypatch, tmp_path) -> None:
     assert credentials["checked"] is True
     assert seen["group_id"] == "model_architecture"
     assert seen["loops"] == 2
+
+
+def test_cli_promote_does_not_require_cursor_credentials(monkeypatch) -> None:
+    seen = {}
+
+    class Result:
+        dry_run = True
+        target_created = True
+        target_branch = "main-next"
+        committed = False
+        pushed = False
+        promoted_sha = "baselinesha"
+        diff_stat = ""
+
+        class anchor:
+            commit_sha = "wins"
+            promote_from_group = "prompt"
+            anchor_metric = "accuracy"
+            metric_value = 0.95
+            top_commit_policy = "best_commit"
+
+        def to_dict(self):
+            return {"ok": True}
+
+    def fail_credentials():
+        raise AssertionError("promote should not require Cursor credentials")
+
+    def fake_promote(**kwargs):
+        seen.update(kwargs)
+        return Result()
+
+    monkeypatch.setattr(cli, "ensure_cursor_api_key", fail_credentials)
+    monkeypatch.setattr(cli, "promote_research_baseline", fake_promote)
+
+    assert cli.main(["promote", "--group-id", "prompt", "--target-branch", "main-next", "--dry-run"]) == 0
+    assert seen["group_id"] == "prompt"
+    assert seen["target_branch"] == "main-next"
+    assert seen["dry_run"] is True

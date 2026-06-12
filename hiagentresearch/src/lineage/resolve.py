@@ -151,7 +151,7 @@ def _resolve_merge_bootstrap(
         # winning commit is its latest one (last_commit) — best_commit would fall back past it
         # to the ancestor that owns the metric peak, dropping the engineering work from the merge.
         source_policy = config.group_by_id(gid).lineage.top_commit_policy
-        anchor = _policy_anchor(
+        anchor = resolve_policy_anchor(
             policy=source_policy,
             parent_group_id=gid,
             anchor_metric=metric,
@@ -265,7 +265,7 @@ def _resolve_inherit_ref(
     git: GitService,
     minimize: bool = False,
 ) -> tuple[str, int | None, str | None]:
-    anchor = _policy_anchor(
+    anchor = resolve_policy_anchor(
         policy=anchor_policy,
         parent_group_id=parent.id,
         anchor_metric=anchor_metric,
@@ -285,7 +285,7 @@ def _resolve_inherit_ref(
     )
 
 
-def _policy_anchor(
+def resolve_policy_anchor(
     *,
     policy: str,
     parent_group_id: str,
@@ -313,3 +313,8 @@ def _policy_anchor(
             git=git,
         )
     raise LineageError(f"unknown anchor_policy: {policy}")
+
+
+# Backwards-compatible private alias for older project-local scripts. Runtime code
+# should import resolve_policy_anchor.
+_policy_anchor = resolve_policy_anchor

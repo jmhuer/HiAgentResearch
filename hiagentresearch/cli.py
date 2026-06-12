@@ -11,6 +11,7 @@ from hiagentresearch.src.dashboard import cli as dashboard_cli
 from hiagentresearch.src.paths import REPO_ROOT
 from hiagentresearch.src.runtime.loop_controller import run_loops, run_loops_all
 from hiagentresearch.src.runtime.orchestrator import init_state, resolve_group, run_group, status_report
+from hiagentresearch.src.runtime.promote import promote_research_baseline
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,6 +46,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run groups within each wave in parallel using git worktrees.",
     )
+
+    promote = sub.add_parser("promote", help="Promote a research policy winner onto a baseline branch.")
+    promote.add_argument("--group-id", default="", help="Override orchestration.promote_from_group.")
+    promote.add_argument("--commit", default="", help="Override the resolved policy-selected commit.")
+    promote.add_argument(
+        "--target-branch",
+        default="",
+        help="Branch to receive the promoted product tree. Defaults to orchestration.baseline_ref.",
+    )
+    promote.add_argument("--dry-run", action="store_true", help="Resolve and print the planned promotion only.")
+    promote.add_argument("--json", action="store_true", help="Print the result as JSON.")
+    promote.add_argument("--push", action="store_true", help="Push the target branch after promotion.")
 
     resolve = sub.add_parser("resolve-group", help="Resolve group id for a branch.")
     resolve.add_argument("--branch", required=True)
@@ -107,6 +120,32 @@ def main(argv: list[str] | None = None) -> int:
             stop_on_success=not args.run_exact_loops,
             parallel=args.parallel,
         )
+    if args.cmd == "promote":
+        result = promote_research_baseline(
+            group_id=args.group_id,
+            commit_sha=args.commit,
+            target_branch=args.target_branch,
+            dry_run=args.dry_run,
+            push=args.push,
+        )
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            mode = "Dry run" if result.dry_run else "Promoted"
+            action = "create" if result.target_created else "update"
+            print(f"{mode}: {action} {result.target_branch} from {result.anchor.commit_sha}")
+            print(
+                f"Source group: {result.anchor.promote_from_group} "
+                f"({result.anchor.anchor_metric}={result.anchor.metric_value}, "
+                f"policy={result.anchor.top_commit_policy})"
+            )
+            if result.diff_stat.strip():
+                print(result.diff_stat.rstrip())
+            if result.committed:
+                print(f"Commit: {result.promoted_sha}")
+            if result.pushed:
+                print(f"Pushed: {result.target_branch}")
+        return 0
     if args.cmd == "resolve-group":
         return resolve_group(branch=args.branch)
     if args.cmd == "render-workspace-docs":

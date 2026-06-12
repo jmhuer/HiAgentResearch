@@ -77,6 +77,16 @@ class GitService:
         )
         return proc.returncode == 0
 
+    def commit_exists(self, ref: str) -> bool:
+        proc = subprocess.run(
+            ["git", "cat-file", "-e", f"{ref}^{{commit}}"],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return proc.returncode == 0
+
     def branch_exists(self, branch: str) -> bool:
         proc = subprocess.run(
             ["git", "rev-parse", "--verify", branch],
@@ -101,6 +111,22 @@ class GitService:
                 path = path.rsplit(" -> ", 1)[1]
             changed.append(path.strip('"'))
         return sorted(set(changed))
+
+    def has_changed_files_under(self, path: str, *, staged: bool = False) -> bool:
+        normalized = path.rstrip("/") or "."
+        return any(
+            normalized in ("", ".") or is_within(changed, normalized)
+            for changed in self.changed_files(staged=staged)
+        )
+
+    def restore_path_from_ref(self, ref: str, path: str) -> None:
+        self._run(["checkout", ref, "--", path])
+
+    def stage_path(self, path: str) -> None:
+        self._run(["add", "--", path])
+
+    def diff_stat(self, left_ref: str, right_ref: str, path: str) -> str:
+        return self._run(["diff", "--stat", left_ref, right_ref, "--", path]).stdout
 
     def stage_research_commit(
         self,
