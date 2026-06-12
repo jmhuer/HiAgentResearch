@@ -6,6 +6,7 @@ from hiagentresearch.src.github.actions import GitHubRun
 from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot
 from hiagentresearch.src.runtime.loop_controller import (
     _extract_last_json_object,
+    _pending_wave_groups,
     _preserve_parallel_failure_artifacts,
     _run_group_capture,
     _run_wave_parallel,
@@ -121,10 +122,52 @@ def test_run_group_capture_parses_json_after_pip_noise() -> None:
     assert payload["failure_class"] == "none"
 
 
+def test_pending_wave_groups_reuses_existing_clean_ci_cycles(tmp_path) -> None:
+    registry = Registry(tmp_path / ".hiagentresearch" / "state")
+    registry.init()
+    registry.record_run(
+        run_id="gh_1",
+        group_id="g1",
+        branch="research/g1",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.91},
+        commit_sha="abc123",
+    )
+    registry.record_cycle_manifest(
+        run_id="gh_1",
+        manifest_path="cycle_manifest.json",
+        manifest={
+            "group_id": "g1",
+            "branch": "research/g1",
+            "loop_index": 1,
+            "goal_id": "g1-g1",
+            "goal": "done",
+            "target_files": [],
+            "planned_code_changes": [],
+        },
+    )
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        policy_modes={"explore": "Explore."},
+        research_groups=[
+            ResearchGroupConfig(id="g1", branch="research/g1", objective="t", policy_mode="explore"),
+            ResearchGroupConfig(id="g2", branch="research/g2", objective="t", policy_mode="explore"),
+        ],
+    )
+
+    assert _pending_wave_groups(["g1", "g2"], registry=registry, config=config, loops=1) == ["g2"]
+
+
 def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
     monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
-    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.init_state", lambda: 0)
     run_dir = tmp_path / ".hiagentresearch" / "runs" / "run_test"
     run_dir.mkdir(parents=True)
     (run_dir / "cycle_intent.json").write_text(
@@ -183,6 +226,15 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
         "hiagentresearch.src.runtime.loop_controller.install_dependency_files",
         lambda config: installed.setdefault("called", True),
     )
+    materialized: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.materialize_framework_guidance",
+        lambda *, root: materialized.append(("framework", root)) or (root / ".hiagentresearch/AGENTS.md"),
+    )
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.write_workspace_agents",
+        lambda config, *, root: materialized.append(("workspace", root)) or (root / "mnist/AGENTS.md"),
+    )
     registry = Registry(tmp_path / ".hiagentresearch" / "state")
     registry.init()
     registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.93, "latency_ms": 5.0, "duration_sec": 1.0})
@@ -201,6 +253,7 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
 
     assert summary.ok is True
     assert installed["called"] is True
+    assert materialized == [("framework", tmp_path), ("workspace", tmp_path)]
     assert summary.cycles[0].github_research_outcome == "met_targets"
     assert (
         tmp_path / ".hiagentresearch" / "cycles" / "model_architecture" / "run_test.json"
@@ -226,7 +279,7 @@ def test_agent_moved_head_blocks_the_loop(monkeypatch, tmp_path) -> None:
     fails fast with a clear agent_moved_head reason rather than silently continuing."""
     monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
     monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
-    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.init_state", lambda: 0)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller._init_execution_state", lambda *a, **k: None)
     monkeypatch.setattr(
         "hiagentresearch.src.runtime.loop_controller.install_dependency_files", lambda config: None
     )
@@ -279,7 +332,7 @@ def test_transient_agent_error_is_retried_from_clean_worktree(monkeypatch, tmp_p
     A persistently transient error still fails fast once the bounded retry budget is exhausted."""
     monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
     monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
-    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.init_state", lambda: 0)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller._init_execution_state", lambda *a, **k: None)
     monkeypatch.setattr(
         "hiagentresearch.src.runtime.loop_controller.install_dependency_files", lambda config: None
     )
@@ -329,7 +382,7 @@ def test_select_collapse_zero_loops_returns_ok_without_agent(monkeypatch, tmp_pa
 
     monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
     monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
-    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.init_state", lambda: 0)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller._init_execution_state", lambda *a, **k: None)
     monkeypatch.setattr(
         "hiagentresearch.src.runtime.loop_controller.install_dependency_files", lambda config: None
     )
@@ -401,7 +454,7 @@ def test_loop_controller_feeds_ci_outcome_into_intent_packet(monkeypatch, tmp_pa
     how the change actually scored (last failure class + next action)."""
     monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
     monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
-    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.init_state", lambda: 0)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller._init_execution_state", lambda *a, **k: None)
     monkeypatch.setattr(
         "hiagentresearch.src.runtime.loop_controller.install_dependency_files",
         lambda config: None,
@@ -508,7 +561,7 @@ def test_preserve_parallel_failure_artifacts_copies_worktree_runs(monkeypatch, t
     assert (copied / "worktree_diff.patch").exists()
 
 
-def test_parallel_loops_all_checks_out_configured_baseline(monkeypatch, tmp_path) -> None:
+def test_parallel_loops_all_routes_singleton_waves_through_worktrees(monkeypatch, tmp_path) -> None:
     """Parallel orchestration must respect the configured baseline branch.
 
     Layer-specific configs can use non-default baselines (for example main-layer2);
@@ -558,12 +611,13 @@ def test_parallel_loops_all_checks_out_configured_baseline(monkeypatch, tmp_path
         policy_modes={"explore": "Explore."},
         orchestration={
             "baseline_ref": "main-layer2",
-            "execution_waves": [["g1", "g2"]],
+            "execution_waves": [["g1", "g2"], ["collapse"]],
             "worktree_root": ".hiagentresearch/worktrees",
         },
         research_groups=[
             ResearchGroupConfig(id="g1", branch="research/g1", objective="t", policy_mode="explore"),
             ResearchGroupConfig(id="g2", branch="research/g2", objective="t", policy_mode="explore"),
+            ResearchGroupConfig(id="collapse", branch="research/collapse", objective="t", policy_mode="explore"),
         ],
     )
 
@@ -576,7 +630,7 @@ def test_parallel_loops_all_checks_out_configured_baseline(monkeypatch, tmp_path
     ) == 0
 
     assert checked_out == ["main-layer2"]
-    assert parallel_calls == [["g1", "g2"]]
+    assert parallel_calls == [["g1", "g2"], ["collapse"]]
 
 
 def test_parallel_wave_materializes_guides_inside_worktree(monkeypatch, tmp_path) -> None:
@@ -807,7 +861,7 @@ def _run_loops_with_ci(monkeypatch, tmp_path, loop_specs):
     one CI verdict per loop, and return the LoopSummary."""
     monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
     monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
-    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.init_state", lambda: 0)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller._init_execution_state", lambda *a, **k: None)
     monkeypatch.setattr(
         "hiagentresearch.src.runtime.loop_controller.install_dependency_files", lambda config: None
     )

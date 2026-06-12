@@ -35,7 +35,7 @@ from hiagentresearch.src.paths import (
     resolve_runs_dir,
     resolve_state_dir,
 )
-from hiagentresearch.src.runtime.orchestrator import init_state, run_group
+from hiagentresearch.src.runtime.orchestrator import run_group
 from hiagentresearch.src.core.outcomes import (
     baseline_metrics_complete,
     normalize_research_outcome_name,
@@ -232,7 +232,7 @@ def run_loops(
 
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         install_dependency_files(loaded_config)
-        init_state()
+        _init_execution_state(loaded_config, git_root)
     registry = Registry(resolve_state_dir())
     registry.init()
     bootstrap = resolve_branch_bootstrap(
@@ -475,6 +475,14 @@ def run_loops(
     return LoopSummary(ok=ok, group_id=group_id, branch=target_branch, cycles=cycles, reason=reason)
 
 
+def _init_execution_state(config: HiAgentResearchConfig, checkout_root: Path) -> None:
+    resolve_state_dir().mkdir(parents=True, exist_ok=True)
+    resolve_runs_dir(checkout_root).mkdir(parents=True, exist_ok=True)
+    Registry(resolve_state_dir()).init()
+    materialize_framework_guidance(root=checkout_root)
+    write_workspace_agents(config, root=checkout_root)
+
+
 def _extract_last_json_object(text: str) -> dict | None:
     decoder = json.JSONDecoder()
     idx = len(text)
@@ -711,9 +719,18 @@ def run_loops_all(
         GitService(REPO_ROOT).checkout(loaded_config.orchestration.baseline_ref)
     try:
         for wave in loaded_config.execution_waves():
-            if parallel and len(wave) > 1:
+            pending_wave = _pending_wave_groups(
+                wave,
+                registry=registry,
+                config=loaded_config,
+                loops=loops,
+            )
+            if not pending_wave:
+                print(json.dumps({"ok": True, "reason": "wave already complete", "groups": wave}, indent=2))
+                continue
+            if parallel:
                 exit_code = _run_wave_parallel(
-                    wave,
+                    pending_wave,
                     loops=loops,
                     agent_model=agent_model,
                     config=loaded_config,
@@ -724,7 +741,7 @@ def run_loops_all(
                     print(json.dumps({"ok": False, "reason": "parallel wave failed", "summaries": []}, indent=2))
                     return exit_code
                 continue
-            for group_id in wave:
+            for group_id in pending_wave:
                 summary = run_loops(
                     group_id=group_id,
                     branch=None,
@@ -747,6 +764,34 @@ def run_loops_all(
         registry.mark_session_complete()
     print(json.dumps({"ok": True, "summaries": [item.to_dict() for item in summaries]}, indent=2))
     return 0
+
+
+def _pending_wave_groups(
+    wave: list[str],
+    *,
+    registry: Registry,
+    config: HiAgentResearchConfig,
+    loops: int,
+) -> list[str]:
+    return [
+        group_id
+        for group_id in wave
+        if not _group_complete(registry=registry, config=config, group_id=group_id, loops=loops)
+    ]
+
+
+def _group_complete(
+    *,
+    registry: Registry,
+    config: HiAgentResearchConfig,
+    group_id: str,
+    loops: int,
+) -> bool:
+    group = config.group_by_id(group_id)
+    effective_loops = group.loops if group.loops is not None else loops
+    if effective_loops == 0:
+        return registry.has_cycle_manifest(group_id, 0)
+    return registry.clean_github_cycle_count(group_id) >= effective_loops
 
 
 def _run_wave_parallel(
