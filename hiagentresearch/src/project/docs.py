@@ -47,7 +47,12 @@ def _dependency_lines(config: HiAgentResearchConfig) -> str:
     paths = "\n".join(f"- `{path}`" for path in config.dependency_files)
     workdir = config.workdir.rstrip("/") or "."
     worker_req = f"{workdir}/requirements.txt"
-    infra_test = f"{workdir}/core/layer2/tests/test_requirements_infra.py"
+    layer_match = re.search(r"layer(\d+)", config.project_id)
+    infra_test = (
+        f"{workdir}/core/layer{layer_match.group(1)}/tests/test_requirements_infra.py"
+        if layer_match
+        else f"{workdir}/tests/test_requirements_infra.py"
+    )
     infra_test_path = REPO_ROOT / infra_test
     smoke_block = ""
     if infra_test_path.is_file():
@@ -65,7 +70,7 @@ transitive infra needs (e.g. `soundfile` for qwen-agent). Infra-sensitive pins i
 wheel markers (`+cu`, `cuda`) and headful `opencv-python`.
 
 `{worker_req}` is for the production Temporal worker / Docker image only — HiAgentResearch
-Layer eval does **not** install it; do not edit it during layer research.{smoke_block}"""
+layer eval does **not** install it; do not edit it during layer research.{smoke_block}"""
 
 
 def _frozen_gate_note(config: HiAgentResearchConfig) -> str:
