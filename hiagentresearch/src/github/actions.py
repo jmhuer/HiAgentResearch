@@ -174,6 +174,7 @@ _TRANSIENT_GH_ERROR_MARKERS = (
     "503",
     "502",
     "server error",
+    "no valid artifacts found",
 )
 
 

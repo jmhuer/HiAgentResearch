@@ -67,6 +67,24 @@ def test_github_actions_retries_transient_network_errors(monkeypatch, tmp_path) 
     assert calls["n"] == 2
 
 
+def test_github_actions_retries_artifact_availability_race(monkeypatch, tmp_path) -> None:
+    calls = {"n": 0}
+
+    def fake_run(args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return subprocess.CompletedProcess(args, 1, "", "no valid artifacts found to download")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("hiagentresearch.src.github.actions.time.sleep", lambda *_: None)
+    service = GitHubActionsService(tmp_path)
+
+    service.download_artifacts(run_id="123", target_dir=tmp_path / "artifacts")
+
+    assert calls["n"] == 2
+
+
 def test_github_actions_does_not_retry_real_errors(monkeypatch, tmp_path) -> None:
     calls = {"n": 0}
 
