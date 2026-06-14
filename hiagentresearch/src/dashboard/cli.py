@@ -4,14 +4,14 @@ import argparse
 import json
 from pathlib import Path
 
-from hiagentresearch.src.core.config import DEFAULT_CONFIG_PATH, load_config
+from hiagentresearch.src.core.config import load_config
 from hiagentresearch.src.dashboard.build import build_from_artifacts, build_from_registry
 from hiagentresearch.src.paths import DEFAULT_STATE_DIR
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build optional HiAgentResearch static dashboard assets.")
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument("--config", type=Path, default=None)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     build = sub.add_parser("build", help="Build a dashboard bundle from a local registry DB.")

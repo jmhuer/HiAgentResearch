@@ -5,6 +5,7 @@ from hiagentresearch.src.core.config import HiAgentResearchConfig, ResearchGroup
 from hiagentresearch.src.github.actions import GitHubRun
 from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot
 from hiagentresearch.src.runtime.loop_controller import (
+    _build_dashboard_snapshot,
     _extract_last_json_object,
     _pending_wave_groups,
     _preserve_parallel_failure_artifacts,
@@ -641,6 +642,78 @@ def test_parallel_loops_all_routes_singleton_waves_through_worktrees(monkeypatch
 
     assert checked_out == ["main-layer2"]
     assert parallel_calls == [["g1", "g2"], ["collapse"]]
+
+
+def test_loops_all_refreshes_dashboard_after_parallel_failure(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.ensure_cursor_api_key", lambda: None)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.ensure_baseline_snapshot", lambda *a, **k: None)
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.GitService", lambda *_: type("Git", (), {"checkout": lambda self, branch: None})())
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.WorktreeManager",
+        lambda *a, **k: type("Worktrees", (), {"remove_all": lambda self: None})(),
+    )
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller._run_wave_parallel", lambda *a, **k: 1)
+
+    refreshed: list[str] = []
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller._build_dashboard_snapshot",
+        lambda config: refreshed.append(config.project_id),
+    )
+
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        dashboard={"enabled": True},
+        policy_modes={"explore": "Explore."},
+        orchestration={"baseline_ref": "main-layer2", "execution_waves": [["g1"]]},
+        research_groups=[
+            ResearchGroupConfig(id="g1", branch="research/g1", objective="t", policy_mode="explore"),
+        ],
+    )
+
+    assert run_loops_all(
+        loops=1,
+        workdir=tmp_path,
+        agent_model="composer-2.5",
+        config=config,
+        parallel=True,
+    ) == 1
+
+    assert refreshed == ["demo"]
+
+
+def test_dashboard_refresh_noops_when_disabled(monkeypatch, tmp_path) -> None:
+    called: list[bool] = []
+    monkeypatch.setattr(
+        "hiagentresearch.src.dashboard.build.build_from_registry",
+        lambda **kwargs: called.append(True),
+    )
+
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        dashboard={"enabled": False},
+        policy_modes={"explore": "Explore."},
+        research_groups=[
+            ResearchGroupConfig(id="g1", branch="research/g1", objective="t", policy_mode="explore"),
+        ],
+    )
+
+    _build_dashboard_snapshot(config)
+
+    assert called == []
 
 
 def test_parallel_wave_materializes_guides_inside_worktree(monkeypatch, tmp_path) -> None:

@@ -899,8 +899,37 @@ def run_loops_all(
         # research session is no longer live. Stamp it so the dashboard renders the
         # run as complete rather than in-progress.
         registry.mark_session_complete()
+        _build_dashboard_snapshot(loaded_config)
     print(json.dumps({"ok": True, "summaries": [item.to_dict() for item in summaries]}, indent=2))
     return 0
+
+
+def _build_dashboard_snapshot(config: HiAgentResearchConfig) -> None:
+    """Best-effort dashboard refresh for completed local orchestration runs."""
+
+    if not config.dashboard.enabled:
+        return
+    try:
+        from hiagentresearch.src.dashboard.build import build_from_registry
+
+        build_from_registry(
+            state_dir=resolve_state_dir(),
+            output_dir=config.dashboard_output_path(REPO_ROOT),
+            config=config,
+            source_label="local_registry",
+        )
+    except Exception as exc:  # pragma: no cover - warning path, not control-flow critical.
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "warning": "dashboard build failed",
+                    "error": str(exc),
+                },
+                indent=2,
+            ),
+            file=sys.stderr,
+        )
 
 
 def _pending_wave_groups(
