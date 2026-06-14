@@ -50,7 +50,9 @@ def test_prompt_is_config_backed() -> None:
     assert "GitHub eval node owns metric-producing evaluation" in prompt
     # The orchestrator is the sole committer: the agent must leave edits uncommitted and
     # never move HEAD (a self-commit makes the working tree look empty to the edit-boundary).
-    assert "git commit" in prompt
+    # The full git enumeration lives once in the framework AGENTS.md; the prompt keeps only
+    # the load-bearing rule plus a pointer to that single source.
+    assert "Git and edit boundaries are defined in `.hiagentresearch/AGENTS.md`" in prompt
     assert "UNCOMMITTED" in prompt
     assert "git diff" in prompt  # read-only git is still allowed (needed for merges)
     # The prompt gives the agent an explicit completion signal so the run finishes cleanly,

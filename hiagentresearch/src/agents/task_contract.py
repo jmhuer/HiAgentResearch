@@ -68,21 +68,22 @@ TASK_CONTRACTS: dict[TaskKind, TaskContract] = {
         agent_role="engineering agent",
         intent_noun="change goal",
         cycle_instruction=(
-            "Work like a staff engineer: take full implementation ownership to improve structure, "
-            "clarity, robustness, or maintainability, keeping changes behavior-preserving and reviewable "
-            "so any metric move stays attributable (don't fold an unrelated behavior change into a "
-            "refactor). This is engineering work, not a metric experiment: do not chase the score or "
-            "gamble on changes hoping a number moves."
+            "Work like a staff engineer: take full implementation ownership and shape the idea into its "
+            "best-engineered form — structure, clarity, robustness, maintainability. Whatever you build "
+            "must be the thing the frozen eval actually runs: wire it onto the evaluated path and enable "
+            "it via code defaults THIS cycle so it is genuinely exercised and tested. Never leave new "
+            "functionality built-but-disabled. This is engineering, not a metric experiment: do not aim "
+            "to change the core mechanism that drives the score, and do not gamble on changes hoping a "
+            "number moves."
         ),
         metric_directive=(
-            "The eval metrics are a guardrail, not the goal. PRESERVE them: your change must keep every "
-            "metric at or above the value you inherited. A regression means your change altered evaluated "
-            "behavior — that is a failed cycle to be repaired (revert or fix), not a finding. If the "
-            "previous cycle regressed a metric, restoring it is your job this cycle, while keeping the "
-            "quality improvement."
+            "The eval metric is a guardrail, not a target. Your enabled change must not regress it below "
+            "the value you inherited — a regression is a failed cycle to repair (fix or revert), not a "
+            "finding. Positive movement is welcome but not expected; don't chase the score. Building "
+            "infrastructure the frozen eval never executes is an incomplete cycle, not a safe one."
         ),
         plan_heading="## Verification",
-        plan_expectation="state how you will verify evaluated behavior is preserved (metrics held) and watch performance impact.",
+        plan_expectation="state how you wired the change onto the frozen-eval path (the request_mode/effective_config it produces) and how you confirmed the metric is preserved.",
         preserve_metrics=True,
         detail_intent_label="Change goal",
         default_scope=(
