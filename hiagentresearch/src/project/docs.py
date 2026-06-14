@@ -39,8 +39,18 @@ def _targets_lines(config: HiAgentResearchConfig) -> list[str]:
 
 def _dependency_lines(config: HiAgentResearchConfig) -> str:
     if not config.dependency_files:
-        return "- No project dependency file is configured for this research workspace."
-    return "\n".join(f"- `{path}`" for path in config.dependency_files)
+        return (
+            "No project dependency file is configured. If your code imports packages "
+            "beyond the stdlib, ask operators to add a dependency file before relying on them."
+        )
+    paths = "\n".join(f"- `{path}`" for path in config.dependency_files)
+    return f"""The GitHub eval node and agent loop install packages from:
+
+{paths}
+
+You may add libraries when your approach needs them. List every package your code imports—
+including dependencies imported at module load time—in the dependency file in the same cycle.
+Missing entries fail CI during pytest collection."""
 
 
 def render_workspace_agents(config: HiAgentResearchConfig) -> str:
