@@ -28,7 +28,8 @@ def test_render_workspace_agents_includes_command_and_targets() -> None:
     assert ".hiagentresearch/eval/" in doc
     assert "read-only" in doc.lower()
     assert "canonical JSON" in doc
-    assert "except for protected paths" in doc
+    assert "Only the configured editable paths are agent-owned" in doc
+    assert "### Read-only authority and context" in doc
     assert "### Dependency files" in doc
     assert "`mnist/requirements.txt`" in doc
     assert "mnist/src/tests/" not in doc
@@ -55,6 +56,35 @@ def test_required_baseline_metrics_for_other_project() -> None:
     assert required == ("f1",)
     assert baseline_metrics_complete({"f1": 0.9}, required) is True
     assert baseline_metrics_complete({"accuracy": 0.9}, required) is False
+
+
+def test_area_desugar_uses_configured_branch_prefix() -> None:
+    from hiagentresearch.src.core.config import HiAgentResearchConfig, ResearchGroupConfig
+
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        policy_modes={"explore": "Explore."},
+        orchestration={"baseline_ref": "main", "branch_prefix": "hiagentresearch"},
+        research_groups=[
+            ResearchGroupConfig(
+                id="layer2_model_gate",
+                objective="t",
+                policy_mode="explore",
+                approaches=["review", "retry"],
+            ),
+        ],
+    )
+
+    branches = {group.id: group.branch for group in config.research_groups}
+    assert branches["layer2_model_gate__a1"] == "hiagentresearch/layer2_model_gate-a1"
+    assert branches["layer2_model_gate__a2"] == "hiagentresearch/layer2_model_gate-a2"
+    assert branches["layer2_model_gate__collapse"] == "hiagentresearch/layer2_model_gate-collapse"
 
 
 def test_edit_boundary_accepts_workspace_changes(monkeypatch) -> None:
@@ -104,14 +134,14 @@ def test_edit_boundary_rejects_changes_outside_configured_editable_paths(monkeyp
 
     group = ResearchGroup(
         id="layer2",
-        branch="research/layer2",
+        branch="hiagentresearch/layer2",
         objective="x",
         policy_mode="explore",
         evaluation=EvaluationSpec(command="true"),
         workdir="grapple-multilayer-detection/src",
         editable_paths=[
             "grapple-multilayer-detection/src/core/layer2/",
-            "grapple-multilayer-detection/src/tests/test_layer2_*.py",
+            "grapple-multilayer-detection/src/core/layer2/tests/",
         ],
     )
     monkeypatch.setattr(

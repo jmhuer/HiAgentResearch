@@ -7,6 +7,7 @@ protected zones). Framework cycle mechanics stay in the framework AGENTS.md.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
@@ -53,11 +54,25 @@ including dependencies imported at module load time—in the dependency file in 
 Missing entries fail CI during pytest collection."""
 
 
+def _frozen_gate_note(config: HiAgentResearchConfig) -> str:
+    match = re.search(r"layer(\d+)", config.project_id)
+    if not match:
+        return ""
+    gate_dir = f".hiagentresearch/eval/gate/layer{match.group(1)}/"
+    if not (REPO_ROOT / gate_dir).exists():
+        return ""
+    editable_tests = f"{config.workdir.rstrip('/')}/core/layer{match.group(1)}/tests/"
+    return (
+        f"Before metric scoring, the eval adapter runs operator-owned pytest gates from "
+        f"`{gate_dir}`. These gates are read-only; failures count as `code_failure`, "
+        f"not as a scored experiment. Agent-editable tests live under `{editable_tests}`."
+    )
+
+
 def render_workspace_agents(config: HiAgentResearchConfig) -> str:
     workdir = config.workdir.rstrip("/") or "."
     metric_fields = ", ".join(f"`{name}`" for name in config.evaluation.targets) or "the configured metrics"
     reference_lines = "\n".join(f"- `{path}`" for path in config.all_reference_paths())
-    hidden_lines = "\n".join(f"- `{path}`" for path in config.hidden_paths) or "- (none configured)"
     editable_lines = "\n".join(f"- `{path}`" for path in config.editable_paths) or f"- `{workdir}/`"
     expectation_lines = (
         "\n".join(f"- {item}" for item in config.agent_contract.research_output_expectations)
@@ -67,6 +82,7 @@ def render_workspace_agents(config: HiAgentResearchConfig) -> str:
     dependency_lines = _dependency_lines(config)
     framework_guidance = default_guidance_files()[0]
     command = _display_eval_command(config)
+    frozen_gate_note = _frozen_gate_note(config)
     return f"""# Workspace contract ({workdir})
 
 <!-- Generated from the active config by `hiagentresearch render-workspace-docs`. Do not edit by hand. -->
@@ -81,7 +97,8 @@ Cycle mechanics live in `{framework_guidance}`.
 
 ## Workspace skeleton
 
-This workspace (`{workdir}/`) is yours except for protected paths below.
+Only the configured editable paths are agent-owned. The rest of `{workdir}/` is
+read-only context for understanding imports, integration, and scoring behavior.
 
 ### Editable paths
 
@@ -99,21 +116,22 @@ After your cycle, the orchestrator (and GitHub eval node) runs this exact comman
 {command}
 ```
 
+{frozen_gate_note}
+
 It prints a canonical JSON report to stdout. Scored metrics ({metric_fields}):
 
 {targets_block}
 
 The eval reads `passed` / `execution_passed` health flags plus those metric keys.
 
-### The eval zone is read-only
+### Read-only authority and context
 
 {reference_lines}
 
 Read these to see how inference is loaded and scored. Never edit or run them.
-
-### Other protected paths
-
-{hidden_lines}
+The broader read-only context includes held-out eval assets under `eval/`,
+operator-curated reference packs under `{workdir}/ref/`, shared layers,
+providers, shell/worker wiring, and secrets.
 
 For cycle mechanics, planning artifacts, self-review, and git boundaries,
 follow the framework contract in `{framework_guidance}`.

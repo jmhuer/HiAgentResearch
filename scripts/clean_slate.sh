@@ -26,26 +26,30 @@ if [[ "${FULL_CLEANUP}" == "true" ]]; then
   CLEAN_REMOTE_BRANCHES=true
 fi
 
-# Remote + research branches are read from config so cleanup follows the repo wherever
-# it lives (config.github.remote, config.research_groups[].branch). Falls back if the
-# config can't be loaded.
 PY="$([[ -x .venv/bin/python ]] && echo .venv/bin/python || echo python3)"
 REMOTE="$("${PY}" -c 'from hiagentresearch.src.core.config import load_config; print(load_config().github.remote)' 2>/dev/null || echo origin)"
-RESEARCH_BRANCHES=()
-while IFS= read -r _b; do
-  [[ -n "${_b}" ]] && RESEARCH_BRANCHES+=("${_b}")
-done < <("${PY}" -c 'from hiagentresearch.src.core.config import load_config
-for g in load_config().research_groups:
-    print(g.branch)' 2>/dev/null)
-if [[ ${#RESEARCH_BRANCHES[@]} -eq 0 ]]; then
-  RESEARCH_BRANCHES=(
-    research/model-architecture
-    research/data-augmentation
-    research/optimization-strategy
-    research/hyperparameter-optimization
-    research/polish-code
-  )
-fi
+RESEARCH_BRANCH_PREFIX="${HIAGENTRESEARCH_RESEARCH_BRANCH_PREFIX:-hiagentresearch}"
+
+collect_research_branches() {
+  local -n _out=$1
+  declare -A seen=()
+  while IFS= read -r branch; do
+    [[ -z "${branch}" ]] && continue
+    [[ "${branch}" == "${RESEARCH_BRANCH_PREFIX}/"* ]] || continue
+    if [[ -z "${seen[${branch}]+x}" ]]; then
+      seen["${branch}"]=1
+      _out+=("${branch}")
+    fi
+  done < <(git branch --format='%(refname:short)' || true)
+  while IFS= read -r branch; do
+    [[ -z "${branch}" ]] && continue
+    if [[ -z "${seen[${branch}]+x}" ]]; then
+      seen["${branch}"]=1
+      _out+=("${branch}")
+    fi
+  done < <(git ls-remote --heads "${REMOTE}" "refs/heads/${RESEARCH_BRANCH_PREFIX}/*" 2>/dev/null \
+    | awk '{print $2}' | sed 's|^refs/heads/||' || true)
+}
 
 log() {
   printf '==> %s\n' "$*"
@@ -81,16 +85,20 @@ clean_worktrees() {
 }
 
 clean_branches() {
-  log "Checking out main and deleting local research branches"
+  local branches=()
+  collect_research_branches branches
+  log "Checking out main and deleting ${#branches[@]} local ${RESEARCH_BRANCH_PREFIX}/* branches"
   git checkout main
-  for branch in "${RESEARCH_BRANCHES[@]}"; do
+  for branch in "${branches[@]}"; do
     git branch -D "${branch}" 2>/dev/null || true
   done
 }
 
 clean_remote_branches() {
-  log "Deleting remote research branches on ${REMOTE}"
-  for branch in "${RESEARCH_BRANCHES[@]}"; do
+  local branches=()
+  collect_research_branches branches
+  log "Deleting ${#branches[@]} remote ${RESEARCH_BRANCH_PREFIX}/* branches on ${REMOTE}"
+  for branch in "${branches[@]}"; do
     git push "${REMOTE}" --delete "${branch}" 2>/dev/null || true
   done
 }
@@ -114,7 +122,7 @@ print_status() {
   echo "  evals.db:    $([[ -f .hiagentresearch/state/evals.db ]] && echo present || echo absent)"
   echo "  run dirs:    $(find .hiagentresearch/runs -mindepth 1 2>/dev/null | wc -l | tr -d ' ')"
   echo "  wt dirs:     $(ls -A .hiagentresearch/worktrees 2>/dev/null | wc -l | tr -d ' ')"
-  echo "  remote research/*: $(git ls-remote --heads ${REMOTE} 'research/*' 2>/dev/null | wc -l | tr -d ' ')"
+  echo "  remote ${RESEARCH_BRANCH_PREFIX}/*: $(git ls-remote --heads ${REMOTE} "${RESEARCH_BRANCH_PREFIX}/*" 2>/dev/null | wc -l | tr -d ' ')"
   if pgrep -af "hiagentresearch|run_phase1_eval|cursor-sdk-bridge" >/dev/null 2>&1; then
     echo "  processes:   still running (see pgrep -af 'hiagentresearch|cursor-sdk-bridge')"
   else

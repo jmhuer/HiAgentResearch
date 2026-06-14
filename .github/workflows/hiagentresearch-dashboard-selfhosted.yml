@@ -62,7 +62,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p dashboard-artifacts
-          git fetch --no-tags --prune origin '+refs/heads/research/*:refs/remotes/origin/research/*'
+          git fetch --no-tags --prune origin '+refs/heads/hiagentresearch/*:refs/remotes/origin/hiagentresearch/*'
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           import subprocess

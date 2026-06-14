@@ -95,6 +95,9 @@ class OrchestrationConfig(BaseModel):
     # Research group whose top_commit_policy-selected commit is promoted by `hiagentresearch promote`.
     # Empty → auto-pick the strongest scored policy-selected anchor across configured groups.
     promote_from_group: str = ""
+    # Namespace for auto-derived research branches. Existing flat configs can still
+    # set explicit group.branch values; this only affects desugared area branches.
+    branch_prefix: str = "research"
     execution_waves: list[list[str]] | None = None
     execution_order: list[str] | None = None
     max_parallel_groups: int = 2
@@ -118,8 +121,8 @@ class AgentConfig(BaseModel):
 
 class ResearchGroupConfig(BaseModel):
     id: str
-    # Optional in the hierarchical (area) shape — auto-derived as `research/<id>` at
-    # load time. Flat configs still set it explicitly.
+    # Optional in the hierarchical (area) shape — auto-derived from
+    # orchestration.branch_prefix at load time. Flat configs still set it explicitly.
     branch: str = ""
     # Optional: a merge group's objective is auto-generated at resolution; normal
     # research groups state their own.
@@ -256,6 +259,10 @@ class HiAgentResearchConfig(BaseModel):
         # level -> ("leaf" wave ids, "collapse" wave ids), preserving area order within a level.
         leaf_waves: dict[int, list[str]] = {}
         collapse_waves: dict[int, list[str]] = {}
+        branch_prefix = self.orchestration.branch_prefix.strip("/") or "research"
+
+        def research_branch(suffix: str) -> str:
+            return f"{branch_prefix}/{suffix}"
 
         for area in areas:
             lvl = level(area.id)
@@ -266,7 +273,7 @@ class HiAgentResearchConfig(BaseModel):
                 expanded.append(
                     area.model_copy(
                         update={
-                            "branch": area.branch or f"research/{area.id}",
+                            "branch": area.branch or research_branch(area.id),
                             "lineage": inherited_lineage(area),
                             "approaches": [],
                             "seed_approach": area.approaches[0] if area.approaches else "",
@@ -285,7 +292,7 @@ class HiAgentResearchConfig(BaseModel):
                 expanded.append(
                     ResearchGroupConfig(
                         id=leaf_id,
-                        branch=f"research/{area.id}-a{index}",
+                        branch=research_branch(f"{area.id}-a{index}"),
                         objective=area.objective,
                         policy_mode=area.policy_mode,
                         task_kind=area.task_kind,
@@ -302,7 +309,7 @@ class HiAgentResearchConfig(BaseModel):
             expanded.append(
                 ResearchGroupConfig(
                     id=f"{area.id}__collapse",
-                    branch=f"research/{area.id}-collapse",
+                    branch=research_branch(f"{area.id}-collapse"),
                     policy_mode=area.policy_mode,
                     task_kind="merge",
                     lineage=LineageConfig(
@@ -350,7 +357,7 @@ class HiAgentResearchConfig(BaseModel):
             expanded.append(
                 ResearchGroupConfig(
                     id="final_merge",
-                    branch="research/final-merge",
+                    branch=research_branch("final-merge"),
                     policy_mode=areas[0].policy_mode,
                     task_kind="merge",
                     lineage=LineageConfig(
