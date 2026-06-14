@@ -45,13 +45,27 @@ def _dependency_lines(config: HiAgentResearchConfig) -> str:
             "beyond the stdlib, ask operators to add a dependency file before relying on them."
         )
     paths = "\n".join(f"- `{path}`" for path in config.dependency_files)
-    return f"""The GitHub eval node and agent loop install packages from:
+    workdir = config.workdir.rstrip("/") or "."
+    worker_req = f"{workdir}/requirements.txt"
+    infra_test = f"{workdir}/core/layer2/tests/test_requirements_infra.py"
+    infra_test_path = REPO_ROOT / infra_test
+    smoke_block = ""
+    if infra_test_path.is_file():
+        smoke_block = (
+            f"\n\nBefore ending a cycle after editing dependencies, run the infra smoke test:\n\n"
+            f"```bash\nPYTHONPATH={workdir} python -m pytest {infra_test} -q\n```\n"
+        )
+    return f"""The GitHub eval node installs packages from this **full eval closure** (one file per layer):
 
 {paths}
 
-You may add libraries when your approach needs them. List every package your code imports—
-including dependencies imported at module load time—in the dependency file in the same cycle.
-Missing entries fail CI during pytest collection."""
+This file is agent-owned: list every package your code imports at module load time, including
+transitive infra needs (e.g. `soundfile` for qwen-agent). Infra-sensitive pins include
+`opencv-python-headless` (CPU runners), `dashscope`, `boto3`, and `qwen-agent` — avoid CUDA
+wheel markers (`+cu`, `cuda`) and headful `opencv-python`.
+
+`{worker_req}` is for the production Temporal worker / Docker image only — HiAgentResearch
+Layer eval does **not** install it; do not edit it during layer research.{smoke_block}"""
 
 
 def _frozen_gate_note(config: HiAgentResearchConfig) -> str:
@@ -68,13 +82,26 @@ def _frozen_gate_note(config: HiAgentResearchConfig) -> str:
         for path in sorted(gate_path.glob("test_*.py"))
         if (REPO_ROOT / editable_tests / path.name).exists()
     ]
-    optional_check = ""
+    optional_checks: list[str] = []
     if editable_gate_files:
+        optional_checks.append(
+            f"PYTHONPATH={config.workdir.rstrip('/') or '.'} python -m pytest "
+            f"{' '.join(editable_gate_files)}"
+        )
+    infra_test = (
+        f"{config.workdir.rstrip('/')}/core/layer{match.group(1)}/tests/test_requirements_infra.py"
+    )
+    if (REPO_ROOT / infra_test).is_file():
+        optional_checks.insert(
+            0,
+            f"PYTHONPATH={config.workdir.rstrip('/') or '.'} python -m pytest {infra_test}",
+        )
+    optional_check = ""
+    if optional_checks:
         optional_check = (
-            " If this repo provides editable copies of the gates, run "
-            f"`PYTHONPATH={config.workdir.rstrip('/') or '.'} python -m pytest {' '.join(editable_gate_files)}` "
-            "as an optional local "
-            "repair check before returning your cycle."
+            " Optional local repair checks before returning your cycle: "
+            + "; ".join(f"`{cmd}`" for cmd in optional_checks)
+            + "."
         )
     return (
         f"Before metric scoring, the eval adapter runs operator-owned pytest gates from "

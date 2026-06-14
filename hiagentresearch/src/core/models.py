@@ -75,7 +75,8 @@ class IntentPacket:
     # Short, actionable feedback for the next cycle's agent (e.g. a metric regression
     # to restore). Surfaced in the prompt; empty when there is nothing to flag.
     last_note: str = ""
-    # Relative path to the last CI feedback bundle; empty until a CI-backed cycle completes.
+    # Relative path to the preserved CI eval bundle directory (runs/<id>/ci/), flat
+    # eval-node artifacts per framework contract. Empty until a CI-backed cycle completes.
     last_feedback_ref: str = ""
     updated_at: str = field(default_factory=utc_now_iso)
 

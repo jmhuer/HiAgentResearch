@@ -83,14 +83,14 @@ def test_prompt_surfaces_ci_feedback_ref_without_dumping_artifacts() -> None:
         last_failure_class="infra_failure",
         next_action="repair",
         last_note="CI eval blocked execution with infra_failure: activity failed",
-        last_feedback_ref=".hiagentresearch/runs/run_abc/ci/feedback.json",
+        last_feedback_ref=".hiagentresearch/runs/run_abc/ci",
     )
 
     prompt = build_research_cycle_prompt(group=group, intent_packet=packet, run_id="run_next")
 
     assert "Feedback from last CI eval: CI eval blocked execution with infra_failure" in prompt
-    assert "Detailed CI artifacts: `.hiagentresearch/runs/run_abc/ci/feedback.json`" in prompt
-    assert "inspect this before changing code" in prompt
+    assert "CI artifact bundle: `.hiagentresearch/runs/run_abc/ci`" in prompt
+    assert "parsed_eval.json and stderr.txt" in prompt
     assert "stderr tail" not in prompt.lower()
 
 

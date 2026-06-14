@@ -34,15 +34,15 @@ def build_research_cycle_prompt(
     policy_line = f"Policy mode: {group.policy_mode}"
     if group.policy_mode_description:
         policy_line += f" — {group.policy_mode_description}"
-    note = getattr(intent_packet, "last_note", "") or ""
-    feedback_ref = getattr(intent_packet, "last_feedback_ref", "") or ""
+    note = intent_packet.last_note or ""
+    feedback_ref = intent_packet.last_feedback_ref or ""
     feedback_lines = []
     if note:
         feedback_lines.append(f"Feedback from last CI eval: {note}")
     if feedback_ref:
         feedback_lines.append(
-            f"Detailed CI artifacts: `{feedback_ref}`; inspect this before changing code "
-            "when the prior failure blocked execution."
+            f"CI artifact bundle: `{feedback_ref}` — start with parsed_eval.json and stderr.txt "
+            "when execution was blocked."
         )
     note_line = "\n".join(feedback_lines)
     if note_line:

@@ -16,7 +16,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
 
-from hiagentresearch.src.core.artifacts import eval_node_index_names
 from hiagentresearch.src.core.coerce import as_string_list
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
 from hiagentresearch.src.core.guidance import materialize_framework_guidance
@@ -52,7 +51,6 @@ from hiagentresearch.src.core.models import utc_now_iso
 # so one hiccup does not abort the leaf and cascade into aborting the whole parallel wave. Genuine
 # blocks (agent_moved_head, deterministic invalid cycles) are never retried. Env-overridable.
 _CYCLE_TRANSIENT_RETRIES = max(1, int(os.environ.get("HIAGENTRESEARCH_CYCLE_TRANSIENT_RETRIES", "3")))
-CI_FEEDBACK_SCHEMA_VERSION = 1
 
 
 def _is_transient_cycle_failure(local: dict) -> bool:
@@ -115,22 +113,6 @@ class CycleResult:
     github_research_outcome: str
     artifact_dir: str
     decision: str
-
-
-@dataclass(slots=True)
-class CiFeedback:
-    schema_version: int
-    run_id: str
-    github_run_id: str
-    correlation_id: str
-    failure_class: str
-    research_outcome: str
-    next_action: str
-    summary: str
-    evidence: dict[str, str]
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 @dataclass(slots=True)
@@ -414,7 +396,13 @@ def run_loops(
                     reason="github artifact correlation_id did not match local run_id",
                 )
 
-            ingest_code = ingest_func(f"gh_{gh_run.database_id}", group_id, target_branch, artifact_dir)
+            ci_dir = _preserve_ci_artifacts(
+                checkout_root=git_root,
+                local_run_id=local_run_id,
+                artifact_dir=artifact_dir,
+            )
+
+            ingest_code = ingest_func(f"gh_{gh_run.database_id}", group_id, target_branch, ci_dir)
             if ingest_code != 0:
                 return LoopSummary(
                     ok=False,
@@ -424,10 +412,10 @@ def run_loops(
                     reason="github artifact ingest failed",
                 )
 
-            failure = json.loads((artifact_dir / "failure_class.json").read_text(encoding="utf-8"))
-            outcome = json.loads((artifact_dir / "research_outcome.json").read_text(encoding="utf-8"))
+            failure = json.loads((ci_dir / "failure_class.json").read_text(encoding="utf-8"))
+            outcome = json.loads((ci_dir / "research_outcome.json").read_text(encoding="utf-8"))
             try:
-                ci_metrics = json.loads((artifact_dir / "metrics.json").read_text(encoding="utf-8"))
+                ci_metrics = json.loads((ci_dir / "metrics.json").read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 ci_metrics = {}
             artifact_ref = f"github_actions:{gh_run.database_id}"
@@ -455,19 +443,9 @@ def run_loops(
                 )
                 if regression_note:
                     decision = "repair"
-            ci_feedback = _preserve_ci_feedback(
-                checkout_root=git_root,
-                local_run_id=local_run_id,
-                github_run_id=gh_run.database_id,
-                artifact_dir=artifact_dir,
-                failure=failure,
-                outcome=outcome,
-                decision=decision,
-            )
-            feedback_ref = _path_relative_to(
-                resolve_runs_dir(git_root) / local_run_id / "ci" / "feedback.json",
-                git_root,
-            )
+            parsed = _read_json(ci_dir / "parsed_eval.json")
+            steering_note = _ci_steering_note(failure, outcome, parsed)
+            feedback_ref = _path_relative_to(ci_dir, git_root)
             # Feed the authoritative CI outcome back into the intent packet so the next
             # cycle's agent prompt reflects how this change actually scored (last failure
             # class, next action, and a pointer to diagnostic artifacts). The local cycle no longer
@@ -476,7 +454,7 @@ def run_loops(
             if intent is not None:
                 intent.last_failure_class = github_failure
                 intent.next_action = decision
-                intent.last_note = regression_note or ci_feedback.summary
+                intent.last_note = regression_note or steering_note
                 intent.last_feedback_ref = feedback_ref
                 intent.updated_at = utc_now_iso()
                 registry.write_intent_packet(intent)
@@ -566,76 +544,39 @@ def _metric_regression_note(
     )
 
 
-def _preserve_ci_feedback(
+def _preserve_ci_artifacts(
     *,
     checkout_root: Path,
     local_run_id: str,
-    github_run_id: str,
     artifact_dir: Path,
-    failure: dict,
-    outcome: dict,
-    decision: str,
-) -> CiFeedback:
+) -> Path:
     ci_dir = resolve_runs_dir(checkout_root) / local_run_id / "ci"
     if ci_dir.exists():
         shutil.rmtree(ci_dir)
     shutil.copytree(artifact_dir, ci_dir)
-    feedback = _build_ci_feedback(
-        checkout_root=checkout_root,
-        ci_dir=ci_dir,
-        local_run_id=local_run_id,
-        github_run_id=github_run_id,
-        failure=failure,
-        outcome=outcome,
-        decision=decision,
-    )
-    (ci_dir / "feedback.json").write_text(
-        json.dumps(feedback.to_dict(), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return feedback
+    return ci_dir
 
 
-def _build_ci_feedback(
-    *,
-    checkout_root: Path,
-    ci_dir: Path,
-    local_run_id: str,
-    github_run_id: str,
-    failure: dict,
-    outcome: dict,
-    decision: str,
-) -> CiFeedback:
-    meta = _read_json(ci_dir / "run_meta.json")
-    parsed = _read_json(ci_dir / "parsed_eval.json")
+def _ci_steering_note(failure: dict, outcome: dict, parsed: dict) -> str:
     failure_class = str(failure.get("failure_class", "infra_failure"))
     research_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
     reason = _first_nonempty(
-        outcome.get("reason"),
-        failure.get("error"),
         parsed.get("eval_error"),
+        failure.get("error"),
         parsed.get("error"),
+        outcome.get("reason"),
     )
-    summary = _ci_feedback_summary(
+    stderr_tail = _first_nonempty(
+        parsed.get("pytest_stderr_tail"),
+        parsed.get("eval_stderr_tail"),
+    )
+    if stderr_tail:
+        trimmed = _trim_feedback_reason(stderr_tail, limit=200)
+        reason = trimmed if not reason else f"{reason}; stderr: {trimmed}"
+    return _ci_feedback_summary(
         failure_class=failure_class,
         research_outcome=research_outcome,
         reason=reason,
-    )
-    evidence = {
-        name: _path_relative_to(ci_dir / name, checkout_root)
-        for name in eval_node_index_names()
-        if (ci_dir / name).exists()
-    }
-    return CiFeedback(
-        schema_version=CI_FEEDBACK_SCHEMA_VERSION,
-        run_id=local_run_id,
-        github_run_id=github_run_id,
-        correlation_id=str(meta.get("correlation_id") or local_run_id),
-        failure_class=failure_class,
-        research_outcome=research_outcome,
-        next_action=decision,
-        summary=summary,
-        evidence=evidence,
     )
 
 

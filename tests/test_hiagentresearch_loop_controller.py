@@ -495,7 +495,18 @@ def test_loop_controller_feeds_ci_outcome_into_intent_packet(monkeypatch, tmp_pa
     )
     (artifact_dir / "metrics.json").write_text(json.dumps({"tests_passed": 1}), encoding="utf-8")
     (artifact_dir / "stdout.txt").write_text("{}", encoding="utf-8")
-    (artifact_dir / "stderr.txt").write_text("", encoding="utf-8")
+    (artifact_dir / "stderr.txt").write_text("traceback in stderr", encoding="utf-8")
+    (artifact_dir / "parsed_eval.json").write_text(
+        json.dumps({"eval_error": "ModuleNotFoundError: soundfile"}),
+        encoding="utf-8",
+    )
+
+    ingest_artifact_dir: Path | None = None
+
+    def capture_ingest(*args, **kwargs):
+        nonlocal ingest_artifact_dir
+        ingest_artifact_dir = kwargs.get("artifact_dir") or (args[3] if len(args) > 3 else None)
+        return 0
 
     registry = Registry(tmp_path / ".hiagentresearch" / "state")
     registry.init()
@@ -526,23 +537,24 @@ def test_loop_controller_feeds_ci_outcome_into_intent_packet(monkeypatch, tmp_pa
         git=FakeGit(),
         github=FakeGitHub(artifact_dir),
         run_group_func=fake_run_group,
-        ingest_func=lambda *a, **k: 0,
+        ingest_func=capture_ingest,
     )
+
+    assert ingest_artifact_dir is not None
+    assert str(ingest_artifact_dir).endswith("/ci")
+    assert ingest_artifact_dir.exists()
 
     updated = registry.read_intent_packet("model_architecture")
     assert updated is not None
     assert updated.last_failure_class == "code_failure"
     assert updated.next_action == "repair"
-    assert updated.last_feedback_ref == ".hiagentresearch/runs/run_ci/ci/feedback.json"
+    assert updated.last_feedback_ref == ".hiagentresearch/runs/run_ci/ci"
+    assert "ModuleNotFoundError: soundfile" in updated.last_note
     assert updated.last_note.startswith("CI eval blocked execution with code_failure")
-    feedback_path = tmp_path / updated.last_feedback_ref
-    assert feedback_path.exists()
-    feedback = json.loads(feedback_path.read_text(encoding="utf-8"))
-    assert feedback["failure_class"] == "code_failure"
-    assert feedback["research_outcome"] == "below_targets"
-    assert feedback["next_action"] == "repair"
-    assert feedback["evidence"]["failure_class.json"] == ".hiagentresearch/runs/run_ci/ci/failure_class.json"
-    assert (feedback_path.parent / "stderr.txt").exists()
+    ci_dir = tmp_path / updated.last_feedback_ref
+    assert (ci_dir / "parsed_eval.json").exists()
+    assert (ci_dir / "stderr.txt").exists()
+    assert not (ci_dir / "feedback.json").exists()
 
 
 def test_preserve_parallel_failure_artifacts_copies_worktree_runs(monkeypatch, tmp_path) -> None:
