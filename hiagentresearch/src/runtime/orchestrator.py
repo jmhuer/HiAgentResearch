@@ -20,7 +20,7 @@ from hiagentresearch.src.core.models import (
     TransitionEvent,
     utc_now_iso,
 )
-from hiagentresearch.src.core.pathspec import is_under_any, is_within
+from hiagentresearch.src.core.pathspec import is_under_any, is_within, matches_any
 from hiagentresearch.src.git.service import GitService, GitServiceError
 from hiagentresearch.src.registry.store import Registry
 from hiagentresearch.src.runtime.quality import ResearchOutcome
@@ -122,15 +122,21 @@ def _validate_edit_boundary(
     run_prefix = f".hiagentresearch/runs/{run_id}/"
     workspace_changes: list[str] = []
     outside: list[str] = []
+    outside_editable: list[str] = []
     for path in cycle_changes:
         if path.startswith(run_prefix) or _is_generated_path(path, group.generated_paths):
             continue
         if is_within(path, group.workdir):
-            workspace_changes.append(path)
+            if group.editable_paths and not matches_any(path, group.editable_paths):
+                outside_editable.append(path)
+            else:
+                workspace_changes.append(path)
         else:
             outside.append(path)
     if outside:
         return False, f"changed files outside workspace ({group.workdir}): {outside}", cycle_changes
+    if outside_editable:
+        return False, f"changed files outside configured editable paths: {outside_editable}", cycle_changes
     if not workspace_changes:
         return False, "agent cycle produced no workspace source change", cycle_changes
     return True, "", cycle_changes
@@ -314,6 +320,7 @@ def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_
         or is_under_any(str(path), group.reference_paths)
         or is_under_any(str(path), group.generated_paths)
         or is_under_any(str(path), group.hidden_paths)
+        or (bool(group.editable_paths) and not matches_any(str(path), group.editable_paths))
     )
     if outside_workspace:
         return (

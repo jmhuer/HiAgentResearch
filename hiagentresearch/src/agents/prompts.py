@@ -27,7 +27,7 @@ def build_research_cycle_prompt(
     guidance_text = _bullets(guidance_files)
     reference_text = _bullets(group.reference_paths)
     generated_paths_text = _bullets(group.generated_paths)
-    expectations_text = _bullets(group.research_output_expectations)
+    workspace_agents = group.workspace_agents_path or f"{workdir}/AGENTS.md"
     lineage_text = _lineage_stanza(lineage_bootstrap)
     contract = task_contract(group.task_kind)
     grounding_text = _grounding_stanza(score_context, preserve_metrics=contract.preserve_metrics)
@@ -57,8 +57,8 @@ def build_research_cycle_prompt(
         f"Your workspace is `{workdir}/`; you own its editable paths. {contract.cycle_instruction}\n"
         f"{contract.metric_directive}\n\n"
         f"Scope this cycle: {scope_text}\n\n"
-        "Project-specific expectations:\n"
-        f"{expectations_text}\n\n"
+        f"Authoritative goals and expectations are in `{workspace_agents}` "
+        "(## Goals and expectations) — read that section before editing.\n\n"
         "Write these planning artifacts in the current checkout before editing code:\n"
         f"- {run_intent_json}: run_id, group_id, objective, goal_id, goal,\n"
         "  evidence_refs, planned_code_changes,\n"

@@ -28,12 +28,18 @@ def test_render_workspace_agents_includes_command_and_targets() -> None:
     assert ".hiagentresearch/eval/" in doc
     assert "read-only" in doc.lower()
     assert "canonical JSON" in doc
-    assert "except for the protected paths listed" in doc
-    assert "Add project dependencies only to the configured dependency file(s)" in doc
+    assert "except for protected paths" in doc
+    assert "### Dependency files" in doc
     assert "`mnist/requirements.txt`" in doc
     assert "mnist/src/tests/" not in doc
     assert "For cycle mechanics, planning artifacts, self-review, and git boundaries" in doc
     assert "what counts as a regression" not in doc
+    assert "## Goals and expectations" in doc
+    assert "## Workspace skeleton" in doc
+    assert doc.index("## Goals and expectations") < doc.index("## Workspace skeleton")
+    assert "### Editable paths" in doc
+    assert "Optimize for relative progress" not in doc
+    assert "research_output_expectations" in doc
 
 
 def test_required_baseline_metrics_derived_from_targets() -> None:
@@ -91,6 +97,36 @@ def test_edit_boundary_rejects_changes_outside_workspace(monkeypatch) -> None:
     )
     assert valid is False
     assert "outside workspace" in error
+
+
+def test_edit_boundary_rejects_changes_outside_configured_editable_paths(monkeypatch) -> None:
+    from hiagentresearch.src.core.models import EvaluationSpec, ResearchGroup
+
+    group = ResearchGroup(
+        id="layer2",
+        branch="research/layer2",
+        objective="x",
+        policy_mode="explore",
+        evaluation=EvaluationSpec(command="true"),
+        workdir="grapple-multilayer-detection/src",
+        editable_paths=[
+            "grapple-multilayer-detection/src/core/layer2/",
+            "grapple-multilayer-detection/src/tests/test_layer2_*.py",
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_git_changed_files",
+        lambda workdir: {
+            "grapple-multilayer-detection/src/core/layer2/runtime.py",
+            "grapple-multilayer-detection/src/core/providers/dashscope.py",
+        },
+    )
+    valid, error, _ = orchestrator._validate_edit_boundary(
+        workdir=Path("."), group=group, run_id="run_x", before_changes=set()
+    )
+    assert valid is False
+    assert "outside configured editable paths" in error
 
 
 def test_edit_boundary_requires_a_workspace_source_change(monkeypatch) -> None:

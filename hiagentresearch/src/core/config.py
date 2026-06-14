@@ -183,6 +183,7 @@ class HiAgentResearchConfig(BaseModel):
     dependency_files: list[str] = Field(default_factory=list)
     generated_paths: list[str] = Field(default_factory=list)
     hidden_paths: list[str] = Field(default_factory=list)
+    editable_paths: list[str] = Field(default_factory=list)
     evaluation: EvaluationConfig
     research_groups: list[ResearchGroupConfig]
     orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
@@ -588,6 +589,7 @@ class HiAgentResearchConfig(BaseModel):
             reference_paths=self.all_reference_paths(),
             generated_paths=self.generated_paths_resolved(),
             hidden_paths=list(self.hidden_paths),
+            editable_paths=list(self.editable_paths),
             research_output_expectations=list(self.agent_contract.research_output_expectations),
             guidance_files=list(default_guidance_files()),
             workspace_agents_path=self.workspace_agents_path(),

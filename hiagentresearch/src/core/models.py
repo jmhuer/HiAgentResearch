@@ -49,6 +49,7 @@ class ResearchGroup:
     reference_paths: list[str] = field(default_factory=list)
     generated_paths: list[str] = field(default_factory=list)
     hidden_paths: list[str] = field(default_factory=list)
+    editable_paths: list[str] = field(default_factory=list)
     research_output_expectations: list[str] = field(default_factory=list)
     guidance_files: list[str] = field(default_factory=list)
     workspace_agents_path: str = ""

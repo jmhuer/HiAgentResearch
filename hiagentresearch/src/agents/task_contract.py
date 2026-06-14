@@ -83,7 +83,7 @@ TASK_CONTRACTS: dict[TaskKind, TaskContract] = {
             "infrastructure the frozen eval never executes is an incomplete cycle, not a safe one."
         ),
         plan_heading="## Verification",
-        plan_expectation="state how you wired the change onto the frozen-eval path (the request_mode/effective_config it produces) and how you confirmed the metric is preserved.",
+        plan_expectation="state how you wired the change onto the frozen-eval path (the effective_config it produces) and how you confirmed the metric is preserved.",
         preserve_metrics=True,
         detail_intent_label="Change goal",
         default_scope=(

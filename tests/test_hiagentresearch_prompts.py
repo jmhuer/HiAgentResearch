@@ -60,6 +60,10 @@ def test_prompt_is_config_backed() -> None:
     assert "stop and" in prompt
     assert "re-read your own diff" in prompt
     assert "Don't keep exploring once the change is reviewed and complete" in prompt
+    # Goals live once in workspace AGENTS.md — not duplicated inline in the prompt.
+    assert "Project-specific expectations" not in prompt
+    assert "Authoritative goals and expectations are in `mnist/AGENTS.md`" in prompt
+    assert "Every cycle starts with concrete evidence" not in prompt
     # The policy mode is sent with its meaning, not just the bare label.
     assert config.policy_modes[group.policy_mode] in prompt
     assert "## Eval Expectations" in prompt
