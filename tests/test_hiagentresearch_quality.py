@@ -56,3 +56,16 @@ def test_research_outcome_marks_targets_met() -> None:
     )
 
     assert outcome.research_outcome == "met_targets"
+
+
+def test_execution_blocked_defaults_to_repair() -> None:
+    outcome = classify_research_outcome(
+        execution_failure_class="infra_failure",
+        eval_passed=False,
+        metrics={},
+        targets={"accuracy": Bounds(min=0.985)},
+    )
+
+    assert outcome.research_outcome == "execution_blocked"
+    assert outcome.next_action == "repair"
+    assert "infra_failure" in outcome.reason

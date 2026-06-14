@@ -532,6 +532,16 @@ def test_loop_controller_feeds_ci_outcome_into_intent_packet(monkeypatch, tmp_pa
     assert updated is not None
     assert updated.last_failure_class == "code_failure"
     assert updated.next_action == "repair"
+    assert updated.last_feedback_ref == ".hiagentresearch/runs/run_ci/ci/feedback.json"
+    assert updated.last_note.startswith("CI eval blocked execution with code_failure")
+    feedback_path = tmp_path / updated.last_feedback_ref
+    assert feedback_path.exists()
+    feedback = json.loads(feedback_path.read_text(encoding="utf-8"))
+    assert feedback["failure_class"] == "code_failure"
+    assert feedback["research_outcome"] == "below_targets"
+    assert feedback["next_action"] == "repair"
+    assert feedback["evidence"]["failure_class.json"] == ".hiagentresearch/runs/run_ci/ci/failure_class.json"
+    assert (feedback_path.parent / "stderr.txt").exists()
 
 
 def test_preserve_parallel_failure_artifacts_copies_worktree_runs(monkeypatch, tmp_path) -> None:

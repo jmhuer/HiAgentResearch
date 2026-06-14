@@ -74,7 +74,7 @@ def write_parse_failure_artifacts(
 ) -> dict[str, Any]:
     research_outcome = {
         "research_outcome": "execution_blocked",
-        "next_action": "repair" if failure_class == "code_failure" else "continue",
+        "next_action": "repair",
         "reason": error,
     }
     _write_json(

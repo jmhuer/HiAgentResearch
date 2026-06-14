@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
 
+from hiagentresearch.src.core.artifacts import eval_node_index_names
 from hiagentresearch.src.core.coerce import as_string_list
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
 from hiagentresearch.src.core.guidance import materialize_framework_guidance
@@ -51,6 +52,7 @@ from hiagentresearch.src.core.models import utc_now_iso
 # so one hiccup does not abort the leaf and cascade into aborting the whole parallel wave. Genuine
 # blocks (agent_moved_head, deterministic invalid cycles) are never retried. Env-overridable.
 _CYCLE_TRANSIENT_RETRIES = max(1, int(os.environ.get("HIAGENTRESEARCH_CYCLE_TRANSIENT_RETRIES", "3")))
+CI_FEEDBACK_SCHEMA_VERSION = 1
 
 
 def _is_transient_cycle_failure(local: dict) -> bool:
@@ -113,6 +115,22 @@ class CycleResult:
     github_research_outcome: str
     artifact_dir: str
     decision: str
+
+
+@dataclass(slots=True)
+class CiFeedback:
+    schema_version: int
+    run_id: str
+    github_run_id: str
+    correlation_id: str
+    failure_class: str
+    research_outcome: str
+    next_action: str
+    summary: str
+    evidence: dict[str, str]
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 @dataclass(slots=True)
@@ -413,41 +431,55 @@ def run_loops(
             except (OSError, json.JSONDecodeError):
                 ci_metrics = {}
             artifact_ref = f"github_actions:{gh_run.database_id}"
-        github_failure = str(failure.get("failure_class", "infra_failure"))
-        github_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
-        met_targets = outcome_met_targets(github_outcome)
-        decision = str(
-            outcome.get(
-                "next_action",
-                "done" if met_targets else ("repair" if github_failure == "code_failure" else "continue"),
+            github_failure = str(failure.get("failure_class", "infra_failure"))
+            github_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
+            met_targets = outcome_met_targets(github_outcome)
+            decision = str(
+                outcome.get(
+                    "next_action",
+                    "done" if met_targets else ("repair" if github_failure != "none" else "continue"),
+                )
             )
-        )
-        # Engineering tasks must PRESERVE the metrics they inherited (the score is a
-        # guardrail, not the goal). If this commit dropped a metric below that floor it
-        # is a regression: not a hard failure (the loop continues so a later cycle can
-        # fix it), but we steer the next cycle to repair it with a specific note.
-        regression_note = ""
-        if task_contract(group_config.task_kind).preserve_metrics:
-            regression_note = _metric_regression_note(
-                registry=registry,
-                bootstrap=bootstrap,
-                metric=group_config.lineage.anchor_metric,
-                current=ci_metrics.get(group_config.lineage.anchor_metric),
-                minimize=loaded_config.evaluation.metric_minimizes(group_config.lineage.anchor_metric),
+            # Engineering tasks must PRESERVE the metrics they inherited (the score is a
+            # guardrail, not the goal). If this commit dropped a metric below that floor it
+            # is a regression: not a hard failure (the loop continues so a later cycle can
+            # fix it), but we steer the next cycle to repair it with a specific note.
+            regression_note = ""
+            if task_contract(group_config.task_kind).preserve_metrics:
+                regression_note = _metric_regression_note(
+                    registry=registry,
+                    bootstrap=bootstrap,
+                    metric=group_config.lineage.anchor_metric,
+                    current=ci_metrics.get(group_config.lineage.anchor_metric),
+                    minimize=loaded_config.evaluation.metric_minimizes(group_config.lineage.anchor_metric),
+                )
+                if regression_note:
+                    decision = "repair"
+            ci_feedback = _preserve_ci_feedback(
+                checkout_root=git_root,
+                local_run_id=local_run_id,
+                github_run_id=gh_run.database_id,
+                artifact_dir=artifact_dir,
+                failure=failure,
+                outcome=outcome,
+                decision=decision,
             )
-            if regression_note:
-                decision = "repair"
-        # Feed the authoritative CI outcome back into the intent packet so the next
-        # cycle's agent prompt reflects how this change actually scored (last failure
-        # class, next action, and any regression to repair). The local cycle no longer
-        # runs an eval, so CI is the only source of this feedback.
-        intent = registry.read_intent_packet(group_id)
-        if intent is not None:
-            intent.last_failure_class = github_failure
-            intent.next_action = decision
-            intent.last_note = regression_note
-            intent.updated_at = utc_now_iso()
-            registry.write_intent_packet(intent)
+            feedback_ref = _path_relative_to(
+                resolve_runs_dir(git_root) / local_run_id / "ci" / "feedback.json",
+                git_root,
+            )
+            # Feed the authoritative CI outcome back into the intent packet so the next
+            # cycle's agent prompt reflects how this change actually scored (last failure
+            # class, next action, and a pointer to diagnostic artifacts). The local cycle no longer
+            # runs an eval, so CI is the only source of this feedback.
+            intent = registry.read_intent_packet(group_id)
+            if intent is not None:
+                intent.last_failure_class = github_failure
+                intent.next_action = decision
+                intent.last_note = regression_note or ci_feedback.summary
+                intent.last_feedback_ref = feedback_ref
+                intent.updated_at = utc_now_iso()
+                registry.write_intent_packet(intent)
         cycles.append(
             CycleResult(
                 loop_index=loop_index,
@@ -532,6 +564,111 @@ def _metric_regression_note(
         f"Your last change regressed {metric} ({float(floor):g} → {float(current):g}); this metric "
         "must be preserved. Restore it (revert or fix the offending change) while keeping the quality improvement."
     )
+
+
+def _preserve_ci_feedback(
+    *,
+    checkout_root: Path,
+    local_run_id: str,
+    github_run_id: str,
+    artifact_dir: Path,
+    failure: dict,
+    outcome: dict,
+    decision: str,
+) -> CiFeedback:
+    ci_dir = resolve_runs_dir(checkout_root) / local_run_id / "ci"
+    if ci_dir.exists():
+        shutil.rmtree(ci_dir)
+    shutil.copytree(artifact_dir, ci_dir)
+    feedback = _build_ci_feedback(
+        checkout_root=checkout_root,
+        ci_dir=ci_dir,
+        local_run_id=local_run_id,
+        github_run_id=github_run_id,
+        failure=failure,
+        outcome=outcome,
+        decision=decision,
+    )
+    (ci_dir / "feedback.json").write_text(
+        json.dumps(feedback.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return feedback
+
+
+def _build_ci_feedback(
+    *,
+    checkout_root: Path,
+    ci_dir: Path,
+    local_run_id: str,
+    github_run_id: str,
+    failure: dict,
+    outcome: dict,
+    decision: str,
+) -> CiFeedback:
+    meta = _read_json(ci_dir / "run_meta.json")
+    parsed = _read_json(ci_dir / "parsed_eval.json")
+    failure_class = str(failure.get("failure_class", "infra_failure"))
+    research_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
+    reason = _first_nonempty(
+        outcome.get("reason"),
+        failure.get("error"),
+        parsed.get("eval_error"),
+        parsed.get("error"),
+    )
+    summary = _ci_feedback_summary(
+        failure_class=failure_class,
+        research_outcome=research_outcome,
+        reason=reason,
+    )
+    evidence = {
+        name: _path_relative_to(ci_dir / name, checkout_root)
+        for name in eval_node_index_names()
+        if (ci_dir / name).exists()
+    }
+    return CiFeedback(
+        schema_version=CI_FEEDBACK_SCHEMA_VERSION,
+        run_id=local_run_id,
+        github_run_id=github_run_id,
+        correlation_id=str(meta.get("correlation_id") or local_run_id),
+        failure_class=failure_class,
+        research_outcome=research_outcome,
+        next_action=decision,
+        summary=summary,
+        evidence=evidence,
+    )
+
+
+def _ci_feedback_summary(*, failure_class: str, research_outcome: str, reason: str) -> str:
+    if failure_class != "none":
+        base = f"CI eval blocked execution with {failure_class}"
+    else:
+        base = f"CI eval completed with outcome {research_outcome}"
+    if reason:
+        return f"{base}: {_trim_feedback_reason(reason)}"
+    return f"{base}."
+
+
+def _trim_feedback_reason(reason: str, limit: int = 500) -> str:
+    text = re.sub(r"\s+", " ", str(reason)).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _first_nonempty(*values: object) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _path_relative_to(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path)
 
 
 def _run_group_capture(run_group_func: RunGroupCallable, **kwargs) -> dict:

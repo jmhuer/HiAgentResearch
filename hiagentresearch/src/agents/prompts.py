@@ -35,7 +35,18 @@ def build_research_cycle_prompt(
     if group.policy_mode_description:
         policy_line += f" — {group.policy_mode_description}"
     note = getattr(intent_packet, "last_note", "") or ""
-    note_line = f"Feedback from last cycle: {note}\n" if note else ""
+    feedback_ref = getattr(intent_packet, "last_feedback_ref", "") or ""
+    feedback_lines = []
+    if note:
+        feedback_lines.append(f"Feedback from last CI eval: {note}")
+    if feedback_ref:
+        feedback_lines.append(
+            f"Detailed CI artifacts: `{feedback_ref}`; inspect this before changing code "
+            "when the prior failure blocked execution."
+        )
+    note_line = "\n".join(feedback_lines)
+    if note_line:
+        note_line += "\n"
     # A group's optional `change_scope` REPLACES the task kind's default scope outright, so
     # there is only ever one scope statement (no competing rules to contradict).
     scope_text = (group.change_scope or "").strip() or contract.default_scope

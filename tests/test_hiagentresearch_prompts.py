@@ -72,6 +72,28 @@ def test_prompt_is_config_backed() -> None:
     assert "mnist/pipeline" not in prompt
 
 
+def test_prompt_surfaces_ci_feedback_ref_without_dumping_artifacts() -> None:
+    config = load_config(Path("configs/standard.yaml"))
+    group = config.research_groups_by_id()["model_architecture"]
+    packet = IntentPacket(
+        group_id=group.id,
+        active_goal_id="h1",
+        goal_text="test goal",
+        attempt_count=1,
+        last_failure_class="infra_failure",
+        next_action="repair",
+        last_note="CI eval blocked execution with infra_failure: activity failed",
+        last_feedback_ref=".hiagentresearch/runs/run_abc/ci/feedback.json",
+    )
+
+    prompt = build_research_cycle_prompt(group=group, intent_packet=packet, run_id="run_next")
+
+    assert "Feedback from last CI eval: CI eval blocked execution with infra_failure" in prompt
+    assert "Detailed CI artifacts: `.hiagentresearch/runs/run_abc/ci/feedback.json`" in prompt
+    assert "inspect this before changing code" in prompt
+    assert "stderr tail" not in prompt.lower()
+
+
 def test_default_scope_differs_per_kind() -> None:
     """Experiments isolate one variable; engineering sizes a cohesive set to the goal;
     merge is an integration step. The scope line is driven by the contract default."""

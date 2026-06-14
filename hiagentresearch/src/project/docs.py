@@ -59,13 +59,28 @@ def _frozen_gate_note(config: HiAgentResearchConfig) -> str:
     if not match:
         return ""
     gate_dir = f".hiagentresearch/eval/gate/layer{match.group(1)}/"
-    if not (REPO_ROOT / gate_dir).exists():
+    gate_path = REPO_ROOT / gate_dir
+    if not gate_path.exists():
         return ""
     editable_tests = f"{config.workdir.rstrip('/')}/core/layer{match.group(1)}/tests/"
+    editable_gate_files = [
+        f"{editable_tests}{path.name}"
+        for path in sorted(gate_path.glob("test_*.py"))
+        if (REPO_ROOT / editable_tests / path.name).exists()
+    ]
+    optional_check = ""
+    if editable_gate_files:
+        optional_check = (
+            " If this repo provides editable copies of the gates, run "
+            f"`PYTHONPATH={config.workdir.rstrip('/') or '.'} python -m pytest {' '.join(editable_gate_files)}` "
+            "as an optional local "
+            "repair check before returning your cycle."
+        )
     return (
         f"Before metric scoring, the eval adapter runs operator-owned pytest gates from "
         f"`{gate_dir}`. These gates are read-only; failures count as `code_failure`, "
         f"not as a scored experiment. Agent-editable tests live under `{editable_tests}`."
+        f"{optional_check}"
     )
 
 

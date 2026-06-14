@@ -1,7 +1,10 @@
+import json
+
 from hiagentresearch.src.core.artifact_schema import (
     classify_non_json_failure,
     normalize_eval,
 )
+from hiagentresearch.src.eval.node import write_parse_failure_artifacts
 
 CANONICAL_METRICS = ("accuracy", "latency_ms")
 
@@ -53,3 +56,17 @@ def test_normalize_eval_keeps_full_payload_in_raw() -> None:
 def test_classify_non_json_failure_module_not_found() -> None:
     stderr = "ModuleNotFoundError: No module named 'sklearn'"
     assert classify_non_json_failure(stderr=stderr, exit_code=1) == "infra_failure"
+
+
+def test_write_parse_failure_artifacts_defaults_to_repair(tmp_path) -> None:
+    outcome = write_parse_failure_artifacts(
+        output_dir=tmp_path,
+        failure_class="infra_failure",
+        exit_code=125,
+        error="eval command timed out",
+    )
+
+    assert outcome["research_outcome"] == "execution_blocked"
+    assert outcome["next_action"] == "repair"
+    written = json.loads((tmp_path / "research_outcome.json").read_text(encoding="utf-8"))
+    assert written["next_action"] == "repair"

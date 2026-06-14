@@ -45,7 +45,7 @@ def classify_research_outcome(
     if execution_failure_class != "none":
         return ResearchOutcome(
             research_outcome="execution_blocked",
-            next_action="repair" if execution_failure_class == "code_failure" else "continue",
+            next_action="repair",
             reason=f"execution did not complete cleanly: {execution_failure_class}",
         )
 
