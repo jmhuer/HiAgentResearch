@@ -4,7 +4,18 @@ import { mergeContributionEdges } from "./merge_contributions.js";
 const SQL_HTTPVFS_URL = "https://cdn.jsdelivr.net/npm/sql.js-httpvfs/+esm";
 const ECHARTS_URL = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.esm.min.js";
 const ALL_GROUPS = "__all__";
-const SERIES_COLORS = ["#89b4ff", "#7ee787", "#f2cc60", "#ff8b8b", "#c9a8ff", "#77d4ff"];
+// Distinct series colors via golden-angle hue rotation so adjacent lineage series stay separable
+// even when a run fans out into many groups (a layered run has 13+); a short fixed palette repeats a
+// hue (e.g. qwen and inference_tuning colliding). Tuned for this theme's light background.
+function buildSeriesColors(count, saturation, lightness) {
+  const golden = 137.508;
+  return Array.from({ length: count }, (_, i) => {
+    const hue = ((i * golden) % 360).toFixed(1);
+    const light = lightness - (i % 2 === 0 ? 8 : 0);
+    return `hsl(${hue}, ${saturation}%, ${light}%)`;
+  });
+}
+const SERIES_COLORS = buildSeriesColors(24, 60, 46);
 const THRESHOLD_LINE_COLOR = "#9aa4b2";
 const MERGE_CONTRIB_SERIES = "__merge_contributions__";
 
@@ -129,21 +140,18 @@ function inChartScope(groupId) {
   return !ids || ids.has(String(groupId));
 }
 
-// An area's trajectory ends at the commit its lineage carries FORWARD — its top (winning) commit.
-// A MERGE collapse keeps integrating past that peak, and those trailing loops scored lower and feed
-// nothing downstream (nothing inherits or merges them) — from the winning lineage's view they are
-// dropped losers, like a SELECT's discarded leaves. Drawing them makes a downstream branch look like
-// it started from that low tail. So we cut a collapse's trajectory at its carried-forward step on
-// BOTH the Overview and per-area tabs. On the Overview every group ends at its carried commit; on a
-// per-area tab only a collapse is trimmed — a leaf keeps every loop so you can inspect that
-// approach's full trajectory. SELECT collapses already end on their winner (no-op). The cutoff is
-// anchor-metric based — one carried commit, applied uniformly across every displayed metric.
-function trajectoryDisplayCutoff(groupId) {
-  const topology = dashboardData.lineage_topology || {};
-  const step = (topology.group_trajectory_winners || {})[groupId]?.trajectory_step;
-  if (!Number.isFinite(step)) return Infinity;
-  if (activeTab()?.overview) return Number(step);
-  return (topology.groups || {})[groupId]?.role === "collapse" ? Number(step) : Infinity;
+// On the Overview every area is abstracted to the commit its lineage carries FORWARD (its top
+// commit): a MERGE collapse's trailing loops scored lower and feed nothing downstream, so cutting
+// each trajectory at its carried-forward step keeps the "branches collapse into one path" story
+// honest. A per-area tab is the opposite — you go there to inspect that area's OWN work, so it keeps
+// every loop and failed branch (this returns Infinity off the Overview); upstream areas are already
+// abstracted there to a single connector by the lineage walk. Anchor-metric based — one carried
+// commit, applied uniformly across every displayed metric.
+function overviewTrajectoryCutoff(groupId) {
+  if (!activeTab()?.overview) return Infinity;
+  const step = ((dashboardData.lineage_topology || {}).group_trajectory_winners || {})[groupId]
+    ?.trajectory_step;
+  return Number.isFinite(step) ? Number(step) : Infinity;
 }
 
 // --- Lineage-DAG walk: the single rule for connecting trajectories ----------------------
@@ -1080,7 +1088,7 @@ function chartPointsForSelection(groupId, metricName) {
         inChartScope(metric.group_id) &&
         metric.metric_name === metricName &&
         !(metric.path_of_leaf && inChartScope(metric.path_of_leaf)) &&
-        Number(metric.trajectory_x) <= trajectoryDisplayCutoff(metric.group_id),
+        Number(metric.trajectory_x) <= overviewTrajectoryCutoff(metric.group_id),
     )
     .map((metric) => enrichMetricPoint(metric, indexes))
     .filter((point) => Number.isFinite(point.metric_value));
