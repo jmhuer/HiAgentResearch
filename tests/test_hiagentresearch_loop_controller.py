@@ -586,6 +586,87 @@ def test_incomplete_ci_bundle_is_treated_as_infra_failure_not_a_crash(monkeypatc
     assert (tmp_path / ".hiagentresearch" / "runs" / "run_partial" / "ci" / "stderr.txt").exists()
 
 
+def test_no_downloadable_artifacts_is_treated_as_infra_failure_not_a_crash(monkeypatch, tmp_path) -> None:
+    """If the eval job uploaded nothing, `gh run download` raises GitHubActionsError. The loop
+    must treat that as an infra_failure cycle, not let the exception crash run_loops / abort
+    the wave."""
+    from hiagentresearch.src.github.actions import GitHubActionsError, GitHubRun
+
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
+    run_dir = tmp_path / ".hiagentresearch" / "runs" / "run_noart"
+    run_dir.mkdir(parents=True)
+    (run_dir / "cycle_intent.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_noart",
+                "group_id": "model_architecture",
+                "objective": "Improve model architecture while preserving latency budget.",
+                "goal_id": "model_architecture-g1",
+                "goal": "Try a bounded model change.",
+                "planned_code_changes": ["Replace one model layer."],
+                "target_files": ["mnist/src/model.py"],
+                "success_criteria": ["accuracy improves"],
+                "rollback_plan": "Revert.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class NoArtifactGitHub:
+        def find_run_for_head(self, **kwargs):
+            return GitHubRun(
+                database_id="123", head_sha=kwargs["head_sha"], name=kwargs["workflow_name"], status="completed"
+            )
+
+        def watch_run(self, run_id: str) -> bool:
+            return True
+
+        def download_artifacts(self, *, run_id: str, target_dir, clean: bool = True):
+            raise GitHubActionsError(f"gh run download {run_id} failed: no valid artifacts found to download")
+
+        def artifact_payload_dir(self, download_dir):
+            return download_dir
+
+    def fake_run_group(**kwargs):
+        print(json.dumps({"ok": True, "run_id": "run_noart", "failure_class": "none"}))
+        return 0
+
+    ingest_calls: list = []
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.install_dependency_files", lambda config: None
+    )
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.materialize_framework_guidance",
+        lambda *, root: root / ".hiagentresearch/AGENTS.md",
+    )
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.write_workspace_agents",
+        lambda config, *, root: root / "mnist/AGENTS.md",
+    )
+    registry = Registry(tmp_path / ".hiagentresearch" / "state")
+    registry.init()
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.93, "latency_ms": 5.0, "duration_sec": 1.0})
+
+    summary = run_loops(
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        loops=1,
+        workdir=tmp_path,
+        agent_model="composer-2.5",
+        config=load_config(Path("configs/standard.yaml")),
+        git=FakeGit(),
+        github=NoArtifactGitHub(),
+        run_group_func=fake_run_group,
+        ingest_func=lambda *a: ingest_calls.append(a) or 0,
+    )
+
+    # No crash; recorded as infra_failure and steered to repair; never ingested.
+    assert summary.cycles[0].github_failure_class == "infra_failure"
+    assert summary.cycles[0].decision == "repair"
+    assert ingest_calls == []
+
+
 def test_agent_moved_head_blocks_the_loop(monkeypatch, tmp_path) -> None:
     """If the agent commits/moves HEAD during a cycle (a contract violation), the cycle
     fails fast with a clear agent_moved_head reason rather than silently continuing."""

@@ -25,7 +25,12 @@ from hiagentresearch.src.agents.task_contract import task_contract
 from hiagentresearch.src.git.service import GitService
 from hiagentresearch.src.git.worktree import WorktreeManager
 from hiagentresearch.src.lineage.resolve import BranchBootstrap, resolve_branch_bootstrap
-from hiagentresearch.src.github.actions import GitHubActionsService, gh_repo_slug, load_run_meta
+from hiagentresearch.src.github.actions import (
+    GitHubActionsError,
+    GitHubActionsService,
+    gh_repo_slug,
+    load_run_meta,
+)
 from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot, install_dependency_files
 from hiagentresearch.src.project.docs import write_workspace_agents
 from hiagentresearch.src.paths import (
@@ -396,15 +401,23 @@ def run_loops(
         github_service.watch_run(gh_run.database_id)
         with tempfile.TemporaryDirectory(prefix=f"hiagentresearch-gh-{gh_run.database_id}-") as tmp:
             download_dir = Path(tmp)
-            github_service.download_artifacts(run_id=gh_run.database_id, target_dir=download_dir)
-            artifact_dir = github_service.artifact_payload_dir(download_dir)
             artifact_ref = f"github_actions:{gh_run.database_id}"
-            if not (artifact_dir / "run_meta.json").is_file():
-                # Incomplete CI bundle: the eval job crashed before writing a full result
-                # (no run_meta.json) yet still uploaded a partial artifact. Treat it as an
-                # infra_failure cycle — preserve what we got and steer repair — instead of
-                # crashing run_loops on the unreadable bundle and aborting the whole wave.
-                # This also lets later loops of this group retry rather than dying outright.
+            # The eval can yield no downloadable artifacts at all (job crashed before upload
+            # -> gh "no valid artifacts found") or a partial bundle missing run_meta.json.
+            # Both are infra failures handled below — never reasons to crash run_loops and
+            # abort the whole wave on an uncaught download/parse error.
+            try:
+                github_service.download_artifacts(run_id=gh_run.database_id, target_dir=download_dir)
+                artifact_dir = github_service.artifact_payload_dir(download_dir)
+                bundle_complete = (artifact_dir / "run_meta.json").is_file()
+            except (GitHubActionsError, OSError):
+                artifact_dir = download_dir
+                bundle_complete = False
+            if not bundle_complete:
+                # No usable CI result: the eval job crashed before uploading a full bundle
+                # (no artifacts, or a partial bundle missing run_meta.json). Treat it as an
+                # infra_failure cycle — preserve whatever we got and steer repair — instead of
+                # crashing run_loops and aborting the wave. Later loops of this group retry.
                 _preserve_ci_artifacts(
                     checkout_root=git_root, local_run_id=local_run_id, artifact_dir=artifact_dir
                 )
@@ -417,9 +430,9 @@ def run_loops(
                     intent.last_failure_class = github_failure
                     intent.next_action = decision
                     intent.last_note = (
-                        f"CI eval run {gh_run.database_id} produced an incomplete artifact bundle "
-                        "(missing run_meta.json); the eval job likely crashed before reporting a "
-                        "result. Repair the change so the eval runs to completion."
+                        f"CI eval run {gh_run.database_id} produced no usable result bundle "
+                        "(no artifacts or missing run_meta.json); the eval job likely crashed "
+                        "before reporting. Repair the change so the eval runs to completion."
                     )
                     intent.updated_at = utc_now_iso()
                     registry.write_intent_packet(intent)
