@@ -498,13 +498,16 @@ def run_loops(
         if stop_on_success and met_targets:
             return LoopSummary(ok=True, group_id=group_id, branch=target_branch, cycles=cycles, reason="targets met")
 
-    # A group succeeds if it produced at least one clean, committable result. A
-    # code_failure cycle is a discarded attempt (no metric, already excluded from lineage
-    # by the registry's failure_class filter) that the next loop is steered to repair —
-    # the same non-terminal treatment a metric regression already gets. Only an all-failure
-    # group (no clean result left to inherit or merge) is a genuine dead-end that fails the
-    # group and aborts the wave.
-    ok = any(cycle.github_failure_class == "none" for cycle in cycles)
+    # A group is a genuine dead-end only when NO clean, inheritable result exists for it
+    # anywhere in the session — not merely in this invocation. On resume a group may already
+    # have clean commits from an earlier loops-all run (recorded in the registry/lineage);
+    # those stay inheritable, so a re-run whose own cycles all failed must not abort the wave.
+    # A code_failure/infra_failure cycle is a discarded attempt the next loop is steered to
+    # repair — the same non-terminal treatment a metric regression already gets.
+    ok = (
+        any(cycle.github_failure_class == "none" for cycle in cycles)
+        or registry.clean_github_cycle_count(group_id) > 0
+    )
     reason = "requested loops completed" if ok else "max loops reached without a clean result"
     return LoopSummary(ok=ok, group_id=group_id, branch=target_branch, cycles=cycles, reason=reason)
 
@@ -874,7 +877,15 @@ def _group_complete(
     effective_loops = group.loops if group.loops is not None else loops
     if effective_loops == 0:
         return registry.has_cycle_manifest(group_id, 0)
-    return registry.clean_github_cycle_count(group_id) >= effective_loops
+    clean = registry.clean_github_cycle_count(group_id)
+    if clean >= effective_loops:
+        return True
+    # Budget exhausted with a usable result: the group already committed its full --loops
+    # budget of CI cycles and has at least one clean, inheritable commit. Re-running it on
+    # resume would exceed the requested budget and risk trading a good result for a flaky
+    # infra_failure, so treat it as done. A group with zero clean cycles stays pending so its
+    # dead-end is handled where it runs (leaf tolerated, root fails the wave).
+    return clean >= 1 and registry.github_cycle_count(group_id) >= effective_loops
 
 
 def _run_wave_parallel(

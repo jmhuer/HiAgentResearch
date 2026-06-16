@@ -622,6 +622,32 @@ class Registry:
         finally:
             conn.close()
 
+    def github_cycle_count(self, group_id: str) -> int:
+        """Count ALL committed CI-backed cycles for a group this session, regardless of
+        outcome — its used loop budget (clean + failed). Counts distinct loop_index, so a
+        re-run of the same loops does not inflate the total past the configured budget.
+        """
+        session_filter, session_params = self._session_run_filter(table="r")
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT c.loop_index)
+                FROM runs r
+                JOIN cycles c ON c.run_id = r.run_id
+                WHERE r.group_id = ?
+                  AND r.commit_sha != ''
+                  AND r.run_id LIKE 'gh_%'
+                  AND c.loop_index IS NOT NULL
+                  AND c.loop_index > 0
+                  {session_filter}
+                """,
+                (group_id, *session_params),
+            ).fetchone()
+            return int(row[0] or 0) if row else 0
+        finally:
+            conn.close()
+
     def has_cycle_manifest(self, group_id: str, loop_index: int) -> bool:
         conn = sqlite3.connect(self.db_path)
         try:

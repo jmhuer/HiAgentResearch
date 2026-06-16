@@ -166,6 +166,175 @@ def test_pending_wave_groups_reuses_existing_clean_ci_cycles(tmp_path) -> None:
     assert _pending_wave_groups(["g1", "g2"], registry=registry, config=config, loops=1) == ["g2"]
 
 
+def test_group_complete_counts_used_budget_not_only_clean_cycles(tmp_path) -> None:
+    """On resume a group that already committed its full --loops budget and has at least one
+    clean, inheritable result is done — even if not every loop was clean — so it is not
+    wastefully re-run. A group with zero clean cycles, or one still under budget, stays
+    pending."""
+    from hiagentresearch.src.runtime.loop_controller import _group_complete
+
+    registry = Registry(tmp_path / ".hiagentresearch" / "state")
+    registry.init()
+
+    def record(group: str, loop: int, failure_class: str) -> None:
+        rid = f"gh_{group}_{loop}"
+        registry.record_run(
+            run_id=rid,
+            group_id=group,
+            branch=f"research/{group}",
+            status="finished" if failure_class == "none" else "error",
+            failure_class=failure_class,
+            metrics={},
+            commit_sha=f"sha_{group}_{loop}",
+        )
+        registry.record_cycle_manifest(
+            run_id=rid,
+            manifest_path="cycle_manifest.json",
+            manifest={
+                "group_id": group,
+                "branch": f"research/{group}",
+                "loop_index": loop,
+                "goal_id": f"{group}-g",
+                "goal": "x",
+                "target_files": [],
+                "planned_code_changes": [],
+            },
+        )
+
+    # Budget used (3 cycles), 2 clean + 1 infra_failure -> complete.
+    for loop, fc in ((1, "none"), (2, "none"), (3, "infra_failure")):
+        record("g_done", loop, fc)
+    # Budget used but zero clean -> dead-end, stays pending.
+    for loop in (1, 2, 3):
+        record("g_dead", loop, "infra_failure")
+    # Under budget (1 clean) -> stays pending.
+    record("g_partial", 1, "none")
+
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        policy_modes={"explore": "Explore."},
+        research_groups=[
+            ResearchGroupConfig(id=g, branch=f"research/{g}", objective="t", policy_mode="explore")
+            for g in ("g_done", "g_dead", "g_partial")
+        ],
+    )
+
+    assert registry.github_cycle_count("g_done") == 3
+    assert registry.clean_github_cycle_count("g_done") == 2
+    assert registry.github_cycle_count("g_dead") == 3
+    assert registry.clean_github_cycle_count("g_dead") == 0
+
+    assert _group_complete(registry=registry, config=config, group_id="g_done", loops=3) is True
+    assert _group_complete(registry=registry, config=config, group_id="g_dead", loops=3) is False
+    assert _group_complete(registry=registry, config=config, group_id="g_partial", loops=3) is False
+
+
+def test_resume_does_not_abort_when_registry_has_a_prior_clean_cycle(monkeypatch, tmp_path) -> None:
+    """A re-run whose own CI cycles all fail must NOT be marked a dead-end if the registry
+    already holds a clean, inheritable cycle from an earlier run — that would falsely abort
+    the wave on a root group that has perfectly good commits to inherit from."""
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
+    run_dir = tmp_path / ".hiagentresearch" / "runs" / "run_resume"
+    run_dir.mkdir(parents=True)
+    (run_dir / "cycle_intent.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_resume",
+                "group_id": "model_architecture",
+                "objective": "Improve model architecture while preserving latency budget.",
+                "goal_id": "model_architecture-g1",
+                "goal": "Try a bounded model change.",
+                "planned_code_changes": ["Replace one model layer."],
+                "target_files": ["mnist/src/model.py"],
+                "success_criteria": ["accuracy improves"],
+                "rollback_plan": "Revert.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    # This run's CI reports infra_failure.
+    artifact_dir = tmp_path / "hiagentresearch-123"
+    artifact_dir.mkdir()
+    (artifact_dir / "run_meta.json").write_text(
+        json.dumps({"correlation_id": "run_resume", "workflow_run_id": "123"}), encoding="utf-8"
+    )
+    (artifact_dir / "failure_class.json").write_text(
+        json.dumps({"failure_class": "infra_failure", "exit_code": 2}), encoding="utf-8"
+    )
+    (artifact_dir / "research_outcome.json").write_text(
+        json.dumps({"research_outcome": "execution_blocked", "next_action": "repair", "reason": "boom"}),
+        encoding="utf-8",
+    )
+    (artifact_dir / "metrics.json").write_text(json.dumps({}), encoding="utf-8")
+
+    def fake_run_group(**kwargs):
+        print(json.dumps({"ok": True, "run_id": "run_resume", "failure_class": "none"}))
+        return 0
+
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.install_dependency_files", lambda config: None
+    )
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.materialize_framework_guidance",
+        lambda *, root: root / ".hiagentresearch/AGENTS.md",
+    )
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.write_workspace_agents",
+        lambda config, *, root: root / "mnist/AGENTS.md",
+    )
+
+    registry = Registry(tmp_path / ".hiagentresearch" / "state")
+    registry.init()
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.93, "latency_ms": 5.0, "duration_sec": 1.0})
+    # A clean, inheritable cycle recorded by an earlier loops-all run.
+    registry.record_run(
+        run_id="gh_prior",
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        status="finished",
+        failure_class="none",
+        metrics={"accuracy": 0.95},
+        commit_sha="priorsha",
+    )
+    registry.record_cycle_manifest(
+        run_id="gh_prior",
+        manifest_path="cycle_manifest.json",
+        manifest={
+            "group_id": "model_architecture",
+            "branch": "research/model-architecture",
+            "loop_index": 1,
+            "goal_id": "model_architecture-g1",
+            "goal": "x",
+            "target_files": [],
+            "planned_code_changes": [],
+        },
+    )
+
+    summary = run_loops(
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        loops=1,
+        workdir=tmp_path,
+        agent_model="composer-2.5",
+        config=load_config(Path("configs/standard.yaml")),
+        git=FakeGit(),
+        github=FakeGitHub(artifact_dir),
+        run_group_func=fake_run_group,
+        ingest_func=lambda *a: 0,
+    )
+
+    assert summary.cycles[0].github_failure_class == "infra_failure"
+    # Not a dead-end: a prior clean cycle remains inheritable, so the wave is not aborted.
+    assert summary.ok is True
+
+
 def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
     monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
