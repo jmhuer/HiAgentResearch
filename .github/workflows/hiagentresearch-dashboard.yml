@@ -78,7 +78,6 @@ jobs:
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           import subprocess
-          import sys
           from pathlib import Path
 
           from hiagentresearch.src.core.config import load_config
@@ -131,21 +130,13 @@ jobs:
                   continue
               if branch not in collectible_branches or not sha:
                   continue
-              live_ref = f"origin/{branch}"
-              is_current_branch_history = subprocess.run(
-                  ["git", "merge-base", "--is-ancestor", sha, live_ref],
-                  check=False,
-              ).returncode == 0
-              if not is_current_branch_history:
-                  # Fail loud rather than silently shrinking the published view: a
-                  # successful in-session run was dropped because its commit is no
-                  # longer in branch history (e.g. force-push/rebase).
-                  print(
-                      f"::warning::dropping run {row.get('databaseId')} on {branch} "
-                      f"({sha[:12]}): commit not in {live_ref} history",
-                      file=sys.stderr,
-                  )
-                  continue
+              # Do NOT filter by current-branch ancestry. Research branches are rebuilt from
+              # the lineage anchor (force-pushed) on every loop/resume, so a successfully
+              # evaluated commit is routinely no longer an ancestor of the branch tip. Dropping
+              # those here discards the entire session's data and produces an empty dashboard.
+              # Session + collectible-branch scoping above is sufficient; the registry build
+              # dedups runs and picks winners from the lineage manifests, matching exactly what
+              # the local registry-built dashboard already shows.
               run_id = str(row["databaseId"])
               subprocess.run(
                   [
