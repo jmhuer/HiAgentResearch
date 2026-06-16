@@ -396,67 +396,92 @@ def run_loops(
             download_dir = Path(tmp)
             github_service.download_artifacts(run_id=gh_run.database_id, target_dir=download_dir)
             artifact_dir = github_service.artifact_payload_dir(download_dir)
-            meta = load_run_meta(artifact_dir)
-            if str(meta.get("correlation_id", "")) != local_run_id:
-                return LoopSummary(
-                    ok=False,
-                    group_id=group_id,
-                    branch=target_branch,
-                    cycles=cycles,
-                    reason="github artifact correlation_id did not match local run_id",
-                )
-
-            ci_dir = _preserve_ci_artifacts(
-                checkout_root=git_root,
-                local_run_id=local_run_id,
-                artifact_dir=artifact_dir,
-            )
-
-            ingest_code = ingest_func(f"gh_{gh_run.database_id}", group_id, target_branch, ci_dir)
-            if ingest_code != 0:
-                return LoopSummary(
-                    ok=False,
-                    group_id=group_id,
-                    branch=target_branch,
-                    cycles=cycles,
-                    reason="github artifact ingest failed",
-                )
-
-            ci = CIResult.from_ci_dir(ci_dir)
             artifact_ref = f"github_actions:{gh_run.database_id}"
-            github_failure = ci.failure_class
-            github_outcome = ci.research_outcome
-            met_targets = ci.met_targets
-            decision = ci.decision()
-            # Engineering tasks must PRESERVE the metrics they inherited (the score is a
-            # guardrail, not the goal). If this commit dropped a metric below that floor it
-            # is a regression: not a hard failure (the loop continues so a later cycle can
-            # fix it), but we steer the next cycle to repair it with a specific note.
-            regression_note = ""
-            if task_contract(group_config.task_kind).preserve_metrics:
-                regression_note = _metric_regression_note(
-                    registry=registry,
-                    bootstrap=bootstrap,
-                    metric=group_config.lineage.anchor_metric,
-                    current=ci.metrics.get(group_config.lineage.anchor_metric),
-                    minimize=loaded_config.evaluation.metric_minimizes(group_config.lineage.anchor_metric),
+            if not (artifact_dir / "run_meta.json").is_file():
+                # Incomplete CI bundle: the eval job crashed before writing a full result
+                # (no run_meta.json) yet still uploaded a partial artifact. Treat it as an
+                # infra_failure cycle — preserve what we got and steer repair — instead of
+                # crashing run_loops on the unreadable bundle and aborting the whole wave.
+                # This also lets later loops of this group retry rather than dying outright.
+                _preserve_ci_artifacts(
+                    checkout_root=git_root, local_run_id=local_run_id, artifact_dir=artifact_dir
                 )
-                if regression_note:
-                    decision = "repair"
-            steering_note = _diagnostics_steering_note(ci_dir, ci)
-            feedback_ref = _path_relative_to(ci_dir, git_root)
-            # Feed the authoritative CI outcome back into the intent packet so the next
-            # cycle's agent prompt reflects how this change actually scored (last failure
-            # class, next action, and a pointer to diagnostic artifacts). The local cycle no longer
-            # runs an eval, so CI is the only source of this feedback.
-            intent = registry.read_intent_packet(group_id)
-            if intent is not None:
-                intent.last_failure_class = github_failure
-                intent.next_action = decision
-                intent.last_note = regression_note or steering_note
-                intent.last_feedback_ref = feedback_ref
-                intent.updated_at = utc_now_iso()
-                registry.write_intent_packet(intent)
+                github_failure = "infra_failure"
+                github_outcome = "execution_blocked"
+                met_targets = False
+                decision = "repair"
+                intent = registry.read_intent_packet(group_id)
+                if intent is not None:
+                    intent.last_failure_class = github_failure
+                    intent.next_action = decision
+                    intent.last_note = (
+                        f"CI eval run {gh_run.database_id} produced an incomplete artifact bundle "
+                        "(missing run_meta.json); the eval job likely crashed before reporting a "
+                        "result. Repair the change so the eval runs to completion."
+                    )
+                    intent.updated_at = utc_now_iso()
+                    registry.write_intent_packet(intent)
+            else:
+                meta = load_run_meta(artifact_dir)
+                if str(meta.get("correlation_id", "")) != local_run_id:
+                    return LoopSummary(
+                        ok=False,
+                        group_id=group_id,
+                        branch=target_branch,
+                        cycles=cycles,
+                        reason="github artifact correlation_id did not match local run_id",
+                    )
+
+                ci_dir = _preserve_ci_artifacts(
+                    checkout_root=git_root,
+                    local_run_id=local_run_id,
+                    artifact_dir=artifact_dir,
+                )
+
+                ingest_code = ingest_func(f"gh_{gh_run.database_id}", group_id, target_branch, ci_dir)
+                if ingest_code != 0:
+                    return LoopSummary(
+                        ok=False,
+                        group_id=group_id,
+                        branch=target_branch,
+                        cycles=cycles,
+                        reason="github artifact ingest failed",
+                    )
+
+                ci = CIResult.from_ci_dir(ci_dir)
+                github_failure = ci.failure_class
+                github_outcome = ci.research_outcome
+                met_targets = ci.met_targets
+                decision = ci.decision()
+                # Engineering tasks must PRESERVE the metrics they inherited (the score is a
+                # guardrail, not the goal). If this commit dropped a metric below that floor it
+                # is a regression: not a hard failure (the loop continues so a later cycle can
+                # fix it), but we steer the next cycle to repair it with a specific note.
+                regression_note = ""
+                if task_contract(group_config.task_kind).preserve_metrics:
+                    regression_note = _metric_regression_note(
+                        registry=registry,
+                        bootstrap=bootstrap,
+                        metric=group_config.lineage.anchor_metric,
+                        current=ci.metrics.get(group_config.lineage.anchor_metric),
+                        minimize=loaded_config.evaluation.metric_minimizes(group_config.lineage.anchor_metric),
+                    )
+                    if regression_note:
+                        decision = "repair"
+                steering_note = _diagnostics_steering_note(ci_dir, ci)
+                feedback_ref = _path_relative_to(ci_dir, git_root)
+                # Feed the authoritative CI outcome back into the intent packet so the next
+                # cycle's agent prompt reflects how this change actually scored (last failure
+                # class, next action, and a pointer to diagnostic artifacts). The local cycle no
+                # longer runs an eval, so CI is the only source of this feedback.
+                intent = registry.read_intent_packet(group_id)
+                if intent is not None:
+                    intent.last_failure_class = github_failure
+                    intent.next_action = decision
+                    intent.last_note = regression_note or steering_note
+                    intent.last_feedback_ref = feedback_ref
+                    intent.updated_at = utc_now_iso()
+                    registry.write_intent_packet(intent)
         cycles.append(
             CycleResult(
                 loop_index=loop_index,

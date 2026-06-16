@@ -275,6 +275,84 @@ def test_loop_controller_commits_pushes_and_ingests(monkeypatch, tmp_path) -> No
     assert ingested["args"][0] == "gh_123"
 
 
+def test_incomplete_ci_bundle_is_treated_as_infra_failure_not_a_crash(monkeypatch, tmp_path) -> None:
+    """A CI eval job that crashes can still upload a partial artifact bundle missing
+    run_meta.json. The loop must treat that as an infra_failure cycle (preserve artifacts,
+    steer repair) and keep going — never raise FileNotFoundError and abort the whole wave."""
+    monkeypatch.setattr("hiagentresearch.src.runtime.loop_controller.REPO_ROOT", tmp_path)
+    monkeypatch.setenv("HIAGENTRESEARCH_STATE_DIR", str(tmp_path / ".hiagentresearch" / "state"))
+    run_dir = tmp_path / ".hiagentresearch" / "runs" / "run_partial"
+    run_dir.mkdir(parents=True)
+    (run_dir / "cycle_intent.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_partial",
+                "group_id": "model_architecture",
+                "objective": "Improve model architecture while preserving latency budget.",
+                "goal_id": "model_architecture-g1",
+                "goal": "Try a bounded model change.",
+                "planned_code_changes": ["Replace one model layer with a smaller equivalent."],
+                "target_files": ["mnist/src/model.py"],
+                "success_criteria": ["accuracy improves"],
+                "rollback_plan": "Revert the model layer.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Partial bundle: an artifact was uploaded, but the eval crashed before run_meta.json.
+    artifact_dir = tmp_path / "hiagentresearch-123"
+    artifact_dir.mkdir()
+    (artifact_dir / "stderr.txt").write_text("Traceback ... eval crashed", encoding="utf-8")
+
+    def fake_run_group(**kwargs):
+        print(json.dumps({"ok": True, "run_id": "run_partial", "failure_class": "none"}))
+        return 0
+
+    ingest_calls: list[tuple] = []
+
+    def fake_ingest(run_id, group_id, branch, artifact_path):
+        ingest_calls.append((run_id, group_id, branch, artifact_path))
+        return 0
+
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.install_dependency_files", lambda config: None
+    )
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.materialize_framework_guidance",
+        lambda *, root: root / ".hiagentresearch/AGENTS.md",
+    )
+    monkeypatch.setattr(
+        "hiagentresearch.src.runtime.loop_controller.write_workspace_agents",
+        lambda config, *, root: root / "mnist/AGENTS.md",
+    )
+    registry = Registry(tmp_path / ".hiagentresearch" / "state")
+    registry.init()
+    registry.record_baseline_snapshot(ref="main", metrics={"accuracy": 0.93, "latency_ms": 5.0, "duration_sec": 1.0})
+
+    summary = run_loops(
+        group_id="model_architecture",
+        branch="research/model-architecture",
+        loops=1,
+        workdir=tmp_path,
+        agent_model="composer-2.5",
+        config=load_config(Path("configs/standard.yaml")),
+        git=FakeGit(),
+        github=FakeGitHub(artifact_dir),
+        run_group_func=fake_run_group,
+        ingest_func=fake_ingest,
+    )
+
+    # No crash; the cycle is recorded as infra_failure and steered to repair.
+    assert summary.cycles[0].github_failure_class == "infra_failure"
+    assert summary.cycles[0].decision == "repair"
+    # Incomplete bundle is never ingested (nothing valid to ingest).
+    assert ingest_calls == []
+    # With no clean cycle the group fails gracefully (it does not raise / abort the wave).
+    assert summary.ok is False
+    # Preserved artifacts for debugging.
+    assert (tmp_path / ".hiagentresearch" / "runs" / "run_partial" / "ci" / "stderr.txt").exists()
+
+
 def test_agent_moved_head_blocks_the_loop(monkeypatch, tmp_path) -> None:
     """If the agent commits/moves HEAD during a cycle (a contract violation), the cycle
     fails fast with a clear agent_moved_head reason rather than silently continuing."""
