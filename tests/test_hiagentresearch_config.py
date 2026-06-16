@@ -316,7 +316,7 @@ def test_desugar_expands_area_into_leaves_and_collapse() -> None:
     assert by_id["augmentation__a1"].seed_approach == "randaugment"
     assert by_id["augmentation__a1"].role == "leaf"
     assert by_id["augmentation__a1"].area == "augmentation"
-    assert by_id["augmentation__a1"].branch == "research/augmentation-a1"
+    assert by_id["augmentation__a1"].branch == "hiagentresearch/augmentation-a1"
     collapse = by_id["augmentation__collapse"]
     assert collapse.task_kind == "merge" and collapse.role == "collapse"
     assert collapse.lineage.draw_from == ["augmentation__a1", "augmentation__a2"]
