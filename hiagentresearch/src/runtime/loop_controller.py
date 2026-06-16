@@ -974,26 +974,59 @@ def _run_wave_parallel(
         # rather than discarding the whole wave's work and aborting the run. Abort only when EVERY
         # group in the wave failed, leaving the area with nothing for downstream to build on.
         preserved = _preserve_parallel_failure_artifacts(failed_groups, worktrees)
-        all_failed = len(failed_groups) == len(processes)
+        # Abort only when a failed group leaves downstream with NO inheritable result — not
+        # merely when every process in this (possibly skip-trimmed) wave exited nonzero. A
+        # failed leaf whose area still has a clean sibling is tolerated; the run aborts only
+        # on a genuine dead-end (a non-leaf, or a whole area with no clean leaf).
+        blocking = [
+            group_id
+            for group_id in failed_groups
+            if _failed_group_blocks_downstream(group_id, config=config, registry=registry)
+        ]
+        abort = bool(blocking)
         print(
             json.dumps(
                 {
-                    "ok": not all_failed,
+                    "ok": not abort,
                     "reason": (
-                        "entire parallel wave failed"
-                        if all_failed
+                        f"wave aborted: no inheritable result for {blocking}"
+                        if abort
                         else "continued past failed leaves; preserved their artifacts"
                     ),
                     "failed_groups": failed_groups,
+                    "blocking_groups": blocking,
                     "artifacts": preserved,
                 },
                 indent=2,
             ),
             flush=True,
         )
-        if all_failed:
+        if abort:
             return 1
     return 0
+
+
+def _failed_group_blocks_downstream(
+    group_id: str, *, config: HiAgentResearchConfig, registry: Registry
+) -> bool:
+    """Whether a failed group leaves downstream with no inheritable clean result.
+
+    A group that produced any clean cycle this session is fine (its commit is inheritable).
+    A failed *leaf* is fine as long as its area retains at least one clean leaf — the collapse
+    adopts the survivors and lineage resolution already tolerates a missing leaf. Any other
+    failed group with zero clean cycles (a single leaf, a collapse/merge, or a flat root that
+    downstream inherits from directly) is a genuine dead-end that must abort the wave.
+    """
+    if registry.clean_github_cycle_count(group_id) > 0:
+        return False
+    group = config.group_by_id(group_id)
+    if group.role == "leaf" and group.area:
+        area_leaves = [
+            g.id for g in config.research_groups if g.area == group.area and g.role == "leaf"
+        ]
+        if any(registry.clean_github_cycle_count(leaf_id) > 0 for leaf_id in area_leaves):
+            return False
+    return True
 
 
 def _preserve_parallel_failure_artifacts(wave: list[str], worktrees: WorktreeManager) -> list[str]:

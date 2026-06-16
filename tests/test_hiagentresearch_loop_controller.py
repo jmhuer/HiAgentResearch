@@ -236,6 +236,69 @@ def test_group_complete_counts_used_budget_not_only_clean_cycles(tmp_path) -> No
     assert _group_complete(registry=registry, config=config, group_id="g_partial", loops=3) is False
 
 
+def test_failed_leaf_tolerated_when_area_keeps_a_clean_sibling(tmp_path) -> None:
+    """A failed leaf only aborts the wave if its area has no clean leaf left for the collapse
+    to adopt. With a clean sibling it is tolerated; a failed collapse (non-leaf) with no clean
+    result is a genuine dead-end. This keeps a single pending leaf in a skip-trimmed wave from
+    falsely aborting the run."""
+    from hiagentresearch.src.runtime.loop_controller import _failed_group_blocks_downstream
+
+    registry = Registry(tmp_path / ".hiagentresearch" / "state")
+    registry.init()
+
+    def record_clean(group: str, loop: int) -> None:
+        rid = f"gh_{group}_{loop}"
+        registry.record_run(
+            run_id=rid,
+            group_id=group,
+            branch=f"research/{group}",
+            status="finished",
+            failure_class="none",
+            metrics={},
+            commit_sha=f"sha_{group}_{loop}",
+        )
+        registry.record_cycle_manifest(
+            run_id=rid,
+            manifest_path="cycle_manifest.json",
+            manifest={
+                "group_id": group,
+                "branch": f"research/{group}",
+                "loop_index": loop,
+                "goal_id": f"{group}-g",
+                "goal": "x",
+                "target_files": [],
+                "planned_code_changes": [],
+            },
+        )
+
+    config = HiAgentResearchConfig(
+        project_id="demo",
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        policy_modes={"explore": "Explore."},
+        research_groups=[
+            ResearchGroupConfig(id="ar", objective="t", policy_mode="explore", approaches=["x", "y"]),
+        ],
+    )
+    ids = {g.id for g in config.research_groups}
+    assert {"ar__a1", "ar__a2", "ar__collapse"} <= ids
+
+    # No clean leaf yet: a failed leaf blocks (the area is a dead-end).
+    assert _failed_group_blocks_downstream("ar__a2", config=config, registry=registry) is True
+
+    record_clean("ar__a1", 1)
+    # Sibling a1 is now clean -> failed leaf a2 is tolerated (collapse adopts a1).
+    assert _failed_group_blocks_downstream("ar__a2", config=config, registry=registry) is False
+    # A leaf with its own clean cycle never blocks.
+    assert _failed_group_blocks_downstream("ar__a1", config=config, registry=registry) is False
+    # A failed collapse (non-leaf) with no clean cycle is a genuine dead-end.
+    assert _failed_group_blocks_downstream("ar__collapse", config=config, registry=registry) is True
+
+
 def test_resume_does_not_abort_when_registry_has_a_prior_clean_cycle(monkeypatch, tmp_path) -> None:
     """A re-run whose own CI cycles all fail must NOT be marked a dead-end if the registry
     already holds a clean, inheritable cycle from an earlier run — that would falsely abort
