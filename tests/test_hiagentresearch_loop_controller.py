@@ -313,7 +313,7 @@ def test_agent_moved_head_blocks_the_loop(monkeypatch, tmp_path) -> None:
     assert summary.cycles == []  # blocked on loop 1, never reached commit/eval
 
 
-def test_is_transient_cycle_failure_only_for_cursor_status_error() -> None:
+def test_is_transient_cycle_failure_only_for_cursor_status_error(tmp_path) -> None:
     """A transient agent-infra failure (Cursor SDK status=error) is retryable; a deterministic
     block (agent_moved_head, a contract invalid_cycle without the transient marker) is not."""
     from hiagentresearch.src.runtime.loop_controller import _is_transient_cycle_failure
@@ -323,8 +323,42 @@ def test_is_transient_cycle_failure_only_for_cursor_status_error() -> None:
     # Not transient: no cursor status marker, a clean run, or a genuine policy violation.
     assert _is_transient_cycle_failure({"failure_class": "invalid_cycle"}) is False
     assert _is_transient_cycle_failure({"failure_class": "invalid_cycle", "cursor_run_status": "finished"}) is False
+    empty_run_dir = tmp_path / "run_empty"
+    empty_run_dir.mkdir()
+    assert _is_transient_cycle_failure(
+        {"failure_class": "invalid_cycle", "cursor_run_status": "finished"},
+        run_dir=empty_run_dir,
+    ) is True
+    intent_run_dir = tmp_path / "run_with_intent"
+    intent_run_dir.mkdir()
+    (intent_run_dir / "cycle_intent.json").write_text("{}", encoding="utf-8")
+    assert _is_transient_cycle_failure(
+        {"failure_class": "invalid_cycle", "cursor_run_status": "finished"},
+        run_dir=intent_run_dir,
+    ) is False
     assert _is_transient_cycle_failure({"failure_class": "agent_moved_head", "cursor_run_status": "error"}) is False
     assert _is_transient_cycle_failure({"failure_class": "none"}) is False
+
+
+def test_diagnostics_steering_note_prefers_outcome_reason_for_below_targets(tmp_path) -> None:
+    from hiagentresearch.src.runtime.loop_controller import _diagnostics_steering_note
+
+    ci_dir = tmp_path / "ci"
+    ci_dir.mkdir()
+    (ci_dir / "diagnostics.json").write_text(
+        json.dumps({"summary": "CI eval completed with outcome below_targets."}),
+        encoding="utf-8",
+    )
+    note = _diagnostics_steering_note(
+        ci_dir,
+        {"failure_class": "none"},
+        {
+            "research_outcome": "below_targets",
+            "reason": "metric macro_f1=0.52 below minimum 0.7",
+        },
+    )
+    assert "metric macro_f1=0.52 below minimum 0.7" in note
+    assert note.startswith("CI eval completed with outcome below_targets")
 
 
 def test_transient_agent_error_is_retried_from_clean_worktree(monkeypatch, tmp_path) -> None:

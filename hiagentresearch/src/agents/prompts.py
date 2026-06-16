@@ -123,17 +123,15 @@ def _grounding_stanza(score: ScoreContext | None, *, preserve_metrics: bool) -> 
         )
         lines.append(f"- Inherited floor (your starting commit): {score.inherited_floor:.4g} — {floor_note}")
     if score.trajectory:
-        points = ", ".join(f"loop {loop}: {value:.4g}" for loop, value in score.trajectory)
-        best = (min if score.minimize else max)(value for _, value in score.trajectory)
-        lines.append(f"- This group's committed scores so far: {points}")
-        if preserve_metrics:
-            lines.append(f"- Best held so far: {best:.4g} — keep at or above it while you improve the code.")
-        else:
-            lines.append(f"- Best so far in this group: {best:.4g} — your job is to beat it.")
-        # Persist-but-vary: only meaningful once there is committed history not to repeat.
+        loop, value = score.trajectory[-1]
+        follow_up = (
+            "hold at or above it while you improve the code."
+            if preserve_metrics
+            else "beat it on the next attempt."
+        )
+        lines.append(f"- Previous committed loop {loop}: {value:.4g} — {follow_up}")
         lines.append(
-            "- These attempts are already on the board: stay with the direction, but don't "
-            "resubmit one that already scored — build on what they taught you and vary the next move."
+            "- Don't resubmit a change that already scored; build on what it taught you and vary the next move."
         )
     else:
         lines.append("- No committed scores yet in this group; establish the first data point.")

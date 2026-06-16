@@ -28,7 +28,12 @@ fi
 
 PY="$([[ -x .venv/bin/python ]] && echo .venv/bin/python || echo python3)"
 REMOTE="$("${PY}" -c 'from hiagentresearch.src.core.config import load_config; print(load_config().github.remote)' 2>/dev/null || echo origin)"
-RESEARCH_BRANCH_PREFIX="${HIAGENTRESEARCH_RESEARCH_BRANCH_PREFIX:-hiagentresearch}"
+if [[ -n "${HIAGENTRESEARCH_RESEARCH_BRANCH_PREFIX:-}" ]]; then
+  RESEARCH_BRANCH_PREFIX="${HIAGENTRESEARCH_RESEARCH_BRANCH_PREFIX}"
+else
+  RESEARCH_BRANCH_PREFIX="$("${PY}" -c 'from hiagentresearch.src.core.config import load_config; print(load_config().orchestration.branch_prefix)' 2>/dev/null || true)"
+  RESEARCH_BRANCH_PREFIX="${RESEARCH_BRANCH_PREFIX:-hiagentresearch}"
+fi
 
 collect_research_branches() {
   local -n _out=$1

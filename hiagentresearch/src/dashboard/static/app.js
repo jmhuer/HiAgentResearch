@@ -526,6 +526,30 @@ function renderRunStatus() {
   el.textContent = live ? "Live" : "Complete";
 }
 
+function renderBaselineChip() {
+  const el = document.getElementById("baseline-chip");
+  if (!el) return;
+  const baseline = (dashboardData.lineage_topology || {}).baseline_snapshot || {};
+  const snapshotMetrics = baseline.metrics || {};
+  const metricNames = (dashboardData.metric_names || []).filter(
+    (name) => snapshotMetrics[name] != null && snapshotMetrics[name] !== "",
+  );
+  if (!metricNames.length) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  const parts = metricNames.map((name) => {
+    const value = Number(snapshotMetrics[name]);
+    return Number.isFinite(value) ? `${name}=${value.toFixed(4)}` : `${name}=${snapshotMetrics[name]}`;
+  });
+  const ref = String(baseline.ref || "baseline");
+  const sha = baseline.commit_sha ? shortSha(String(baseline.commit_sha)) : "";
+  const at = sha ? ` @ ${sha}` : "";
+  el.hidden = false;
+  el.textContent = `Frozen L0 (${ref}${at}): ${parts.join(", ")}`;
+}
+
 function renderHeroMeta(manifest) {
   renderRunStatus();
   const meta = document.getElementById("hero-meta");
@@ -564,6 +588,7 @@ function renderShell(manifest, summary) {
   document.title = manifest.title || summary.title || "HiAgentResearch Dashboard";
   text("dashboard-title", manifest.title || summary.title || "HiAgentResearch");
   text("dashboard-tagline", "Cycle trajectory and research outcomes.");
+  renderBaselineChip();
   renderHeroMeta(manifest);
   const repository = dashboardData.repository || manifest.repository || {};
   const repoLink = document.getElementById("repo-link");
@@ -974,6 +999,16 @@ function updateChartRunSummary(groupId) {
     return;
   }
   summary.textContent = runCountLabel(groupId);
+  const note = document.getElementById("chart-scope-note");
+  if (!note) return;
+  if (activeTab()?.overview) {
+    note.hidden = false;
+    note.textContent =
+      "Overview shows carried-forward peaks only. Open an area tab for full loop history.";
+  } else {
+    note.hidden = true;
+    note.textContent = "";
+  }
 }
 
 function chartLegendRows(seriesCount) {

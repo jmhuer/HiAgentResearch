@@ -97,7 +97,7 @@ class OrchestrationConfig(BaseModel):
     promote_from_group: str = ""
     # Namespace for auto-derived research branches. Existing flat configs can still
     # set explicit group.branch values; this only affects desugared area branches.
-    branch_prefix: str = "research"
+    branch_prefix: str = "hiagentresearch"
     execution_waves: list[list[str]] | None = None
     execution_order: list[str] | None = None
     max_parallel_groups: int = 2
@@ -259,7 +259,7 @@ class HiAgentResearchConfig(BaseModel):
         # level -> ("leaf" wave ids, "collapse" wave ids), preserving area order within a level.
         leaf_waves: dict[int, list[str]] = {}
         collapse_waves: dict[int, list[str]] = {}
-        branch_prefix = self.orchestration.branch_prefix.strip("/") or "research"
+        branch_prefix = self.orchestration.branch_prefix.strip("/") or "hiagentresearch"
 
         def research_branch(suffix: str) -> str:
             return f"{branch_prefix}/{suffix}"

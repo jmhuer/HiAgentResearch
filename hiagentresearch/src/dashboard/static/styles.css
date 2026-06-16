@@ -332,6 +332,25 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.baseline-chip {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.chart-scope-note {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .hero-link {
   color: var(--accent);
   text-decoration: none;

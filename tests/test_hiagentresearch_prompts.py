@@ -246,8 +246,9 @@ def test_prompt_grounds_agent_with_score_context() -> None:
     assert "higher is better" in prompt
     assert "Baseline (L0): 0.972" in prompt
     assert "Inherited floor" in prompt and "0.975" in prompt
-    assert "loop 1: 0.974" in prompt and "loop 2: 0.978" in prompt
-    assert "Best so far in this group: 0.978" in prompt
+    assert "Previous committed loop 2: 0.978" in prompt
+    assert "loop 1: 0.974" not in prompt
+    assert "Best so far in this group" not in prompt
     assert "attempt 2 of 3" in prompt
     # Never hands the agent the unreachable absolute target as its bar.
     assert "0.985" not in prompt
@@ -271,10 +272,11 @@ def test_grounding_is_role_aware_metric_is_guardrail_for_engineering() -> None:
         group=group, intent_packet=packet, run_id="run_eng", score_context=score,
     )
     assert "guardrail, not a number to chase" in prompt
-    assert "Best held so far" in prompt
+    assert "Previous committed loop 2: 0.973" in prompt
+    assert "Best held so far" not in prompt
     assert "your job is to beat it" not in prompt  # engineering never chases the score
     # Persist-but-vary appears once there is committed history.
-    assert "don't resubmit one that already scored" in prompt
+    assert "Don't resubmit a change that already scored" in prompt
 
 
 def test_prompt_grounding_final_attempt_says_consolidate() -> None:

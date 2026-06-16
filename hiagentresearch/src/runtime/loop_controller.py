@@ -53,13 +53,15 @@ from hiagentresearch.src.core.models import utc_now_iso
 _CYCLE_TRANSIENT_RETRIES = max(1, int(os.environ.get("HIAGENTRESEARCH_CYCLE_TRANSIENT_RETRIES", "3")))
 
 
-def _is_transient_cycle_failure(local: dict) -> bool:
-    """A transient agent-infra failure worth retrying: the Cursor SDK run finished with
-    status=error (not a research signal), as opposed to a deterministic block."""
-    return (
-        str(local.get("failure_class", "")) == "invalid_cycle"
-        and str(local.get("cursor_run_status", "")).strip().lower() == "error"
-    )
+def _is_transient_cycle_failure(local: dict, *, run_dir: Path | None = None) -> bool:
+    """A transient agent-infra failure worth retrying: SDK status=error, or the agent
+  finished without writing cycle_intent.json (empty run). Deterministic contract blocks
+  that produced intent are not retried."""
+    if str(local.get("failure_class", "")) != "invalid_cycle":
+        return False
+    if str(local.get("cursor_run_status", "")).strip().lower() == "error":
+        return True
+    return run_dir is not None and not (run_dir / "cycle_intent.json").is_file()
 
 
 class GitLike(Protocol):
@@ -296,7 +298,14 @@ def run_loops(
                 loop_index=loop_index,
                 loops=loops,
             )
-            if not _is_transient_cycle_failure(local) or attempt >= _CYCLE_TRANSIENT_RETRIES:
+            transient_run_id = str(local.get("run_id", ""))
+            transient_run_dir = (
+                resolve_runs_dir(git_root) / transient_run_id if transient_run_id else None
+            )
+            if (
+                not _is_transient_cycle_failure(local, run_dir=transient_run_dir)
+                or attempt >= _CYCLE_TRANSIENT_RETRIES
+            ):
                 break
             # The failed attempt may have left a partial edit; reset to HEAD (the loop's start,
             # since a blocked cycle does not commit) so the retry runs on a clean slate.
@@ -557,14 +566,20 @@ def _preserve_ci_artifacts(
 
 
 def _diagnostics_steering_note(ci_dir: Path, failure: dict, outcome: dict) -> str:
+    failure_class = str(failure.get("failure_class", "infra_failure"))
+    research_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
+    if failure_class == "none" and research_outcome == "below_targets":
+        return _ci_feedback_summary(
+            failure_class=failure_class,
+            research_outcome=research_outcome,
+            reason=str(outcome.get("reason") or ""),
+        )
     diagnostics_path = ci_dir / "diagnostics.json"
     if diagnostics_path.is_file():
         diagnostics = _read_json(diagnostics_path)
         summary = str(diagnostics.get("summary") or "").strip()
         if summary:
             return _trim_feedback_reason(summary)
-    failure_class = str(failure.get("failure_class", "infra_failure"))
-    research_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
     reason = _first_nonempty(
         failure.get("primary_error"),
         failure.get("error"),
