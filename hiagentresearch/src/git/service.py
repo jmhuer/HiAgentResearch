@@ -218,8 +218,18 @@ class GitService:
         self._run(["commit", "-m", subject, "-m", body])
         return self.head_sha()
 
-    def push(self, *, remote: str, branch: str) -> None:
-        self._run(["push", remote, f"HEAD:{branch}"])
+    def push(self, *, remote: str, branch: str, force: bool = False) -> None:
+        args = ["push"]
+        if force:
+            # Research branches are framework-owned and rebuilt from the lineage anchor on
+            # every run, so a resumed run's local branch intentionally diverges from the
+            # stale remote branch a prior run left behind. Force the remote to the rebuilt
+            # branch (the framework is the sole writer of these branches); a plain push would
+            # be rejected non-fast-forward and abort the wave. Off by default so protected
+            # targets (e.g. promotion onto a release branch) are never force-pushed.
+            args.append("--force")
+        args += [remote, f"HEAD:{branch}"]
+        self._run(args)
 
     def head_sha(self) -> str:
         return self._run(["rev-parse", "HEAD"]).stdout.strip()

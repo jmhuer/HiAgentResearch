@@ -87,7 +87,7 @@ class GitLike(Protocol):
         hidden_paths: list[str],
     ) -> bool: ...
     def commit(self, *, subject: str, body: str) -> str: ...
-    def push(self, *, remote: str, branch: str) -> None: ...
+    def push(self, *, remote: str, branch: str, force: bool = False) -> None: ...
 
 
 class GitHubActionsLike(Protocol):
@@ -382,7 +382,9 @@ def run_loops(
         subject = _commit_subject(loop_index=loop_index, manifest=manifest)
         body = _commit_body(local_run_id=local_run_id, manifest_path=manifest_path, manifest=manifest)
         commit_sha = git_service.commit(subject=subject, body=body)
-        git_service.push(remote=loaded_config.github.remote, branch=target_branch)
+        # Force: this research branch is rebuilt from the lineage anchor each run, so on
+        # resume it intentionally diverges from the stale remote branch a prior run pushed.
+        git_service.push(remote=loaded_config.github.remote, branch=target_branch, force=True)
 
         gh_run = github_service.find_run_for_head(
             branch=target_branch,

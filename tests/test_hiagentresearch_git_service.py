@@ -44,6 +44,25 @@ def test_git_service_raises_on_failed_command(monkeypatch, tmp_path) -> None:
         service.checkout("missing")
 
 
+def test_push_force_flag(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args[1:])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    service = GitService(tmp_path)
+
+    # Default (e.g. promotion onto a protected branch) is never forced.
+    service.push(remote="origin", branch="main-layer2")
+    assert calls[-1] == ["push", "origin", "HEAD:main-layer2"]
+
+    # Research branches force-update the framework-owned remote branch (rebuilt on resume).
+    service.push(remote="origin", branch="hiagentresearch/g-a2", force=True)
+    assert calls[-1] == ["push", "--force", "origin", "HEAD:hiagentresearch/g-a2"]
+
+
 def test_git_service_creates_missing_branch_from_main(monkeypatch, tmp_path) -> None:
     calls = []
 

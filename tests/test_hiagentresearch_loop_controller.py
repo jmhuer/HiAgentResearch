@@ -79,9 +79,10 @@ class FakeGit:
         self.body = body
         return "abc"
 
-    def push(self, *, remote: str, branch: str) -> None:
+    def push(self, *, remote: str, branch: str, force: bool = False) -> None:
         self.pushed = True
         self.remote = remote
+        self.push_forced = force
 
 
 class FakeGitHub:
