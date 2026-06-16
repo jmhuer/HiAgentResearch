@@ -582,15 +582,19 @@ def _preserve_ci_artifacts(
 
 
 def _diagnostics_steering_note(ci_dir: Path, ci: CIResult) -> str:
-    # A clean-but-below-targets run has no failure to diagnose; summarize its outcome.
-    if not ci.execution_blocked and ci.research_outcome == "below_targets":
-        return _ci_feedback_summary(ci, reason=ci.reason)
+    # Prefer the adapter's structured diagnostics summary whenever it is present: it is the
+    # richest, most specific account of the run for every outcome (a below-target run carries
+    # the same authoritative summary as a blocked one, and an adapter may fold an outcome
+    # breakdown into it). Fall back to a generic outcome summary only when it is absent.
     diagnostics_path = ci_dir / "diagnostics.json"
     if diagnostics_path.is_file():
         diagnostics = read_json_object(diagnostics_path)
         summary = str(diagnostics.get("summary") or "").strip()
         if summary:
             return _trim_feedback_reason(summary)
+    # A clean-but-below-targets run has no failure to diagnose; summarize its outcome.
+    if not ci.execution_blocked and ci.research_outcome == "below_targets":
+        return _ci_feedback_summary(ci, reason=ci.reason)
     return _ci_feedback_summary(ci, reason=ci.first_reason())
 
 

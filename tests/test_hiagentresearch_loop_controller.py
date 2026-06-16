@@ -732,16 +732,40 @@ def test_is_transient_cycle_failure_only_for_cursor_status_error(tmp_path) -> No
     assert _is_transient_cycle_failure({"failure_class": "none"}) is False
 
 
-def test_diagnostics_steering_note_prefers_outcome_reason_for_below_targets(tmp_path) -> None:
+def test_diagnostics_steering_note_prefers_structured_summary_for_below_targets(tmp_path) -> None:
+    # The adapter's structured diagnostics summary is the richest account of any outcome —
+    # an adapter may fold a per-outcome breakdown into it — so it wins over the generic
+    # outcome reason even on a clean-but-below-targets run. (Generic: the breakdown text is
+    # opaque to the framework.)
     from hiagentresearch.src.core.ci_result import CIResult
     from hiagentresearch.src.runtime.loop_controller import _diagnostics_steering_note
 
     ci_dir = tmp_path / "ci"
     ci_dir.mkdir()
+    enriched = "CI eval completed with outcome below_targets. Breakdown: detail A; detail B."
     (ci_dir / "diagnostics.json").write_text(
-        json.dumps({"summary": "CI eval completed with outcome below_targets."}),
+        json.dumps({"summary": enriched}),
         encoding="utf-8",
     )
+    ci = CIResult.from_dicts(
+        {"failure_class": "none"},
+        {
+            "research_outcome": "below_targets",
+            "reason": "metric macro_f1=0.52 below minimum 0.7",
+        },
+    )
+    note = _diagnostics_steering_note(ci_dir, ci)
+    assert note == enriched
+
+
+def test_diagnostics_steering_note_falls_back_to_outcome_reason_without_summary(tmp_path) -> None:
+    from hiagentresearch.src.core.ci_result import CIResult
+    from hiagentresearch.src.runtime.loop_controller import _diagnostics_steering_note
+
+    ci_dir = tmp_path / "ci"
+    ci_dir.mkdir()
+    # diagnostics.json present but with no usable summary -> fall back to the outcome reason.
+    (ci_dir / "diagnostics.json").write_text(json.dumps({"summary": ""}), encoding="utf-8")
     ci = CIResult.from_dicts(
         {"failure_class": "none"},
         {
