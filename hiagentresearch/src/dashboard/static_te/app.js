@@ -526,30 +526,6 @@ function renderRunStatus() {
   el.textContent = live ? "Live" : "Complete";
 }
 
-function renderBaselineChip() {
-  const el = document.getElementById("baseline-chip");
-  if (!el) return;
-  const baseline = (dashboardData.lineage_topology || {}).baseline_snapshot || {};
-  const snapshotMetrics = baseline.metrics || {};
-  const metricNames = (dashboardData.metric_names || []).filter(
-    (name) => snapshotMetrics[name] != null && snapshotMetrics[name] !== "",
-  );
-  if (!metricNames.length) {
-    el.hidden = true;
-    el.textContent = "";
-    return;
-  }
-  const parts = metricNames.map((name) => {
-    const value = Number(snapshotMetrics[name]);
-    return Number.isFinite(value) ? `${name}=${value.toFixed(4)}` : `${name}=${snapshotMetrics[name]}`;
-  });
-  const ref = String(baseline.ref || "baseline");
-  const sha = baseline.commit_sha ? shortSha(String(baseline.commit_sha)) : "";
-  const at = sha ? ` @ ${sha}` : "";
-  el.hidden = false;
-  el.textContent = `Frozen L0 (${ref}${at}): ${parts.join(", ")}`;
-}
-
 function renderHeroMeta(manifest) {
   renderRunStatus();
   const meta = document.getElementById("hero-meta");
@@ -588,7 +564,6 @@ function renderShell(manifest, summary) {
   document.title = manifest.title || summary.title || "HiAgentResearch Dashboard";
   text("dashboard-title", manifest.title || summary.title || "HiAgentResearch");
   text("dashboard-tagline", "Hierarchical, metric-guided agent exploration.");
-  renderBaselineChip();
   renderHeroMeta(manifest);
   const repository = dashboardData.repository || manifest.repository || {};
   const repoLink = document.getElementById("repo-link");
@@ -1343,7 +1318,10 @@ async function renderEChart(container, values, metricName, groupId) {
   chartInstance.off("click");
   attachChartResizeObserver(container);
 
-  const positioned = assignTrajectoryPositions(values);
+  // trajectory_x is authoritative from the backend; here we only coerce its type. The sort and
+  // the L0…Ln axis derivation below are intentionally view-layer — they depend on the active
+  // tab/metric scope (which points are in view), so they cannot fold into the backend data.
+  const positioned = normalizeTrajectoryX(values);
   const ordered = [...positioned].sort((left, right) => {
     const traj = Number(left.trajectory_x) - Number(right.trajectory_x);
     if (traj !== 0) return traj;
@@ -1767,7 +1745,7 @@ function fillTemplate(template, values) {
 }
 
 // Keep aligned with hiagentresearch.src.dashboard.trajectory.assign_trajectory_positions.
-function assignTrajectoryPositions(points) {
+function normalizeTrajectoryX(points) {
   // trajectory_x is computed once, authoritatively, by the backend
   // (trajectory.assign_trajectory_positions). The frontend only normalizes the
   // type — it never re-derives the lineage axis.

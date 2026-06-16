@@ -87,6 +87,7 @@ jobs:
 
           config = load_config()
           workflow = config.github.workflow_name
+          run_list_limit = config.github.dashboard_run_list_limit
           baseline_ref = config.orchestration.baseline_ref
           # Collect the baseline (main) run too — it carries the frozen L0 that should
           # show before any research loop has run.
@@ -105,7 +106,7 @@ jobs:
                   "--status",
                   "completed",
                   "--limit",
-                  "100",
+                  str(run_list_limit),
                   "--json",
                   "databaseId,headBranch,headSha,createdAt,updatedAt",
               ],
