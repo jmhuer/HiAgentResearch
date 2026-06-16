@@ -132,7 +132,16 @@ class GitHubActionsService:
 
             shutil.rmtree(target_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
-        self._run(["run", "download", run_id, "--dir", str(target_dir)])
+        # actions/upload-artifact@v4 artifacts can take a while to become downloadable after
+        # the run completes — `gh run download` then reports "no valid artifacts found" for a
+        # run that actually succeeded. That marker is transient, so retry on a longer budget
+        # here (~2.5 min) than the default gh call to ride out propagation lag and recover the
+        # real result, rather than burning the cycle as an infra_failure.
+        self._run(
+            ["run", "download", run_id, "--dir", str(target_dir)],
+            retries=8,
+            backoff_sec=4.0,
+        )
         return target_dir
 
     def artifact_payload_dir(self, download_dir: Path) -> Path:

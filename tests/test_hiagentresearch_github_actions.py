@@ -68,11 +68,14 @@ def test_github_actions_retries_transient_network_errors(monkeypatch, tmp_path) 
 
 
 def test_github_actions_retries_artifact_availability_race(monkeypatch, tmp_path) -> None:
+    # upload-artifact@v4 propagation can lag well past the default gh retry budget, so
+    # download_artifacts retries longer: 6 "not yet available" responses (which would exceed
+    # the default 4-retry budget) still recover on the 7th attempt.
     calls = {"n": 0}
 
     def fake_run(args, **kwargs):
         calls["n"] += 1
-        if calls["n"] == 1:
+        if calls["n"] <= 6:
             return subprocess.CompletedProcess(args, 1, "", "no valid artifacts found to download")
         return subprocess.CompletedProcess(args, 0, "", "")
 
@@ -82,7 +85,7 @@ def test_github_actions_retries_artifact_availability_race(monkeypatch, tmp_path
 
     service.download_artifacts(run_id="123", target_dir=tmp_path / "artifacts")
 
-    assert calls["n"] == 2
+    assert calls["n"] == 7
 
 
 def test_github_actions_does_not_retry_real_errors(monkeypatch, tmp_path) -> None:
