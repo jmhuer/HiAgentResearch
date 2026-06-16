@@ -129,19 +129,21 @@ function inChartScope(groupId) {
   return !ids || ids.has(String(groupId));
 }
 
-// On the Overview, an area's trajectory ends at the commit its lineage carries FORWARD — its top
-// (winning) commit. A MERGE collapse keeps integrating past that peak, and those trailing loops
-// scored lower and feed nothing downstream (nothing inherits or merges them) — from the winning
-// lineage's view they are dropped losers, like a SELECT's discarded leaves. So on the big-picture
-// view we cut each trajectory at its carried-forward step to keep the "branches collapse into one
-// path" story honest. SELECT collapses already end on their winner (no-op); a per-area tab keeps
-// every integration loop (this fires only on the Overview). The cutoff is anchor-metric based —
-// one carried commit, applied uniformly across every displayed metric.
-function overviewTrajectoryCutoff(groupId) {
-  if (!activeTab()?.overview) return Infinity;
-  const step = ((dashboardData.lineage_topology || {}).group_trajectory_winners || {})[groupId]
-    ?.trajectory_step;
-  return Number.isFinite(step) ? Number(step) : Infinity;
+// An area's trajectory ends at the commit its lineage carries FORWARD — its top (winning) commit.
+// A MERGE collapse keeps integrating past that peak, and those trailing loops scored lower and feed
+// nothing downstream (nothing inherits or merges them) — from the winning lineage's view they are
+// dropped losers, like a SELECT's discarded leaves. Drawing them makes a downstream branch look like
+// it started from that low tail. So we cut a collapse's trajectory at its carried-forward step on
+// BOTH the Overview and per-area tabs. On the Overview every group ends at its carried commit; on a
+// per-area tab only a collapse is trimmed — a leaf keeps every loop so you can inspect that
+// approach's full trajectory. SELECT collapses already end on their winner (no-op). The cutoff is
+// anchor-metric based — one carried commit, applied uniformly across every displayed metric.
+function trajectoryDisplayCutoff(groupId) {
+  const topology = dashboardData.lineage_topology || {};
+  const step = (topology.group_trajectory_winners || {})[groupId]?.trajectory_step;
+  if (!Number.isFinite(step)) return Infinity;
+  if (activeTab()?.overview) return Number(step);
+  return (topology.groups || {})[groupId]?.role === "collapse" ? Number(step) : Infinity;
 }
 
 // --- Lineage-DAG walk: the single rule for connecting trajectories ----------------------
@@ -1097,7 +1099,7 @@ function chartPointsForSelection(groupId, metricName) {
         inChartScope(metric.group_id) &&
         metric.metric_name === metricName &&
         !(metric.path_of_leaf && inChartScope(metric.path_of_leaf)) &&
-        Number(metric.trajectory_x) <= overviewTrajectoryCutoff(metric.group_id),
+        Number(metric.trajectory_x) <= trajectoryDisplayCutoff(metric.group_id),
     )
     .map((metric) => enrichMetricPoint(metric, indexes))
     .filter((point) => Number.isFinite(point.metric_value));
