@@ -140,18 +140,26 @@ function inChartScope(groupId) {
   return !ids || ids.has(String(groupId));
 }
 
-// On the Overview every area is abstracted to the commit its lineage carries FORWARD (its top
-// commit): a MERGE collapse's trailing loops scored lower and feed nothing downstream, so cutting
-// each trajectory at its carried-forward step keeps the "branches collapse into one path" story
-// honest. A per-area tab is the opposite — you go there to inspect that area's OWN work, so it keeps
-// every loop and failed branch (this returns Infinity off the Overview); upstream areas are already
-// abstracted there to a single connector by the lineage walk. Anchor-metric based — one carried
-// commit, applied uniformly across every displayed metric.
-function overviewTrajectoryCutoff(groupId) {
-  if (!activeTab()?.overview) return Infinity;
-  const step = ((dashboardData.lineage_topology || {}).group_trajectory_winners || {})[groupId]
-    ?.trajectory_step;
-  return Number.isFinite(step) ? Number(step) : Infinity;
+// How much of a group's trajectory to display, by scope. A lineage hands off downstream at its
+// carried-forward (winning) commit; loops past it scored lower and feed nothing forward.
+//   - Overview: abstract EVERY area to its carried commit — the converged "branches collapse into
+//     one path" view.
+//   - Per-area tab: the ACTIVE area shows its FULL work — every loop and failed branch. UPSTREAM
+//     ancestor areas are drawn only for context (chartScopedGroupIds adds their result group), so
+//     they are abstracted to the lineage we actually built from; this keeps a previous area's
+//     non-carried/failed loops from bleeding into the current area's plot.
+//   - Flat config (no tabs): no abstraction.
+// Anchor-metric based — one carried commit, applied uniformly across every displayed metric.
+function trajectoryDisplayCutoff(groupId) {
+  const tab = activeTab();
+  if (!tab) return Infinity;
+  const topology = dashboardData.lineage_topology || {};
+  const step = (topology.group_trajectory_winners || {})[groupId]?.trajectory_step;
+  if (!Number.isFinite(step)) return Infinity;
+  if (tab.overview) return Number(step);
+  const groupArea = (topology.groups || {})[groupId]?.area;
+  // Active area → full trajectory; upstream ancestor area → abstract to its carried commit.
+  return groupArea && groupArea !== tab.area ? Number(step) : Infinity;
 }
 
 // --- Lineage-DAG walk: the single rule for connecting trajectories ----------------------
@@ -1088,7 +1096,7 @@ function chartPointsForSelection(groupId, metricName) {
         inChartScope(metric.group_id) &&
         metric.metric_name === metricName &&
         !(metric.path_of_leaf && inChartScope(metric.path_of_leaf)) &&
-        Number(metric.trajectory_x) <= overviewTrajectoryCutoff(metric.group_id),
+        Number(metric.trajectory_x) <= trajectoryDisplayCutoff(metric.group_id),
     )
     .map((metric) => enrichMetricPoint(metric, indexes))
     .filter((point) => Number.isFinite(point.metric_value));
