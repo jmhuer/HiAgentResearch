@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from hiagentresearch.src.core.config import AgentContractConfig, EvaluationConfig, HiAgentResearchConfig, LineageConfig, MetricExpectation, ResearchGroupConfig, load_config, resolve_group_id_for_branch
+from hiagentresearch.src.core.config import AgentContractConfig, EvaluationConfig, GitHubConfig, HiAgentResearchConfig, LineageConfig, MetricExpectation, ResearchGroupConfig, load_config, resolve_group_id_for_branch
 from hiagentresearch.src.core.guidance import DEFAULT_GUIDANCE_FILES
 
 
@@ -17,6 +17,13 @@ def test_lineage_policies_default_to_best_commit() -> None:
     lineage = LineageConfig(mode="inherit", inherit_from="parent")
     assert lineage.inherit_policy == "best_commit"
     assert lineage.top_commit_policy == "best_commit"
+
+
+def test_github_dashboard_run_list_limit_is_config_driven() -> None:
+    """The dashboard collect-artifacts step's `gh run list --limit` is config-driven
+    (default 100), so a long session can raise it without editing the workflow."""
+    assert GitHubConfig().dashboard_run_list_limit == 100
+    assert GitHubConfig(dashboard_run_list_limit=250).dashboard_run_list_limit == 250
 
 
 def test_agent_settings_are_config_driven() -> None:

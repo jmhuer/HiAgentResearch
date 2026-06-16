@@ -46,6 +46,10 @@ class GitHubConfig(BaseModel):
     remote: str = "origin"
     run_lookup_attempts: int = 30
     run_lookup_sleep_sec: float = 3.0
+    # Cap on how many completed workflow runs the dashboard collect-artifacts step lists when
+    # discovering this session's evals. Raise it for long sessions whose run count exceeds the
+    # default page; the session + collectible-branch filters still scope what is ingested.
+    dashboard_run_list_limit: int = 100
 
 
 class DashboardConfig(BaseModel):
