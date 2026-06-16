@@ -1743,7 +1743,6 @@ function fillTemplate(template, values) {
   }, template);
 }
 
-// Keep aligned with hiagentresearch.src.dashboard.trajectory.assign_trajectory_positions.
 function normalizeTrajectoryX(points) {
   // trajectory_x is computed once, authoritatively, by the backend
   // (trajectory.assign_trajectory_positions). The frontend only normalizes the

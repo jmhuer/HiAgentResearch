@@ -796,6 +796,14 @@ function baselineNodeHtml(isTop) {
   return `<span class="${cls}" title="frozen baseline (L0)">${inner}</span>`;
 }
 
+// Distinct merge-kind badges (Select / Iterative) for the merge section's collapsible summary, so
+// the kind reads before the section is expanded. Returns HTML ("" when there are no merges).
+function mergeSubtypeBadges(mergeGroups) {
+  return [...new Set(mergeGroups.map((m) => (m.is_select ? "Select" : "Iterative")))]
+    .map((kind) => `<span class="merge-subtype merge-subtype--${kind.toLowerCase()}">${kind}</span>`)
+    .join("");
+}
+
 // A merge converges every lineage into one branch through a SEQUENCE of integration steps:
 // it starts from the strongest lineage (base) and folds in the rest best→worst, one per
 // loop cycle. So N lineages show one base node + N-1 merge step nodes (e.g. 3 lineages →
@@ -820,9 +828,12 @@ function renderMergeGroups() {
     mergeFilter = (merge) => String(merge.group_id) === String(tab.collapse);
   }
   const mergeGroups = (topology.merge_groups || []).filter(mergeFilter);
+  // Surface the merge kind(s) in the collapsible summary so it reads before the section is expanded.
+  // The slot is a stable element in the summary (index.html) — set it directly by id rather than
+  // reaching across the DOM. Cleared automatically when there are no merges (badges => "").
+  const subtypeSlot = document.getElementById("merge-subtype-slot");
+  if (subtypeSlot) subtypeSlot.innerHTML = mergeSubtypeBadges(mergeGroups);
   if (!mergeGroups.length) {
-    const _det0 = container.closest("details");
-    if (_det0) _det0.querySelectorAll("summary .merge-subtype").forEach((n) => n.remove());
     // A single-result area (e.g. the engineering foundation) has no competing approaches to
     // select or merge. Keep the section present but greyed so the two-section layout stays
     // stable when switching tabs, rather than collapsing to an empty box.
@@ -973,20 +984,6 @@ function renderMergeGroups() {
     </div>
     <div class="lineage-chains">${articles}</div>
   `;
-  // PROTO: surface merge subtype(s) next to the "Merge" title in the collapsed <summary>,
-  // so the kind (Select / Iterative) is visible before expanding.
-  const _det = container.closest("details");
-  const _h2 = _det ? _det.querySelector("summary h2") : null;
-  if (_h2) {
-    _h2.querySelectorAll(".merge-subtype").forEach((n) => n.remove());
-    const _hint = _h2.querySelector(".collapsible-hint");
-    [...new Set(mergeGroups.map((m) => (m.is_select ? "Select" : "Iterative")))].forEach((s) => {
-      const _tag = document.createElement("span");
-      _tag.className = "merge-subtype merge-subtype--" + s.toLowerCase();
-      _tag.textContent = s;
-      _h2.insertBefore(_tag, _hint);
-    });
-  }
   const toggle = document.getElementById("merge-contributions-toggle");
   if (toggle) {
     toggle.onchange = (event) => {
@@ -1762,7 +1759,6 @@ function fillTemplate(template, values) {
   }, template);
 }
 
-// Keep aligned with hiagentresearch.src.dashboard.trajectory.assign_trajectory_positions.
 function normalizeTrajectoryX(points) {
   // trajectory_x is computed once, authoritatively, by the backend
   // (trajectory.assign_trajectory_positions). The frontend only normalizes the
