@@ -4,9 +4,9 @@ from pathlib import Path
 from hiagentresearch.src.core.config import HiAgentResearchConfig, ResearchGroupConfig, load_config
 from hiagentresearch.src.github.actions import GitHubRun
 from hiagentresearch.src.runtime.baseline import ensure_baseline_snapshot
+from hiagentresearch.src.core.json_io import extract_last_json_object
 from hiagentresearch.src.runtime.loop_controller import (
     _build_dashboard_snapshot,
-    _extract_last_json_object,
     _pending_wave_groups,
     _preserve_parallel_failure_artifacts,
     _run_group_capture,
@@ -108,7 +108,7 @@ class FakeGitHub:
 
 def test_extract_last_json_object_ignores_leading_noise() -> None:
     text = "Requirement already satisfied: torch\n{\"ok\": true, \"run_id\": \"r1\"}\n"
-    payload = _extract_last_json_object(text)
+    payload = extract_last_json_object(text)
     assert payload == {"ok": True, "run_id": "r1"}
 
 
@@ -341,6 +341,7 @@ def test_is_transient_cycle_failure_only_for_cursor_status_error(tmp_path) -> No
 
 
 def test_diagnostics_steering_note_prefers_outcome_reason_for_below_targets(tmp_path) -> None:
+    from hiagentresearch.src.core.ci_result import CIResult
     from hiagentresearch.src.runtime.loop_controller import _diagnostics_steering_note
 
     ci_dir = tmp_path / "ci"
@@ -349,14 +350,14 @@ def test_diagnostics_steering_note_prefers_outcome_reason_for_below_targets(tmp_
         json.dumps({"summary": "CI eval completed with outcome below_targets."}),
         encoding="utf-8",
     )
-    note = _diagnostics_steering_note(
-        ci_dir,
+    ci = CIResult.from_dicts(
         {"failure_class": "none"},
         {
             "research_outcome": "below_targets",
             "reason": "metric macro_f1=0.52 below minimum 0.7",
         },
     )
+    note = _diagnostics_steering_note(ci_dir, ci)
     assert "metric macro_f1=0.52 below minimum 0.7" in note
     assert note.startswith("CI eval completed with outcome below_targets")
 

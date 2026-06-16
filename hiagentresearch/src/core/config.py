@@ -63,6 +63,30 @@ class AgentContractConfig(BaseModel):
     research_output_expectations: list[str] = Field(default_factory=list)
 
 
+class WorkspaceDocsConfig(BaseModel):
+    """Optional repo-relative paths the generated workspace AGENTS.md references.
+
+    These are pure documentation hints — the framework makes no naming assumptions
+    (no `layerN` pattern, no domain knowledge). A project that has an infra smoke
+    test, frozen pre-score gates, or agent-editable tests names them here; a project
+    that has none (e.g. the mnist example) leaves them unset and the corresponding
+    doc blocks are simply omitted. Each block is rendered only when its path is set
+    AND exists on disk, so a stale config never documents a missing file.
+    """
+
+    # Smoke test the agent runs after editing dependencies, e.g.
+    # `<workdir>/core/layerN/tests/test_requirements_infra.py`.
+    infra_smoke_test: str = ""
+    # Operator-owned frozen pytest gate directory run before metric scoring, e.g.
+    # `.hiagentresearch/eval/gate/layerN/`.
+    gate_tests_dir: str = ""
+    # Agent-editable test directory mirrored against the frozen gate, e.g.
+    # `<workdir>/core/layerN/tests/`.
+    editable_tests_dir: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class LineageConfig(BaseModel):
     mode: Literal["baseline", "inherit", "force"] = "baseline"
     inherit_from: str | None = None
@@ -111,7 +135,9 @@ class AgentConfig(BaseModel):
     # Reasoning effort passed to the model (Cursor ModelSelection "thinking" param).
     # Empty means the model default; "high" is the strongest documented mode.
     thinking: str = "high"
-    startup_attempts: int = 2
+    # Bridge startup can fail transiently (~1.5% of launches) on an unlucky cursor-sdk
+    # tool-callback token; 3 attempts makes a single unlucky token a non-event.
+    startup_attempts: int = 3
     startup_retry_backoff_sec: float = 2.0
     unary_timeout_sec: float = 1800.0
     stream_timeout_sec: float = 1800.0
@@ -203,6 +229,7 @@ class HiAgentResearchConfig(BaseModel):
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     agent_contract: AgentContractConfig = Field(default_factory=AgentContractConfig)
+    workspace_docs: WorkspaceDocsConfig = Field(default_factory=WorkspaceDocsConfig)
 
     @model_validator(mode="after")
     def desugar_areas(self) -> "HiAgentResearchConfig":

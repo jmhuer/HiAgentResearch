@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,11 @@ from hiagentresearch.src.core.models import (
     TransitionEvent,
     utc_now_iso,
 )
-from hiagentresearch.src.core.pathspec import is_under_any, is_within, matches_any
+from hiagentresearch.src.core.edit_boundary import (
+    PathCategory,
+    PathClassifier,
+    is_generated_artifact,
+)
 from hiagentresearch.src.git.service import GitService, GitServiceError
 from hiagentresearch.src.registry.store import Registry
 from hiagentresearch.src.runtime.quality import ResearchOutcome
@@ -108,55 +113,29 @@ def _validate_edit_boundary(
     if not cycle_changes:
         return False, "agent cycle produced no changed files", []
 
-    touched_reference = [path for path in cycle_changes if is_under_any(path, group.reference_paths)]
-    if touched_reference:
-        return (
-            False,
-            f"agent cycle modified read-only reference/eval paths: {touched_reference}",
-            cycle_changes,
-        )
-    touched_hidden = [path for path in cycle_changes if is_under_any(path, group.hidden_paths)]
-    if touched_hidden:
-        return False, f"agent cycle modified hidden paths: {touched_hidden}", cycle_changes
-
-    run_prefix = f".hiagentresearch/runs/{run_id}/"
-    workspace_changes: list[str] = []
-    outside: list[str] = []
-    outside_editable: list[str] = []
+    classifier = PathClassifier(group, run_id=run_id)
+    buckets: dict[PathCategory, list[str]] = {}
     for path in cycle_changes:
-        if path.startswith(run_prefix) or _is_generated_path(path, group.generated_paths):
-            continue
-        if is_within(path, group.workdir):
-            if group.editable_paths and not matches_any(path, group.editable_paths):
-                outside_editable.append(path)
-            else:
-                workspace_changes.append(path)
-        else:
-            outside.append(path)
-    if outside:
-        return False, f"changed files outside workspace ({group.workdir}): {outside}", cycle_changes
-    if outside_editable:
-        return False, f"changed files outside configured editable paths: {outside_editable}", cycle_changes
-    if not workspace_changes:
+        buckets.setdefault(classifier.classify(path), []).append(path)
+
+    # Precedence matches PathClassifier: a single violating category fails the cycle with
+    # a message that names the offending files; only an all-clean set with at least one
+    # real workspace change passes.
+    if buckets.get(PathCategory.REFERENCE):
+        return False, f"agent cycle modified read-only reference/eval paths: {buckets[PathCategory.REFERENCE]}", cycle_changes
+    if buckets.get(PathCategory.HIDDEN):
+        return False, f"agent cycle modified hidden paths: {buckets[PathCategory.HIDDEN]}", cycle_changes
+    if buckets.get(PathCategory.OUTSIDE_WORKDIR):
+        return False, f"changed files outside workspace ({group.workdir}): {buckets[PathCategory.OUTSIDE_WORKDIR]}", cycle_changes
+    if buckets.get(PathCategory.OUTSIDE_EDITABLE):
+        return False, f"changed files outside configured editable paths: {buckets[PathCategory.OUTSIDE_EDITABLE]}", cycle_changes
+    if not buckets.get(PathCategory.WORKSPACE):
         return False, "agent cycle produced no workspace source change", cycle_changes
     return True, "", cycle_changes
 
 
-# Dependency lockfiles a package manager (e.g. `uv`) may auto-write at the repo root as a side
-# effect of an agent running it. They are tool output, never source edits, and are never committed
-# (stage_research_commit only stages within the workspace) — so a stray one outside the workspace
-# must not invalidate a cycle.
-_TOOL_LOCKFILES = frozenset({"uv.lock", "poetry.lock", "Pipfile.lock"})
-
-
-def _is_generated_path(path: str, generated_paths: list[str]) -> bool:
-    if is_under_any(path, generated_paths):
-        return True
-    if Path(path).name in _TOOL_LOCKFILES:
-        return True
-    # Experiment manifests are framework-generated bookkeeping and should not
-    # count as source edits during workspace boundary validation.
-    return is_under_any(path, [".hiagentresearch/cycles"])
+# Kept for the orchestrator contract test; the canonical logic now lives in core.edit_boundary.
+_is_generated_path = is_generated_artifact
 
 
 def _metadata_payload(
@@ -205,15 +184,31 @@ def _execution_blocked_outcome(*, reason: str, next_action: str) -> dict[str, An
     ).to_dict()
 
 
+@dataclass(slots=True)
+class _CycleContext:
+    """Run-scoped handles shared by every phase of a single ``run_group`` cycle.
+
+    Bundling these stops each phase (and ``_finalize_blocked_run``) from threading the
+    same seven arguments, so phases read as small, focused steps over a common context.
+    """
+
+    registry: Registry
+    group: ResearchGroup
+    run_id: str
+    correlation_id: str
+    checkout_root: Path
+    workdir: Path
+    run_dir: Path
+    actions_path: Path
+    metadata_path: Path
+
+    def log(self, payload: dict[str, Any]) -> None:
+        _append_jsonl(self.actions_path, payload)
+
+
 def _finalize_blocked_run(
+    ctx: _CycleContext,
     *,
-    registry: Registry,
-    run_dir: Path,
-    metadata_path: Path,
-    checkout_root: Path,
-    run_id: str,
-    group: ResearchGroup,
-    correlation_id: str,
     failure_class: str,
     reason: str,
     next_action: str,
@@ -228,35 +223,35 @@ def _finalize_blocked_run(
     ``failure_class.json`` payload and a few report fields differ.
     """
     research_outcome = _execution_blocked_outcome(reason=reason, next_action=next_action)
-    _write_json(run_dir / "research_outcome.json", research_outcome)
+    _write_json(ctx.run_dir / "research_outcome.json", research_outcome)
     if failure_class_payload is not None:
-        _write_json(run_dir / "failure_class.json", failure_class_payload)
+        _write_json(ctx.run_dir / "failure_class.json", failure_class_payload)
     _write_json(
-        metadata_path,
+        ctx.metadata_path,
         _metadata_payload(
-            run_id=run_id,
-            group=group,
+            run_id=ctx.run_id,
+            group=ctx.group,
             status="error",
             failure_class=failure_class,
-            correlation_id=correlation_id,
+            correlation_id=ctx.correlation_id,
             error=reason,
             agent_backend="cursor_sdk",
             **(metadata_extra or {}),
         ),
     )
-    registry.record_run(
-        run_id=run_id,
-        group_id=group.id,
-        branch=group.branch,
+    ctx.registry.record_run(
+        run_id=ctx.run_id,
+        group_id=ctx.group.id,
+        branch=ctx.group.branch,
         status="error",
         failure_class=failure_class,
         metrics={},
-        correlation_id=correlation_id,
+        correlation_id=ctx.correlation_id,
     )
-    registry.record_transition(
+    ctx.registry.record_transition(
         TransitionEvent(
-            run_id=run_id,
-            group_id=group.id,
+            run_id=ctx.run_id,
+            group_id=ctx.group.id,
             from_state="running_agent_cycle",
             to_state="blocked",
             reason=transition_reason,
@@ -265,11 +260,11 @@ def _finalize_blocked_run(
     )
     payload: dict[str, Any] = {
         "ok": False,
-        "run_id": run_id,
+        "run_id": ctx.run_id,
         "status": "error",
         "failure_class": failure_class,
         "error": reason,
-        "run_dir": _path_relative_to(run_dir, checkout_root),
+        "run_dir": _path_relative_to(ctx.run_dir, ctx.checkout_root),
     }
     if print_extra:
         payload.update(print_extra)
@@ -313,14 +308,13 @@ def _validate_agent_intent_contract(*, run_dir: Path, group: ResearchGroup, run_
     target_files = intent.get("target_files")
     if not isinstance(target_files, list) or not target_files:
         return False, "cycle_intent.json target_files must be a non-empty list"
+    # A declared target must be a real editable workspace source file — the same
+    # WORKSPACE category the edit-boundary validator allows for actual changes.
+    classifier = PathClassifier(group, run_id=run_id)
     outside_workspace = sorted(
         path
         for path in target_files
-        if not is_within(str(path), group.workdir)
-        or is_under_any(str(path), group.reference_paths)
-        or is_under_any(str(path), group.generated_paths)
-        or is_under_any(str(path), group.hidden_paths)
-        or (bool(group.editable_paths) and not matches_any(str(path), group.editable_paths))
+        if classifier.classify(str(path)) is not PathCategory.WORKSPACE
     )
     if outside_workspace:
         return (
@@ -489,6 +483,209 @@ def _build_score_context(
     )
 
 
+def _execute_agent_phase(
+    ctx: _CycleContext,
+    *,
+    prior_intent: IntentPacket,
+    effective_model: str,
+    agent_cfg: Any,
+    lineage_bootstrap: BranchBootstrap | None,
+    score_context: ScoreContext,
+) -> int | None:
+    """Run the Cursor agent cycle. None on success; a blocked exit code on backend failure."""
+    ctx.log(
+        {
+            "step": "run_agent_backend",
+            "backend": "cursor_sdk",
+            "model": effective_model,
+            "thinking": agent_cfg.thinking,
+        }
+    )
+    try:
+        record = run_cursor_agent_cycle(
+            workdir=ctx.workdir,
+            run_dir=ctx.run_dir,
+            group=ctx.group,
+            intent_packet=prior_intent,
+            run_id=ctx.run_id,
+            model=effective_model,
+            thinking=agent_cfg.thinking,
+            startup_attempts=agent_cfg.startup_attempts,
+            startup_retry_backoff_sec=agent_cfg.startup_retry_backoff_sec,
+            unary_timeout_sec=agent_cfg.unary_timeout_sec,
+            stream_timeout_sec=agent_cfg.stream_timeout_sec,
+            lineage_bootstrap=lineage_bootstrap,
+            score_context=score_context,
+        )
+    except AgentBackendError as exc:
+        cursor_run_status = sdk_run_id = agent_id = stream_error = ""
+        if exc.record is not None:
+            cursor_run_status = str(exc.record.raw_result.get("cursor_run_status") or exc.record.status)
+            sdk_run_id = str(exc.record.raw_result.get("sdk_run_id") or exc.record.raw_result.get("id") or "")
+            agent_id = str(exc.record.raw_result.get("agent_id") or "")
+            stream_error = str(exc.record.raw_result.get("stream_error") or "")
+        return _finalize_blocked_run(
+            ctx,
+            failure_class=exc.failure_class,
+            reason=str(exc),
+            next_action="continue",
+            transition_reason=f"cursor_agent_backend_failed:{exc.failure_class}",
+            failure_class_payload={
+                "failure_class": exc.failure_class,
+                "exit_code": 1,
+                "error": str(exc),
+                "cursor_run_status": cursor_run_status,
+                "sdk_run_id": sdk_run_id,
+                "agent_id": agent_id,
+                "stream_error": stream_error,
+            },
+            metadata_extra={"cursor_run_status": cursor_run_status},
+            print_extra={
+                "cursor_run_status": cursor_run_status,
+                "sdk_run_id": sdk_run_id,
+                "agent_id": agent_id,
+                "stream_error": stream_error,
+            },
+        )
+    (ctx.run_dir / "agent_stdout.txt").write_text(record.summary, encoding="utf-8")
+    (ctx.run_dir / "agent_stderr.txt").write_text("", encoding="utf-8")
+    return None
+
+
+def _head_guard_phase(ctx: _CycleContext, *, head_before: str) -> int | None:
+    """Fail the cycle if the agent moved HEAD — the orchestrator is the sole committer."""
+    head_after = _git_head_sha(ctx.checkout_root)
+    if head_before and head_after and head_before != head_after:
+        reason = (
+            f"agent moved HEAD during the cycle ({head_before[:7]} -> {head_after[:7]}); "
+            "the agent must not run git add/commit/merge/rebase/reset/stash/checkout/push — "
+            "the orchestrator owns committing. Make edits in the working tree and leave them "
+            "uncommitted."
+        )
+        ctx.log({"step": "head_guard_failed", "head_before": head_before, "head_after": head_after})
+        return _finalize_blocked_run(
+            ctx,
+            failure_class="agent_moved_head",
+            reason=reason,
+            next_action="repair",
+            transition_reason="agent_moved_head",
+            failure_class_payload={
+                "failure_class": "agent_moved_head",
+                "head_before": head_before,
+                "head_after": head_after,
+                "error": reason,
+            },
+        )
+    return None
+
+
+def _intent_contract_phase(ctx: _CycleContext) -> int | None:
+    """Validate the agent's declared cycle_intent.json planning contract."""
+    ctx.log({"step": "validate_plan_before_eval"})
+    valid_contract, contract_error = _validate_agent_intent_contract(
+        run_dir=ctx.run_dir, group=ctx.group, run_id=ctx.run_id
+    )
+    if not valid_contract:
+        ctx.log({"step": "plan_validation_failed", "error": contract_error})
+        return _finalize_blocked_run(
+            ctx,
+            failure_class="invalid_cycle",
+            reason=contract_error,
+            next_action="repair",
+            transition_reason="planning_contract_failed",
+        )
+    ctx.log({"step": "plan_validation_passed"})
+    return None
+
+
+def _edit_boundary_phase(ctx: _CycleContext, *, preexisting_changes: set[str]) -> int | None:
+    """Validate the agent's actual edits stayed within the workspace boundary."""
+    valid_edits, edit_error, cycle_changes = _validate_edit_boundary(
+        workdir=ctx.workdir,
+        group=ctx.group,
+        run_id=ctx.run_id,
+        before_changes=preexisting_changes,
+    )
+    ctx.log({"step": "edit_boundary_check", "valid": valid_edits, "changed_files": cycle_changes})
+    if not valid_edits:
+        return _finalize_blocked_run(
+            ctx,
+            failure_class="invalid_cycle",
+            reason=edit_error,
+            next_action="repair",
+            transition_reason="edit_boundary_failed",
+        )
+    return None
+
+
+def _record_validated_cycle(ctx: _CycleContext, *, prior_intent: IntentPacket) -> int:
+    """Persist a clean, contract-valid cycle awaiting CI eval; return success exit code 0.
+
+    There is no local metric eval: the GitHub eval node is the single, commit-bound source
+    of truth. Locally we only confirm a bounded, contract-valid edit (the phases above); the
+    loop controller commits this cycle and CI scores it, then writes the result back into the
+    intent packet so the next cycle's agent prompt reflects how this change actually scored.
+    """
+    failure_class = "none"
+    ctx.log({"step": "cycle_validated", "note": "ci_owns_eval"})
+    ctx.registry.record_run(
+        run_id=ctx.run_id,
+        group_id=ctx.group.id,
+        branch=ctx.group.branch,
+        status="finished",
+        failure_class=failure_class,
+        metrics={},
+        correlation_id=ctx.correlation_id,
+    )
+    prior = _apply_agent_intent_update(run_dir=ctx.run_dir, prior=prior_intent)
+    prior.attempt_count += 1
+    prior.updated_at = utc_now_iso()
+    ctx.registry.write_intent_packet(prior)
+    ctx.registry.record_transition(
+        TransitionEvent(
+            run_id=ctx.run_id,
+            group_id=ctx.group.id,
+            from_state="running_agent_cycle",
+            to_state="ready_for_wake",
+            reason="cycle_validated:awaiting_ci_eval",
+            actor="orchestrator",
+        )
+    )
+    _write_json(
+        ctx.metadata_path,
+        _metadata_payload(
+            run_id=ctx.run_id,
+            group=ctx.group,
+            status="finished",
+            failure_class=failure_class,
+            correlation_id=ctx.correlation_id,
+            research_outcome="awaiting_ci_eval",
+            next_action=prior.next_action,
+        ),
+    )
+    ctx.registry.record_artifacts(
+        run_id=ctx.run_id,
+        artifact_paths=[ctx.run_dir / name for name in local_run_index_names() if (ctx.run_dir / name).exists()],
+        artifact_type="research_cycle",
+        base_dir=ctx.run_dir,
+    )
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "run_id": ctx.run_id,
+                "status": "finished",
+                "failure_class": failure_class,
+                "research_outcome": "awaiting_ci_eval",
+                "next_action": prior.next_action,
+                "run_dir": _path_relative_to(ctx.run_dir, ctx.checkout_root),
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
 def run_group(
     group_id: str,
     workdir: Path,
@@ -516,31 +713,38 @@ def run_group(
     # (a self-committed edit leaves the working tree clean and looks empty to the boundary).
     head_before = _git_head_sha(checkout_root)
     run_id = f"run_{uuid.uuid4().hex[:12]}"
-    correlation_id = run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
     run_dir = runs_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    actions_path = run_dir / "agent_actions.jsonl"
-    metadata_path = run_dir / "run_meta.json"
-
-    transition = TransitionEvent(
+    ctx = _CycleContext(
+        registry=registry,
+        group=group,
         run_id=run_id,
-        group_id=group.id,
-        from_state="idle",
-        to_state="running_agent_cycle",
-        reason="manual run-group command",
-        actor="orchestrator",
+        correlation_id=run_id,
+        checkout_root=checkout_root,
+        workdir=workdir,
+        run_dir=run_dir,
+        actions_path=run_dir / "agent_actions.jsonl",
+        metadata_path=run_dir / "run_meta.json",
     )
-    registry.record_transition(transition)
 
-    _append_jsonl(
-        actions_path,
+    registry.record_transition(
+        TransitionEvent(
+            run_id=run_id,
+            group_id=group.id,
+            from_state="idle",
+            to_state="running_agent_cycle",
+            reason="manual run-group command",
+            actor="orchestrator",
+        )
+    )
+    ctx.log(
         {
             "step": "start_cycle",
             "group_id": group.id,
             "objective": group.objective,
             "policy_mode": group.policy_mode,
-        },
+        }
     )
 
     prior_intent = registry.read_intent_packet(group.id) or _seed_intent(group)
@@ -556,217 +760,30 @@ def run_group(
         loop_index=loop_index,
         loops=loops,
     )
-    _append_jsonl(
-        actions_path,
-        {"step": "run_agent_backend", "backend": "cursor_sdk", "model": effective_model, "thinking": agent_cfg.thinking},
-    )
-    try:
-        record = run_cursor_agent_cycle(
-            workdir=workdir,
-            run_dir=run_dir,
-            group=group,
-            intent_packet=prior_intent,
-            run_id=run_id,
-            model=effective_model,
-            thinking=agent_cfg.thinking,
-            startup_attempts=agent_cfg.startup_attempts,
-            startup_retry_backoff_sec=agent_cfg.startup_retry_backoff_sec,
-            unary_timeout_sec=agent_cfg.unary_timeout_sec,
-            stream_timeout_sec=agent_cfg.stream_timeout_sec,
-            lineage_bootstrap=lineage_bootstrap,
-            score_context=score_context,
-        )
-        (run_dir / "agent_stdout.txt").write_text(record.summary, encoding="utf-8")
-        (run_dir / "agent_stderr.txt").write_text("", encoding="utf-8")
-    except AgentBackendError as exc:
-        failure_class = exc.failure_class
-        cursor_run_status = ""
-        sdk_run_id = ""
-        agent_id = ""
-        stream_error = ""
-        if exc.record is not None:
-            cursor_run_status = str(exc.record.raw_result.get("cursor_run_status") or exc.record.status)
-            sdk_run_id = str(exc.record.raw_result.get("sdk_run_id") or exc.record.raw_result.get("id") or "")
-            agent_id = str(exc.record.raw_result.get("agent_id") or "")
-            stream_error = str(exc.record.raw_result.get("stream_error") or "")
-        return _finalize_blocked_run(
-            registry=registry,
-            run_dir=run_dir,
-            metadata_path=metadata_path,
-            checkout_root=checkout_root,
-            run_id=run_id,
-            group=group,
-            correlation_id=correlation_id,
-            failure_class=failure_class,
-            reason=str(exc),
-            next_action="continue",
-            transition_reason=f"cursor_agent_backend_failed:{failure_class}",
-            failure_class_payload={
-                "failure_class": failure_class,
-                "exit_code": 1,
-                "error": str(exc),
-                "cursor_run_status": cursor_run_status,
-                "sdk_run_id": sdk_run_id,
-                "agent_id": agent_id,
-                "stream_error": stream_error,
-            },
-            metadata_extra={"cursor_run_status": cursor_run_status},
-            print_extra={
-                "cursor_run_status": cursor_run_status,
-                "sdk_run_id": sdk_run_id,
-                "agent_id": agent_id,
-                "stream_error": stream_error,
-            },
-        )
 
-    head_after = _git_head_sha(checkout_root)
-    if head_before and head_after and head_before != head_after:
-        reason = (
-            f"agent moved HEAD during the cycle ({head_before[:7]} -> {head_after[:7]}); "
-            "the agent must not run git add/commit/merge/rebase/reset/stash/checkout/push — "
-            "the orchestrator owns committing. Make edits in the working tree and leave them "
-            "uncommitted."
-        )
-        _append_jsonl(
-            actions_path,
-            {"step": "head_guard_failed", "head_before": head_before, "head_after": head_after},
-        )
-        return _finalize_blocked_run(
-            registry=registry,
-            run_dir=run_dir,
-            metadata_path=metadata_path,
-            checkout_root=checkout_root,
-            run_id=run_id,
-            group=group,
-            correlation_id=correlation_id,
-            failure_class="agent_moved_head",
-            reason=reason,
-            next_action="repair",
-            transition_reason="agent_moved_head",
-            failure_class_payload={
-                "failure_class": "agent_moved_head",
-                "head_before": head_before,
-                "head_after": head_after,
-                "error": reason,
-            },
-        )
-
-    _append_jsonl(actions_path, {"step": "validate_plan_before_eval"})
-    valid_contract, contract_error = _validate_agent_intent_contract(run_dir=run_dir, group=group, run_id=run_id)
-    if not valid_contract:
-        _append_jsonl(actions_path, {"step": "plan_validation_failed", "error": contract_error})
-        return _finalize_blocked_run(
-            registry=registry,
-            run_dir=run_dir,
-            metadata_path=metadata_path,
-            checkout_root=checkout_root,
-            run_id=run_id,
-            group=group,
-            correlation_id=correlation_id,
-            failure_class="invalid_cycle",
-            reason=contract_error,
-            next_action="repair",
-            transition_reason="planning_contract_failed",
-        )
-    _append_jsonl(actions_path, {"step": "plan_validation_passed"})
-
-    valid_edits, edit_error, cycle_changes = _validate_edit_boundary(
-        workdir=workdir,
-        group=group,
-        run_id=run_id,
-        before_changes=preexisting_changes,
+    # The cycle is a fixed sequence of guard phases: each returns None to continue or a
+    # non-zero exit code (a persisted, blocked cycle) to stop. A clean pass through all of
+    # them records a validated cycle awaiting CI eval.
+    blocked = _execute_agent_phase(
+        ctx,
+        prior_intent=prior_intent,
+        effective_model=effective_model,
+        agent_cfg=agent_cfg,
+        lineage_bootstrap=lineage_bootstrap,
+        score_context=score_context,
     )
-    _append_jsonl(
-        actions_path,
-        {"step": "edit_boundary_check", "valid": valid_edits, "changed_files": cycle_changes},
-    )
-    if not valid_edits:
-        return _finalize_blocked_run(
-            registry=registry,
-            run_dir=run_dir,
-            metadata_path=metadata_path,
-            checkout_root=checkout_root,
-            run_id=run_id,
-            group=group,
-            correlation_id=correlation_id,
-            failure_class="invalid_cycle",
-            reason=edit_error,
-            next_action="repair",
-            transition_reason="edit_boundary_failed",
-        )
-
-    # No local metric eval. The full eval is owned solely by the GitHub eval node
-    # (the single, commit-bound source of truth). Locally we only verify that the
-    # agent produced a contract-valid, bounded edit (the gates above); the loop
-    # controller then commits/pushes this cycle and CI scores it. This removes a
-    # redundant full eval per cycle — the loop already waits for CI and drives every
-    # continue/stop/repair decision from the CI outcome, not a local one. The CI
-    # result is written back into the intent packet (by the loop controller) so the
-    # next cycle's agent prompt reflects how this change actually scored.
-    failure_class = "none"
-    _append_jsonl(actions_path, {"step": "cycle_validated", "note": "ci_owns_eval"})
-
-    registry.record_run(
-        run_id=run_id,
-        group_id=group.id,
-        branch=group.branch,
-        status="finished",
-        failure_class=failure_class,
-        metrics={},
-        correlation_id=correlation_id,
-    )
-
-    prior = _apply_agent_intent_update(run_dir=run_dir, prior=prior_intent)
-    prior.attempt_count += 1
-    prior.updated_at = utc_now_iso()
-    registry.write_intent_packet(prior)
-
-    registry.record_transition(
-        TransitionEvent(
-            run_id=run_id,
-            group_id=group.id,
-            from_state="running_agent_cycle",
-            to_state="ready_for_wake",
-            reason="cycle_validated:awaiting_ci_eval",
-            actor="orchestrator",
-        )
-    )
-
-    _write_json(
-        metadata_path,
-        _metadata_payload(
-            run_id=run_id,
-            group=group,
-            status="finished",
-            failure_class=failure_class,
-            correlation_id=correlation_id,
-            research_outcome="awaiting_ci_eval",
-            next_action=prior.next_action,
-        ),
-    )
-    registry.record_artifacts(
-        run_id=run_id,
-        artifact_paths=[
-            run_dir / name for name in local_run_index_names() if (run_dir / name).exists()
-        ],
-        artifact_type="research_cycle",
-        base_dir=run_dir,
-    )
-    print(
-        json.dumps(
-            {
-                "ok": True,
-                "run_id": run_id,
-                "status": "finished",
-                "failure_class": failure_class,
-                "research_outcome": "awaiting_ci_eval",
-                "next_action": prior.next_action,
-                "run_dir": _path_relative_to(run_dir, checkout_root),
-            },
-            indent=2,
-        )
-    )
-    return 0
+    if blocked is not None:
+        return blocked
+    blocked = _head_guard_phase(ctx, head_before=head_before)
+    if blocked is not None:
+        return blocked
+    blocked = _intent_contract_phase(ctx)
+    if blocked is not None:
+        return blocked
+    blocked = _edit_boundary_phase(ctx, preexisting_changes=preexisting_changes)
+    if blocked is not None:
+        return blocked
+    return _record_validated_cycle(ctx, prior_intent=prior_intent)
 
 
 def build_parser() -> argparse.ArgumentParser:

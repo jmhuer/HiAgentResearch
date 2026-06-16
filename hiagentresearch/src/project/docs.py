@@ -7,7 +7,6 @@ protected zones). Framework cycle mechanics stay in the framework AGENTS.md.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from hiagentresearch.src.core.config import HiAgentResearchConfig, load_config
@@ -47,15 +46,9 @@ def _dependency_lines(config: HiAgentResearchConfig) -> str:
     paths = "\n".join(f"- `{path}`" for path in config.dependency_files)
     workdir = config.workdir.rstrip("/") or "."
     worker_req = f"{workdir}/requirements.txt"
-    layer_match = re.search(r"layer(\d+)", config.project_id)
-    infra_test = (
-        f"{workdir}/core/layer{layer_match.group(1)}/tests/test_requirements_infra.py"
-        if layer_match
-        else f"{workdir}/tests/test_requirements_infra.py"
-    )
-    infra_test_path = REPO_ROOT / infra_test
+    infra_test = config.workspace_docs.infra_smoke_test
     smoke_block = ""
-    if infra_test_path.is_file():
+    if infra_test and (REPO_ROOT / infra_test).is_file():
         smoke_block = (
             f"\n\nBefore ending a cycle after editing dependencies, run the infra smoke test:\n\n"
             f"```bash\nPYTHONPATH={workdir} python -m pytest {infra_test} -q\n```\n"
@@ -74,32 +67,31 @@ layer eval does **not** install it; do not edit it during layer research.{smoke_
 
 
 def _frozen_gate_note(config: HiAgentResearchConfig) -> str:
-    match = re.search(r"layer(\d+)", config.project_id)
-    if not match:
+    gate_dir = config.workspace_docs.gate_tests_dir
+    if not gate_dir:
         return ""
-    gate_dir = f".hiagentresearch/eval/gate/layer{match.group(1)}/"
+    gate_dir = gate_dir.rstrip("/") + "/"
     gate_path = REPO_ROOT / gate_dir
     if not gate_path.exists():
         return ""
-    editable_tests = f"{config.workdir.rstrip('/')}/core/layer{match.group(1)}/tests/"
+    workdir = config.workdir.rstrip("/") or "."
+    editable_tests = config.workspace_docs.editable_tests_dir.rstrip("/")
+    editable_tests = f"{editable_tests}/" if editable_tests else ""
     editable_gate_files = [
         f"{editable_tests}{path.name}"
         for path in sorted(gate_path.glob("test_*.py"))
-        if (REPO_ROOT / editable_tests / path.name).exists()
+        if editable_tests and (REPO_ROOT / editable_tests / path.name).exists()
     ]
     optional_checks: list[str] = []
     if editable_gate_files:
         optional_checks.append(
-            f"PYTHONPATH={config.workdir.rstrip('/') or '.'} python -m pytest "
-            f"{' '.join(editable_gate_files)}"
+            f"PYTHONPATH={workdir} python -m pytest {' '.join(editable_gate_files)}"
         )
-    infra_test = (
-        f"{config.workdir.rstrip('/')}/core/layer{match.group(1)}/tests/test_requirements_infra.py"
-    )
-    if (REPO_ROOT / infra_test).is_file():
+    infra_test = config.workspace_docs.infra_smoke_test
+    if infra_test and (REPO_ROOT / infra_test).is_file():
         optional_checks.insert(
             0,
-            f"PYTHONPATH={config.workdir.rstrip('/') or '.'} python -m pytest {infra_test}",
+            f"PYTHONPATH={workdir} python -m pytest {infra_test}",
         )
     optional_check = ""
     if optional_checks:

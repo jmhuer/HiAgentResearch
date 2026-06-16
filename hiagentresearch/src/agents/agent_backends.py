@@ -57,7 +57,30 @@ def failure_class_for_cursor_agent_error() -> FailureClass:
     return "infra_failure"
 
 
-def _startup_retry_attempts_from_env(default: int = 2) -> int:
+# Markers for Cursor bridge startup failures that are transient even though the SDK
+# reports them with is_retryable=False. The bridge mints a fresh tool-callback auth
+# token on every launch (secrets.token_urlsafe), and the vendored bridge arg parser
+# rejects any value starting with "-" as "Missing value" — so ~1.5% of launches die
+# before discovery purely on an unlucky token. A relaunch regenerates the token and
+# clears it, so we retry these regardless of the SDK's is_retryable flag.
+_BRIDGE_STARTUP_RETRY_MARKERS = (
+    "before discovery",
+    "bridge discovery",
+    "tool-callback",
+    "tool callback server",
+)
+
+
+def _is_retryable_startup_error(exc: Any) -> bool:
+    """A Cursor startup error is retryable if the SDK says so OR it is a transient
+    pre-discovery bridge launch failure (see ``_BRIDGE_STARTUP_RETRY_MARKERS``)."""
+    if bool(getattr(exc, "is_retryable", False)):
+        return True
+    message = str(exc).lower()
+    return any(marker in message for marker in _BRIDGE_STARTUP_RETRY_MARKERS)
+
+
+def _startup_retry_attempts_from_env(default: int = 3) -> int:
     raw = os.environ.get("HIAGENTRESEARCH_CURSOR_STARTUP_RETRY", "").strip().lower()
     if raw in {"0", "false", "off", "no"}:
         return 1
@@ -99,7 +122,7 @@ def run_cursor_agent_cycle(
     run_id: str,
     model: str = "composer-2.5",
     thinking: str = "",
-    startup_attempts: int = 2,
+    startup_attempts: int = 3,
     startup_retry_backoff_sec: float = 2.0,
     unary_timeout_sec: float = 1800.0,
     stream_timeout_sec: float = 1800.0,
@@ -199,7 +222,7 @@ def run_cursor_agent_cycle(
                 result = sdk_run.wait()
                 break
         except CursorAgentError as exc:
-            can_retry = attempt < resolved_attempts and bool(getattr(exc, "is_retryable", False))
+            can_retry = attempt < resolved_attempts and _is_retryable_startup_error(exc)
             _append_stream_event(
                 stream_path,
                 {
@@ -208,6 +231,7 @@ def run_cursor_agent_cycle(
                     "error_type": type(exc).__name__,
                     "error": str(exc),
                     "is_retryable": bool(getattr(exc, "is_retryable", False)),
+                    "will_retry": can_retry,
                 },
             )
             if can_retry:

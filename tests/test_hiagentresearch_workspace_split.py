@@ -58,6 +58,41 @@ def test_required_baseline_metrics_for_other_project() -> None:
     assert baseline_metrics_complete({"accuracy": 0.9}, required) is False
 
 
+def test_workspace_docs_blocks_are_config_driven_not_inferred_from_project_id() -> None:
+    """The smoke-test and frozen-gate blocks come ONLY from workspace_docs config —
+    the framework must not infer them from a `layerN` naming convention in project_id."""
+    from hiagentresearch.src.core.config import HiAgentResearchConfig, ResearchGroupConfig
+
+    base = dict(
+        workdir=".",
+        evaluation={
+            "entrypoint": ".hiagentresearch/eval/run.py",
+            "command_template": "true",
+            "targets": {"accuracy": {"min": 0.9}},
+        },
+        dependency_files=["requirements.txt"],
+        policy_modes={"explore": "Explore."},
+        research_groups=[
+            ResearchGroupConfig(id="g", objective="t", policy_mode="explore"),
+        ],
+    )
+
+    # A project_id that literally contains "layer2" but no workspace_docs → no blocks.
+    inferred = HiAgentResearchConfig(project_id="grapple_layer2", **base)
+    doc = render_workspace_agents(inferred)
+    assert "infra smoke test" not in doc
+    assert "frozen pytest gates" not in doc.lower() and "operator-owned pytest gates" not in doc
+
+    # Unset paths stay absent even when the files would exist; only config opts in.
+    configured = HiAgentResearchConfig(
+        project_id="anything",
+        workspace_docs={"gate_tests_dir": "does/not/exist/", "infra_smoke_test": "nope.py"},
+        **base,
+    )
+    # Non-existent paths render nothing (stale config never documents a missing file).
+    assert "infra smoke test" not in render_workspace_agents(configured)
+
+
 def test_area_desugar_uses_configured_branch_prefix() -> None:
     from hiagentresearch.src.core.config import HiAgentResearchConfig, ResearchGroupConfig
 

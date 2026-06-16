@@ -36,10 +36,11 @@ from hiagentresearch.src.paths import (
     resolve_state_dir,
 )
 from hiagentresearch.src.runtime.orchestrator import run_group
+from hiagentresearch.src.core.ci_result import CIResult
+from hiagentresearch.src.core.json_io import extract_last_json_object, read_json_object
 from hiagentresearch.src.core.outcomes import (
     baseline_metrics_complete,
     normalize_research_outcome_name,
-    outcome_met_targets,
     required_baseline_metrics,
 )
 from hiagentresearch.src.registry.store import Registry
@@ -421,22 +422,12 @@ def run_loops(
                     reason="github artifact ingest failed",
                 )
 
-            failure = json.loads((ci_dir / "failure_class.json").read_text(encoding="utf-8"))
-            outcome = json.loads((ci_dir / "research_outcome.json").read_text(encoding="utf-8"))
-            try:
-                ci_metrics = json.loads((ci_dir / "metrics.json").read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                ci_metrics = {}
+            ci = CIResult.from_ci_dir(ci_dir)
             artifact_ref = f"github_actions:{gh_run.database_id}"
-            github_failure = str(failure.get("failure_class", "infra_failure"))
-            github_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
-            met_targets = outcome_met_targets(github_outcome)
-            decision = str(
-                outcome.get(
-                    "next_action",
-                    "done" if met_targets else ("repair" if github_failure != "none" else "continue"),
-                )
-            )
+            github_failure = ci.failure_class
+            github_outcome = ci.research_outcome
+            met_targets = ci.met_targets
+            decision = ci.decision()
             # Engineering tasks must PRESERVE the metrics they inherited (the score is a
             # guardrail, not the goal). If this commit dropped a metric below that floor it
             # is a regression: not a hard failure (the loop continues so a later cycle can
@@ -447,12 +438,12 @@ def run_loops(
                     registry=registry,
                     bootstrap=bootstrap,
                     metric=group_config.lineage.anchor_metric,
-                    current=ci_metrics.get(group_config.lineage.anchor_metric),
+                    current=ci.metrics.get(group_config.lineage.anchor_metric),
                     minimize=loaded_config.evaluation.metric_minimizes(group_config.lineage.anchor_metric),
                 )
                 if regression_note:
                     decision = "repair"
-            steering_note = _diagnostics_steering_note(ci_dir, failure, outcome)
+            steering_note = _diagnostics_steering_note(ci_dir, ci)
             feedback_ref = _path_relative_to(ci_dir, git_root)
             # Feed the authoritative CI outcome back into the intent packet so the next
             # cycle's agent prompt reflects how this change actually scored (last failure
@@ -501,24 +492,6 @@ def _init_execution_state(config: HiAgentResearchConfig, checkout_root: Path) ->
     write_workspace_agents(config, root=checkout_root)
 
 
-def _extract_last_json_object(text: str) -> dict | None:
-    decoder = json.JSONDecoder()
-    idx = len(text)
-    while idx > 0:
-        idx = text.rfind("{", 0, idx)
-        if idx < 0:
-            return None
-        try:
-            obj, _end = decoder.raw_decode(text, idx)
-        except json.JSONDecodeError:
-            idx -= 1
-            continue
-        if isinstance(obj, dict):
-            return obj
-        idx -= 1
-    return None
-
-
 def _metric_regression_note(
     *,
     registry: Registry,
@@ -565,38 +538,24 @@ def _preserve_ci_artifacts(
     return ci_dir
 
 
-def _diagnostics_steering_note(ci_dir: Path, failure: dict, outcome: dict) -> str:
-    failure_class = str(failure.get("failure_class", "infra_failure"))
-    research_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
-    if failure_class == "none" and research_outcome == "below_targets":
-        return _ci_feedback_summary(
-            failure_class=failure_class,
-            research_outcome=research_outcome,
-            reason=str(outcome.get("reason") or ""),
-        )
+def _diagnostics_steering_note(ci_dir: Path, ci: CIResult) -> str:
+    # A clean-but-below-targets run has no failure to diagnose; summarize its outcome.
+    if not ci.execution_blocked and ci.research_outcome == "below_targets":
+        return _ci_feedback_summary(ci, reason=ci.reason)
     diagnostics_path = ci_dir / "diagnostics.json"
     if diagnostics_path.is_file():
-        diagnostics = _read_json(diagnostics_path)
+        diagnostics = read_json_object(diagnostics_path)
         summary = str(diagnostics.get("summary") or "").strip()
         if summary:
             return _trim_feedback_reason(summary)
-    reason = _first_nonempty(
-        failure.get("primary_error"),
-        failure.get("error"),
-        outcome.get("reason"),
-    )
-    return _ci_feedback_summary(
-        failure_class=failure_class,
-        research_outcome=research_outcome,
-        reason=reason,
-    )
+    return _ci_feedback_summary(ci, reason=ci.first_reason())
 
 
-def _ci_feedback_summary(*, failure_class: str, research_outcome: str, reason: str) -> str:
-    if failure_class != "none":
-        base = f"CI eval blocked execution with {failure_class}"
+def _ci_feedback_summary(ci: CIResult, *, reason: str) -> str:
+    if ci.execution_blocked:
+        base = f"CI eval blocked execution with {ci.failure_class}"
     else:
-        base = f"CI eval completed with outcome {research_outcome}"
+        base = f"CI eval completed with outcome {ci.research_outcome}"
     if reason:
         return f"{base}: {_trim_feedback_reason(reason)}"
     return f"{base}."
@@ -607,14 +566,6 @@ def _trim_feedback_reason(reason: str, limit: int = 500) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
-
-
-def _first_nonempty(*values: object) -> str:
-    for value in values:
-        text = str(value or "").strip()
-        if text:
-            return text
-    return ""
 
 
 def _path_relative_to(path: Path, root: Path) -> str:
@@ -629,7 +580,7 @@ def _run_group_capture(run_group_func: RunGroupCallable, **kwargs) -> dict:
     with contextlib.redirect_stdout(stdout):
         exit_code = run_group_func(**kwargs)
     text = stdout.getvalue().strip()
-    payload = _extract_last_json_object(text)
+    payload = extract_last_json_object(text)
     if payload is None:
         try:
             payload = json.loads(text)
@@ -657,7 +608,7 @@ def _write_cycle_manifest(
     required_metrics: tuple[str, ...] = (),
 ) -> tuple[str, dict]:
     run_dir = resolve_runs_dir(checkout_root) / local_run_id
-    intent = _read_json(run_dir / "cycle_intent.json")
+    intent = read_json_object(run_dir / "cycle_intent.json")
     baseline_metrics = ((baseline_snapshot or {}).get("metrics") or {})
     required = required_metrics or required_baseline_metrics(None)
     lineage_baseline_snapshot = None
@@ -749,18 +700,6 @@ def _merge_participant_payload(source: dict | None) -> dict | None:
     if source.get("reason"):
         payload["reason"] = str(source.get("reason"))
     return payload
-
-
-def _read_json(path: Path) -> dict:
-    # Soft read for already-validated manifest metadata: the agent intent contract
-    # (_validate_agent_intent_contract) runs and blocks the cycle before this point,
-    # so a missing/corrupt file here only degrades optional manifest fields rather
-    # than masking an unvalidated failure. Kept intentionally (not a silent crutch).
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
 
 
 def _commit_subject(*, loop_index: int, manifest: dict) -> str:
