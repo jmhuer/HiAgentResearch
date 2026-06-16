@@ -24,6 +24,7 @@ EVAL_NODE_INDEX = INGEST_REQUIRED + (
     "stdout.txt",
     "stderr.txt",
     "parsed_eval.json",
+    "diagnostics.json",
 )
 
 RUN_CYCLE_INDEX = (

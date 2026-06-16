@@ -497,7 +497,41 @@ def test_loop_controller_feeds_ci_outcome_into_intent_packet(monkeypatch, tmp_pa
     (artifact_dir / "stdout.txt").write_text("{}", encoding="utf-8")
     (artifact_dir / "stderr.txt").write_text("traceback in stderr", encoding="utf-8")
     (artifact_dir / "parsed_eval.json").write_text(
-        json.dumps({"eval_error": "ModuleNotFoundError: soundfile"}),
+        json.dumps(
+            {
+                "diagnostics": {
+                    "schema_version": 1,
+                    "summary": "CI eval blocked execution with code_failure: ModuleNotFoundError: soundfile",
+                    "primary_failure": "ModuleNotFoundError: soundfile",
+                    "phases": [{"name": "pytest", "exit_code": 1, "error": "pytest failed"}],
+                    "attachments": [
+                        {
+                            "name": "stdout.txt",
+                            "role": "adapter_stdout",
+                            "description": "Frozen eval adapter stdout",
+                        }
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "diagnostics.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "summary": "CI eval blocked execution with code_failure: ModuleNotFoundError: soundfile",
+                "primary_failure": "ModuleNotFoundError: soundfile",
+                "phases": [{"name": "pytest", "exit_code": 1, "error": "pytest failed"}],
+                "attachments": [
+                    {
+                        "name": "stdout.txt",
+                        "role": "adapter_stdout",
+                        "description": "Frozen eval adapter stdout",
+                    }
+                ],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -553,7 +587,7 @@ def test_loop_controller_feeds_ci_outcome_into_intent_packet(monkeypatch, tmp_pa
     assert updated.last_note.startswith("CI eval blocked execution with code_failure")
     ci_dir = tmp_path / updated.last_feedback_ref
     assert (ci_dir / "parsed_eval.json").exists()
-    assert (ci_dir / "stderr.txt").exists()
+    assert (ci_dir / "diagnostics.json").exists()
     assert not (ci_dir / "feedback.json").exists()
 
 

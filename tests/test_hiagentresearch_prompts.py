@@ -90,8 +90,8 @@ def test_prompt_surfaces_ci_feedback_ref_without_dumping_artifacts() -> None:
 
     assert "Feedback from last CI eval: CI eval blocked execution with infra_failure" in prompt
     assert "CI artifact bundle: `.hiagentresearch/runs/run_abc/ci`" in prompt
-    assert "parsed_eval.json and stderr.txt" in prompt
-    assert "stderr tail" not in prompt.lower()
+    assert "diagnostics.json" in prompt
+    assert "parsed_eval.json is metrics only" in prompt
 
 
 def test_default_scope_differs_per_kind() -> None:

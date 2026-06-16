@@ -443,8 +443,7 @@ def run_loops(
                 )
                 if regression_note:
                     decision = "repair"
-            parsed = _read_json(ci_dir / "parsed_eval.json")
-            steering_note = _ci_steering_note(failure, outcome, parsed)
+            steering_note = _diagnostics_steering_note(ci_dir, failure, outcome)
             feedback_ref = _path_relative_to(ci_dir, git_root)
             # Feed the authoritative CI outcome back into the intent packet so the next
             # cycle's agent prompt reflects how this change actually scored (last failure
@@ -557,22 +556,20 @@ def _preserve_ci_artifacts(
     return ci_dir
 
 
-def _ci_steering_note(failure: dict, outcome: dict, parsed: dict) -> str:
+def _diagnostics_steering_note(ci_dir: Path, failure: dict, outcome: dict) -> str:
+    diagnostics_path = ci_dir / "diagnostics.json"
+    if diagnostics_path.is_file():
+        diagnostics = _read_json(diagnostics_path)
+        summary = str(diagnostics.get("summary") or "").strip()
+        if summary:
+            return _trim_feedback_reason(summary)
     failure_class = str(failure.get("failure_class", "infra_failure"))
     research_outcome = normalize_research_outcome_name(str(outcome.get("research_outcome", "unknown")))
     reason = _first_nonempty(
-        parsed.get("eval_error"),
+        failure.get("primary_error"),
         failure.get("error"),
-        parsed.get("error"),
         outcome.get("reason"),
     )
-    stderr_tail = _first_nonempty(
-        parsed.get("pytest_stderr_tail"),
-        parsed.get("eval_stderr_tail"),
-    )
-    if stderr_tail:
-        trimmed = _trim_feedback_reason(stderr_tail, limit=200)
-        reason = trimmed if not reason else f"{reason}; stderr: {trimmed}"
     return _ci_feedback_summary(
         failure_class=failure_class,
         research_outcome=research_outcome,

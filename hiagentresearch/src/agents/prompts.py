@@ -41,8 +41,8 @@ def build_research_cycle_prompt(
         feedback_lines.append(f"Feedback from last CI eval: {note}")
     if feedback_ref:
         feedback_lines.append(
-            f"CI artifact bundle: `{feedback_ref}` — start with parsed_eval.json and stderr.txt "
-            "when execution was blocked."
+            f"CI artifact bundle: `{feedback_ref}` — if execution was blocked, read diagnostics.json "
+            "then follow attachments for detail; parsed_eval.json is metrics only."
         )
     note_line = "\n".join(feedback_lines)
     if note_line:

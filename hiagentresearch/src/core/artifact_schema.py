@@ -12,7 +12,16 @@ class ArtifactParseError(ValueError):
 
 # Top-level canonical-JSON keys that are control flags, not metrics.
 RESERVED_PAYLOAD_KEYS = frozenset(
-    {"passed", "execution_passed", "exit_code", "failure_class", "error", "research_outcome"}
+    {
+        "passed",
+        "execution_passed",
+        "exit_code",
+        "failure_class",
+        "error",
+        "research_outcome",
+        "diagnostics",
+        "scorer_error",
+    }
 )
 
 

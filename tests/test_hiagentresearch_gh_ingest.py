@@ -27,6 +27,10 @@ def _write_required_artifacts(artifact_dir, *, metrics: str = '{"tests_passed": 
     (artifact_dir / "stdout.txt").write_text("{}", encoding="utf-8")
     (artifact_dir / "stderr.txt").write_text("", encoding="utf-8")
     (artifact_dir / "parsed_eval.json").write_text("{}", encoding="utf-8")
+    (artifact_dir / "diagnostics.json").write_text(
+        '{"schema_version": 1, "summary": "CI eval completed with outcome met_targets.", "attachments": []}',
+        encoding="utf-8",
+    )
     (artifact_dir / "cycle_manifest.json").write_text(
         json.dumps(
             {
