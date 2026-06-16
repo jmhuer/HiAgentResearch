@@ -589,22 +589,22 @@ def test_final_merge_base_parent_is_the_terminal_collapse_not_its_hidden_leaf() 
 
 
 def test_collapse_traces_adopted_source_climb_into_base_for_select_and_merge() -> None:
-    """EVERY collapse re-emits its adopted source leaf's climb *up to* the adopted/base commit
-    (tagged path_of_leaf) so the Overview line passes through every real commit instead of
-    teleporting across the hidden source leaf. This is unconditional — it holds for a SELECT
-    (adopts the leaf outright) AND a MERGE (starts from the leaf commit, then runs its own loops),
-    because the climb into the base is a structural fact, independent of metric and of whether the
-    MERGE later improved past its base. The path stops AT the adopted commit; the leaf's own anchor
-    is the lower bound (below it is the previous area, drawn by the walk). The frontend suppresses
-    these on the leaf's tab. The auto final_merge (role != collapse) is NOT traced (its child
-    collapse already draws that climb — tracing would double-draw)."""
+    """A collapse whose adopted source is in its OWN area re-emits that source leaf's climb *up to*
+    the adopted/base commit (tagged path_of_leaf) so the Overview line passes through every real
+    commit instead of teleporting across the hidden source leaf. It holds for a SELECT (adopts the
+    leaf outright) AND a MERGE (starts from the leaf commit, then runs its own loops), and regardless
+    of whether the MERGE later improved past its base. The path stops AT the adopted commit; the
+    leaf's own anchor is the lower bound (below it is the previous area, drawn by the walk). The
+    frontend suppresses these on the leaf's tab. The auto final_merge (role != collapse) is NOT
+    traced (its child collapse already draws that climb — tracing would double-draw). A cross-area
+    inherited base is covered by test_collapse_does_not_retrace_an_inherited_upstream_climb."""
     topology = {
         "groups": {
-            "architecture__a2": {"mode": "inherit", "role": "leaf"},
-            "architecture__collapse": {"mode": "inherit", "role": "collapse"},
-            "optimization__a1": {"mode": "inherit", "role": "leaf"},
-            "optimization__collapse": {"mode": "inherit", "role": "collapse"},
-            "final_merge": {"mode": "inherit", "role": "final_merge"},
+            "architecture__a2": {"mode": "inherit", "role": "leaf", "area": "architecture"},
+            "architecture__collapse": {"mode": "inherit", "role": "collapse", "area": "architecture"},
+            "optimization__a1": {"mode": "inherit", "role": "leaf", "area": "optimization"},
+            "optimization__collapse": {"mode": "inherit", "role": "collapse", "area": "optimization"},
+            "final_merge": {"mode": "inherit", "role": "final_merge", "area": "final_merge"},
         },
         "inherit_anchors": {
             # SELECT: leaf inherited polish@L3 (its loops L4,L5); collapse adopted the leaf's L5.
@@ -658,8 +658,8 @@ def test_collapse_traces_baseline_root_source_climb_into_base() -> None:
     must re-emit L1 and L2 on the collapse series for Overview."""
     topology = {
         "groups": {
-            "prompting__a1": {"mode": "baseline", "role": "leaf"},
-            "prompting__collapse": {"mode": "inherit", "role": "collapse"},
+            "prompting__a1": {"mode": "baseline", "role": "leaf", "area": "prompting"},
+            "prompting__collapse": {"mode": "inherit", "role": "collapse", "area": "prompting"},
         },
         "inherit_anchors": {
             "prompting__collapse": {
@@ -686,6 +686,40 @@ def test_collapse_traces_baseline_root_source_climb_into_base() -> None:
     assert "collapsepath:prompting__collapse:0" not in by_run
     assert "collapsepath:prompting__collapse:3" not in by_run
     assert "collapsepath:prompting__collapse:4" not in by_run
+
+
+def test_collapse_does_not_retrace_an_inherited_upstream_climb() -> None:
+    """When a collapse's adopted base is INHERITED from an UPSTREAM area (its own leaves never beat
+    the inherited commit, so anchor_source_group flattens to the upstream leaf), that climb belongs to
+    the upstream area and is already drawn there. Re-tracing it here would start the collapse BEFORE
+    the commit it inherited (a downstream area branching at the source's pre-winner loop instead of the
+    adopted winner). So only the base node at the adopted step is emitted — no path_of_leaf rows."""
+    topology = {
+        "groups": {
+            "gate__a1": {"mode": "inherit", "role": "leaf", "area": "gate"},
+            "gate__collapse": {"mode": "inherit", "role": "collapse", "area": "gate"},
+            "caption__collapse": {"mode": "inherit", "role": "collapse", "area": "caption"},
+        },
+        "inherit_anchors": {
+            "gate__a1": {"anchor_source_group": "qwen", "parent_trajectory_step": 3, "commit_sha": "q3"},
+            "gate__collapse": {"anchor_source_group": "gate__a1", "parent_trajectory_step": 5, "commit_sha": "g5"},
+            # caption never beat the inherited gate commit → adopts gate__a1 @ L5 (a CROSS-area source).
+            "caption__collapse": {"anchor_source_group": "gate__a1", "parent_trajectory_step": 5, "commit_sha": "g5"},
+        },
+    }
+    rows = [
+        {"group_id": "gate__a1", "metric_name": "accuracy", "trajectory_x": 4, "metric_value": 0.51, "commit_sha": "g4"},
+        {"group_id": "gate__a1", "metric_name": "accuracy", "trajectory_x": 5, "metric_value": 0.55, "commit_sha": "g5"},
+    ]
+    out = _collapse_result_points(rows, topology, ["accuracy"])
+    by_run = {r["run_id"]: r for r in out}
+
+    # Same-area gate collapse: keeps its own L4 climb into the base.
+    assert by_run["collapsepath:gate__collapse:4"]["metric_value"] == 0.51
+    # Cross-area caption collapse: base node at the inherited L5, but NO L4 climb re-traced.
+    cap_base = by_run["collapsebase:caption__collapse"]
+    assert cap_base["trajectory_x"] == 5 and cap_base["commit_sha"] == "g5" and cap_base["metric_value"] == 0.55
+    assert "collapsepath:caption__collapse:4" not in by_run
 
 
 def test_select_collapse_flagged_distinctly_from_merge_collapse() -> None:

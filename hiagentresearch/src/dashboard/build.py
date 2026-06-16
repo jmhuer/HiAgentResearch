@@ -483,14 +483,16 @@ def _collapse_result_points(
     *connectors* are gone — the frontend derives where each trajectory connects (its nearest
     in-scope ancestor) at render time by walking ``lineage_parents``.
 
-    Every collapse additionally re-emits the adopted source leaf's path *up to* the adopted commit
-    (its intermediate loop nodes), tagged ``path_of_leaf``, so the Overview shows HOW the base was
-    reached instead of teleporting from the previous area to the adopted step. This holds for both
-    SELECT and MERGE collapses — the climb into the base is a structural fact independent of metric
-    and of whether a MERGE later improved past its base. Those path nodes are suppressed by the
-    frontend on the leaf's own area tab (where the leaf line already draws the path), so there is no
-    double-drawing. (The auto ``final_merge`` has role ``final_merge``, not ``collapse``, so it is
-    not processed here and never re-traces a child collapse's climb.)"""
+    A collapse additionally re-emits the adopted source leaf's path *up to* the adopted commit (its
+    intermediate loop nodes), tagged ``path_of_leaf``, so the Overview shows HOW the base was reached
+    instead of teleporting from the previous area to the adopted step — but ONLY when the source is in
+    the collapse's OWN area. When the base is inherited from an UPSTREAM area, that climb is the
+    upstream area's own story (already drawn under it); re-tracing it here would start the collapse
+    BEFORE the commit it inherited (e.g. a downstream area branching at the source's pre-winner loop
+    instead of the adopted winner). This holds for both SELECT and MERGE collapses. The path nodes are
+    suppressed by the frontend on the leaf's own area tab (where the leaf line already draws the path),
+    so there is no double-drawing. (The auto ``final_merge`` has role ``final_merge``, not ``collapse``,
+    so it is not processed here and never re-traces a child collapse's climb.)"""
     groups = topology.get("groups") or {}
     inherit_anchors = topology.get("inherit_anchors") or {}
     point_at: dict[tuple[str, str, int], dict[str, Any]] = {}
@@ -514,16 +516,18 @@ def _collapse_result_points(
         # The adopted source's own anchor step is the lower bound for the path trace. Inherited
         # sources have an explicit anchor; baseline-mode roots implicitly inherit the frozen L0.
         source_anchor_step = _source_anchor_trajectory_step(source, groups, inherit_anchors)
-        # Trace the adopted source's climb into the base for EVERY collapse, unconditionally.
-        # The climb (the source's loops from its own anchor up to the adopted commit) is a
-        # structural fact — it happened regardless of metric and regardless of whether a MERGE
-        # later improved past its base — so re-emitting it keeps the Overview line continuous
-        # through every real commit instead of teleporting across the hidden source leaf. This is
-        # not gated on SELECT-vs-MERGE: a SELECT adopts the leaf outright, a MERGE starts from the
-        # leaf's commit then runs its own loops, but both reach their base via the same leaf climb.
-        # Only `role==collapse` groups get here; the auto `final_merge` (role=="final_merge") is
-        # excluded, so it never re-traces a child collapse's climb (which would double-draw).
-        trace = source_anchor_step is not None
+        # Re-trace the adopted source's climb into the base ONLY when that source is within this
+        # collapse's OWN area: then the climb (the source leaf's loops from its anchor up to the
+        # adopted commit) is the area's internal progression into its base, and drawing it keeps the
+        # Overview line continuous instead of teleporting across the hidden source leaf. When the base
+        # is INHERITED from an upstream area, that climb belongs to (and is already drawn under) the
+        # upstream area; re-emitting it here would make this collapse start BEFORE the commit it
+        # inherited — a downstream area branching at the source's pre-winner loop instead of the
+        # adopted winner. The base node itself (below) is always emitted at the adopted step. Not
+        # gated on SELECT-vs-MERGE: both reach their base via the same leaf climb.
+        source_area = str((groups.get(source) or {}).get("area") or "")
+        same_area = bool(source_area) and source_area == str(meta.get("area") or "")
+        trace = source_anchor_step is not None and same_area
         for metric in metric_names:
             if (group_id, metric, step) not in point_at:  # base node (the adopted commit)
                 src_point = point_at.get((source, metric, step))
